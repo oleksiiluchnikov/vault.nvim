@@ -1,58 +1,24 @@
 # vault.nvim
-Plugin to manage Obsidian like vaults in Neovim.
+
+Plugin to manage Obsidian like vaults in Neovim. 
+This plugin is still in early development and subject to change.
+
+## Motivation
+
+I created this plugin to enable the use of Neovim for managing my [Obsidian](https://obsidian.md/)
+vault, according to my opinionated note organization style.
 
 ## Features
-- Vault
-  - [ ] Create vault
-  - [ ] Switch vault
-- Note
-  - [ ] Create note
-  - [ ] Open note
-  - [ ] Delete note
-  - [ ] Rename note
-  - [ ] Move note
-  - [ ] Update note
-- Tag
-  - [ ] Create tag
-  - [ ] Delete tag
-  - [ ] Rename tag
-  - [ ] Move tag
-  - [ ] Update tag
-  - [ ] List notes with tag
-  - [ ] List tags in note
-  - [ ] List tags in vault
-- Folder
-- Link
-  - [ ] Create link
-  - [ ] Delete link
-  - [ ] Rename link
-  - [ ] Move link
-  - [ ] Update link
-  - [ ] List links in note
-  - [ ] List links in vault
-- Backlink
-  - [ ] List backlinks in note
-  - [ ] List backlinks in vault
-- Date
-  - [ ] Create date
-  - [ ] Delete date
-  - [ ] Rename date
-  - [ ] Move date
-  - [ ] Update date
-  - [ ] List dates in note
-  - [ ] List dates in vault
 
-- Telescope pickers
-  - [x] Notes
-  - [ ] Folders
-  - [x] Tags
-  - [ ] Links
-  - [ ] Backlinks
+- Telescope integration
+  - Search for notes in vault
+    - Search by title
+    - Search by tag
+  - Search for tags in vault
+- [nvim-cmp](https://github.com/hrsh7th/nvim-cmp) integration
+  - Autocomplete tags
+  - Autocomplete dates
 
-- nvim-cmp sources
-  - [ ] Notes
-  - [ ] Folders
-  - [ ] Tags
-  - [ ] Links
-  - [ ] Backlinks
-  - [ ] Dates
+## License
+
+[MIT](https://choosealicense.com/licenses/mit/)

@@ -1,5 +1,4 @@
 local Job = require("plenary.job")
-local Path = require("plenary.path")
 ---@class Vault
 ---@field notes function|Note[]
 ---@field tags Tag[]
@@ -135,6 +134,7 @@ end
 function Vault.test()
   vim.cmd("lua package.loaded['vault'] = nil")
   local notes = Vault.notes()
+  ---@diagnostic disable-next-line
   P(notes)
 end
 

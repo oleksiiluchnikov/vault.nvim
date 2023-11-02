@@ -1,8 +1,21 @@
 local M = {}
-
 ---@class Wikilink
 ---@param link string
 ---@return table
+local wikilink = {}
+
+function wikilink:new(link)
+  local o = {}
+  setmetatable(o, self)
+  self.__index = self
+  self.link = link
+  self.title = ""
+  self.heading = ""
+  self.custom_title = ""
+  return o
+end
+  
+
 function M.parse(link)
   local link_pattern = "%[%[[^%]]+%]%]"
   local wikilink_data = link:match(link_pattern)

@@ -8,15 +8,15 @@ local M = {}
 local default_options = {
   dirs = {
     root = "~/knowledge",
-    inbox = "~/knowledge/inbox",
-    docs = "~/knowledge/_docs",
-    templates = "~/knowledge/_templates",
+    inbox = "inbox",
+    docs = "_docs",
+    templates = "_templates",
     journal = {
-      root = "~/knowledge/Journal",
-      daily = "~/knowledge/Journal/Daily",
-      weekly = "~/knowledge/Journal/Weekly",
-      monthly = "~/knowledge/Journal/Monthly",
-      yearly = "~/knowledge/Journal/Yearly",
+      root = "Journal",
+      daily = "Journal/Daily",
+      weekly = "Journal/Weekly",
+      monthly = "Journal/Monthly",
+      yearly = "Journal/Yearly",
     },
   },
 	ignore = {
@@ -38,24 +38,49 @@ local default_options = {
 }
 
 ---Expand the directories in the config recursively.
----@param dirs table
-  local function expand_dirs(dirs)
+---@param dirs table|nil
+  local function process_dirs(dirs)
     if dirs == nil then
       return
     end
+    --- if dirs.root is nil, then the user has not set the root directory.
+    if dirs.root == nil then
+      vim.notify("Vault: root directory is not set.", vim.log.levels.ERROR)
+      return
+    end
+
+    local root_dir = vim.fn.expand(dirs.root)
+
+    if type(root_dir) ~= "string" then
+      vim.notify("Vault: root directory is not a string.", vim.log.levels.ERROR)
+      return
+    end
+
+    dirs.root = root_dir
+
+    --- Return full pathes of the directories.
     for k, v in pairs(dirs) do
-      if type(v) == "string" and v:sub(1, 1) == "~" then
-        dirs[k] = vim.fn.expand(v)
-      elseif type(v) == "table" then
-        expand_dirs(v)
+      --- Skip the dirs.root.
+      if k ~= "root" then
+        if type(v) == "string" then
+          dirs[k] = root_dir .. "/" .. v
+        elseif type(v) == "table" then
+          process_dirs(v)
+        end
       end
     end
+
+    return dirs
 end
 
 ---@param options table|nil
 function M.setup(options)
   options = options or default_options
-  expand_dirs(options.dirs)
+  --- Expand the directories recursively.
+  if options.dirs == nil then
+    options.dirs = default_options.dirs
+  end
+  options.dirs = process_dirs(options.dirs) or default_options.dirs
   M = vim.tbl_deep_extend("force", M, options)
 end
 

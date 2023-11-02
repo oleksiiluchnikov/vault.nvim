@@ -2,67 +2,41 @@ local M = {}
 
 local has_cmp, cmp = pcall(require, "cmp")
 if not has_cmp then
+  vim.notify("nvim-cmp is not installed", vim.log.levels.ERROR)
 	return
 end
 
 local function register_date_source()
 
-	local year_endings = {}
-	for i = 0, 99 do
-		local year_ending = string.format("%02d", i)
-		table.insert(year_endings, year_ending)
-	end
-
-	local months = {}
-	for i = 1, 12 do
-		local month = string.format("%02d", i)
-		table.insert(months, month)
-	end
-
-	local days = {}
-	for i = 1, 31 do
-		local day = string.format("%02d", i)
-		table.insert(days, day)
-	end
-
-	local year_beginnings = {}
-	for i = 10, 21 do
-		local year_beginning = tostring(i)
-		table.insert(year_beginnings, year_beginning)
-	end
-
-	local function is_valid_date(date)
-		local year = string.sub(date, 1, 4)
-		local month = string.sub(date, 6, 7)
-		local day = string.sub(date, 9, 10)
-    if tonumber(day) > 29 and tonumber(month) == 2 and (tonumber(year) % 4) == 0 then
-      return false
-    elseif tonumber(day) > 28 and tonumber(month) == 2 and (tonumber(year) % 4) ~= 0 then
-      return false
-    elseif tonumber(day) > 30 and (tonumber(month) == 4 or tonumber(month) == 6 or tonumber(month) == 9 or tonumber(month) == 11) then
-      return false
+local function is_valid_date(year, month, day)
+    if day > 29 and month == 2 and (year % 4) == 0 then
+        return false
+    elseif day > 28 and month == 2 and (year % 4) ~= 0 then
+        return false
+    elseif day > 30 and (month == 4 or month == 6 or month == 9 or month == 11) then
+        return false
     end
     return true
-	end
+end
 
-  local function get_dates(year_beginning)
+local function get_dates(year_beginning)
     local date_endings = {}
-		for _, year_ending in ipairs(year_endings) do
-			for _, month in ipairs(months) do
-				for _, day in ipairs(days) do
-          local date = year_beginning .. year_ending .. "-" .. month .. "-" .. day
-          if is_valid_date(date) then
-            table.insert(date_endings, date)
-          end
-				end
-			end
-		end
+    for year_ending = 0, 99 do
+        for month = 1, 12 do
+            for day = 1, 31 do
+                local year = tonumber(year_beginning) * 100 + year_ending
+                if is_valid_date(year, month, day) then
+                    local date = string.format("%04d-%02d-%02d", year, month, day)
+                    table.insert(date_endings, date)
+                end
+            end
+        end
+    end
     return date_endings
 end
 
 	---Get date suggestions for a given prefix
 	---@param prefix_to_filter string -- like 202 or 19 or 20 or 2021-0 or 2021-01 or 2021-01-0 or 2021-01-01
-	---@param endings table -- like { "2021-01-01", "2021-01-02", "2021-01-03" }
 	---@return table -- like { "2021-01-01", "2021-01-02", "2021-01-03" }
 	local function filter_dates(prefix_to_filter)
 		local dates = {}
@@ -77,26 +51,26 @@ end
 		return dates
 	end
 
-	local date_source = {}
-	date_source.new = function()
-		return setmetatable({}, { __index = date_source })
+	local source = {}
+	source.new = function()
+		return setmetatable({}, { __index = source })
 	end
 
-	date_source.is_available = function()
+	source.is_available = function()
 		if vim.bo.filetype == "markdown" then
 			return true
 		end
 	end
 
-	date_source.get_trigger_characters = function()
+	source.get_trigger_characters = function()
 		return { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "-", " " }
 	end
 
-	date_source.get_keyword_pattern = function() -- keyword_pattern is used to match the keyword before the cursor
+	source.get_keyword_pattern = function() -- keyword_pattern is used to match the keyword before the cursor
 		return [[\[\d\-\s\]+$]]
 	end
 
-	date_source.complete = function(_, request, callback)
+	source.complete = function(_, request, callback)
 		local input = request.context.cursor_before_line:sub(request.offset - 1)
 		local typed_date = string.sub(request.context.cursor_before_line, request.offset - 11, request.offset - 1)
 		local typed_string = string.match(request.context.cursor_before_line, "[%d%-]+$")
@@ -194,32 +168,32 @@ end
 			callback({ isIncomplete = true })
 		end
 	end
-	cmp.register_source("vault_date", date_source.new())
+	cmp.register_source("vault_date", source.new())
 end
 
 local function register_tag_source()
 	local tags = require("vault").get_tags()
-	local tag_source = {}
+	local source = {}
 
-	tag_source.new = function()
-		return setmetatable({}, { __index = tag_source })
+	source.new = function()
+		return setmetatable({}, { __index = source })
 	end
 
-	tag_source.is_available = function()
+	source.is_available = function()
 		if vim.bo.filetype == "markdown" then
 			return true
 		end
 	end
 
-	tag_source.get_trigger_characters = function()
+	source.get_trigger_characters = function()
 		return { "#" }
 	end
 
-	tag_source.get_keyword_pattern = function()
+	source.get_keyword_pattern = function()
 		return [[\%(#\%(\w\|\-\|_\|\/\)\+\)]]
 	end
 
-	tag_source.complete = function(_, request, callback)
+	source.complete = function(_, request, callback)
 		local input = string.sub(request.context.cursor_before_line, request.offset - 1)
 		local prefix = string.sub(request.context.cursor_before_line, 1, request.offset - 1)
 
@@ -257,7 +231,7 @@ local function register_tag_source()
 		end
 	end
 
-	cmp.register_source("vault_tag", tag_source.new())
+	cmp.register_source("vault_tag", source.new())
 end
 
 function M.setup()

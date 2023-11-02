@@ -1,13 +1,9 @@
 ---@class Note
 local Note = {}
 
-local Tag = require("vault.tag")
-local wikilink = require("vault.wikilink")
 local utils = require("vault.utils")
 local list = require("vault.list")
 local config = require("vault.config")
-local Path = require("plenary.path")
-local Job = require("plenary.job")
 
 ---Create a new note if it does not exist.
 ---@class Note
@@ -22,17 +18,17 @@ local Job = require("plenary.job")
 ---@field class string|function - The class of the note.
 ---@field status string|nil - The status of the note.
 
----@param opts table
+---@param obj table
 ---@return Note
-function Note:new(note)
-  note = note or {}
-  note.path = note.path
-  note.relpath = note.relpath or utils.to_relpath(note.path)
-  note.basename = note.basename or vim.fn.fnamemodify(note.path, ":t")
-  note.content = note.content or self:content(note.path)
+function Note:new(obj)
+  obj = obj or {}
+  obj.path = obj.path
+  obj.relpath = obj.relpath or utils.to_relpath(obj.path)
+  obj.basename = obj.basename or vim.fn.fnamemodify(obj.path, ":t")
+  obj.content = obj.content or self:content(obj.path)
   -- setmetatable(opts, self)
   self.__index = self
-	return note
+	return obj
 end
 
 ---Write note filet to the specified path.
@@ -124,15 +120,15 @@ end
 
 ---@param path string|nil
 ---@param content string|nil
----@return Tag[]|table
+---@return table -- 
 function Note:tags(path, content)
   path = path or self.path
   content = content or self:content(path)
 
 	local tags = {}
 	for match in content:gmatch(config.search_pattern.tag) do
-    local tag = Tag:new(match)
-    table.insert(tags, tag)
+    -- local tag = Tag:new(match)
+    table.insert(tags, match)
   end
 	return tags
 end
