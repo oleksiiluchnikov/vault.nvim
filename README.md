@@ -46,6 +46,7 @@ return {
     'nvim-lua/plenary.nvim',
     'nvim-telescope/telescope.nvim',
     'hrsh7th/nvim-cmp',
+    'oleksiiluchnikov/gradient.nvim',
   },
   config = function()
     require('vault').setup()
