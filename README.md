@@ -109,8 +109,9 @@ require('vault').setup()
 require('vault').notes()
 
 --- Fetch an array of all tags in vault.
+---@param tags_prefix string? @ Optional prefix to filter tags by. E.g. "status/". If not provided, all tags in vault will be returned.
 ---@type table[] @ An array of tag objects.
-require('vault').tags()
+require('vault').get_tags(tag_prefix)
 
 ---Open Telescope note search picker.
 ---@param notes table[]? @ An optional array of note objects to search. If not provided, all notes in vault will be searched.
