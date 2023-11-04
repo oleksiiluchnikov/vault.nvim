@@ -27,11 +27,8 @@ serve as a reference and potentially become more customizable in the future.
 
 ## 🤨 Motivation
 
-I developed this plugin with the goal of harnessing Neovim's power to manage my
-[Obsidian](https://obsidian.md) vault, tailored to my distinctive note organization style.
-While I also appreciate and use the fantastic [obsidian.nvim](https://github.com/epwalsh/obsidian.nvim) plugin,
-I embarked on creating my own solution to provide the flexibility to adapt and customize it
-according to my unique requirements and preferences.
+I developed this plugin with the goal of harnessing Neovim's power to manage my [Obsidian](https://obsidian.md) vault, tailored to my distinctive note organization style.
+While I also appreciate and use the fantastic [obsidian.nvim](https://github.com/epwalsh/obsidian.nvim) plugin, I embarked on creating my own solution to provide the flexibility to adapt and customize it according to my unique requirements and preferences.
 
 ## 📦 Installation
 
@@ -41,7 +38,7 @@ Install the plugin with your preferred package manager:
 
 ```lua
 return {
-  'oleksiiluchnikov/gradient.nvim',
+  'oleksiiluchnikov/vault.nvim',
   dependencies = {
     'nvim-lua/plenary.nvim',
     'nvim-telescope/telescope.nvim',
