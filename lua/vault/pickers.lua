@@ -2,6 +2,7 @@ local M = {}
 
 local Log = require("plenary.log")
 local Job = require("plenary.job")
+local gradient = require("gradient")
 
 local pickers = require("telescope.pickers")
 local finders = require("telescope.finders")
@@ -114,9 +115,27 @@ function M.tags()
         { width = entry_width },
         { remaining = true },
         { width = count_length },
-        { remaining = true },
+        { remaining = false },
       },
     })
+
+
+    local steps = 11
+
+    local colors = gradient.from_stops(steps, "#2e2e2e", "TelescopeResultsNormal")
+
+    local hl_group_prefix = "VaultTagLevel"
+
+    local hl_groups = {}
+
+    for i, color in ipairs(colors) do
+      local i_str = tostring(i)
+      vim.api.nvim_set_hl(0, hl_group_prefix .. i_str, {
+        fg = color,
+      })
+      table.insert(hl_groups, hl_group_prefix .. i_str)
+    end
+
 
     local make_display = function(entry)
       local tag_value = tag.value
@@ -124,15 +143,56 @@ function M.tags()
 
       ---@type table
       local display_value = {}
-      if notes_length > 100 then
+
+      if notes_length > 160 then
+        local hl_group = hl_groups[11]
         display_value = {
-          tag_value,
-          "TelescopeResultsIdentifier",
+          tag_value, hl_group,
+        }
+      elseif notes_length > 80 then
+        local hl_group = hl_groups[10]
+        display_value = {
+          tag_value, hl_group,
+        }
+      elseif notes_length > 40 then
+        local hl_group = hl_groups[9]
+        display_value = {
+          tag_value, hl_group,
         }
       elseif notes_length > 20 then
+        local hl_group = hl_groups[8]
         display_value = {
-          tag_value,
-          "TelescopeResultsSelection",
+          tag_value, hl_group,
+        }
+      elseif notes_length > 15 then
+        local hl_group = hl_groups[7]
+        display_value = {
+          tag_value, hl_group,
+        }
+      elseif notes_length > 8 then
+        local hl_group = hl_groups[6]
+        display_value = {
+          tag_value, hl_group,
+        }
+      elseif notes_length > 5 then
+        local hl_group = hl_groups[5]
+        display_value = {
+          tag_value, hl_group,
+        }
+      elseif notes_length > 3 then
+        local hl_group = hl_groups[4]
+        display_value = {
+          tag_value, hl_group,
+        }
+      elseif notes_length > 1 then
+        local hl_group = hl_groups[3]
+        display_value = {
+          tag_value, hl_group,
+        }
+      elseif notes_length > 0 then
+        local hl_group = hl_groups[2]
+        display_value = {
+          tag_value, hl_group,
         }
       else
         display_value = {
@@ -140,6 +200,8 @@ function M.tags()
           "TelescopeResultsComment",
         }
       end
+
+
       return displayer({
         display_value,
         { display_count, "TelescopeResultsNumber" },
@@ -176,7 +238,6 @@ function M.tags()
     end
     tag.documentation:open()
 	end
-
 
 	pickers
 		.new({}, {
@@ -273,26 +334,6 @@ function M.notes_with_tags(tag_values)
 
 	M.notes(notes_with_tags)
 end
-
-M.test = function()
-	M.notes_with_tags({ "#status/TODO", "#class/Action" })
-end
-
-M.todos = function()
-	M.notes_with_tags({ "#status/TODO" })
-end
-
-M.in_progress = function()
-	M.notes_with_tags({ "#status/IN-PROGRESS" })
-end
-
-M.done = function()
-	M.notes_with_tags({ "#status/DONE" })
-end
-
-M._cache = {
-	parent_tag = "",
-}
 
 --- I want to browse tag until it has no more nesting,
 --- and then return to full tag value like: status/TODO/later
@@ -410,4 +451,24 @@ function M.root_tags()
 		:find()
 end
 
+
+M.test = function()
+	M.notes_with_tags({ "#status/TODO", "#class/Action" })
+end
+
+M.todos = function()
+	M.notes_with_tags({ "#status/TODO" })
+end
+
+M.in_progress = function()
+	M.notes_with_tags({ "#status/IN-PROGRESS" })
+end
+
+M.done = function()
+	M.notes_with_tags({ "#status/DONE" })
+end
+
+M._cache = {
+	parent_tag = "",
+}
 return M

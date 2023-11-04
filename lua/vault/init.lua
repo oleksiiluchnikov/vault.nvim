@@ -1,10 +1,15 @@
 local Job = require("plenary.job")
+
+local Tag = require("vault.tag")
+
 ---@class Vault
 ---@field notes function|Note[]
 ---@field tags Tag[]
 ---@field setup function
 local Vault = {}
 
+---Create a new Vault object.
+---@return Vault
 function Vault:new()
   local o = {
   }
@@ -15,12 +20,16 @@ end
 
 local config
 
+---Setup the vault plugin.
+---@return nil
 function Vault.setup()
   config = require("vault.config")
   require("vault.commands")
   require("vault.cmp").setup()
 end
 
+---Retrieve notes from your vault.
+---@return Note[]
 function Vault.notes()
   local notes = {}
   Job:new({
@@ -31,7 +40,6 @@ function Vault.notes()
       "f",
       "-name",
       "*" .. config.ext,
-      -- ignore dirs starting with . or _
       "-not",
       "-path",
       "*/\\.[^_]*",
@@ -54,15 +62,36 @@ function Vault.notes()
   return notes
 end
 
+---@param line string - The line to parse.
+---@param tbl table - The table to extend.
+---@return table|nil - The table with the tags.
+local function parse_line_with_tags(line, tbl)
+  local path, line_with_tag = line:match("^(.*" .. config.ext .. "):(.+)")
+  if path == nil or line_with_tag == nil then
+    return
+  end
 
+  for tag_value in line:gmatch("#([A-Za-z0-9_][A-Za-z0-9-_/]+)") do
+    if Tag.is_tag(tag_value) == false then
+      goto continue
+    end
+
+    if tbl[tag_value] == nil then
+      local tag = Tag:new({ value = tag_value, notes_paths = { path } })
+      tbl[tag_value] = tag
+    else
+      vim.list_extend(tbl[tag_value].notes_paths, { path })
+    end
+    ::continue::
+  end
+  return tbl
+end
 
 --- Retrieve tags from your vault.
 ---@param tag_prefix string|nil - Prefix to filter tags (optional).
 ---@return Tag[] - Array of Tag objects.
 function Vault.get_tags(tag_prefix)
 	tag_prefix = tag_prefix or nil
-
-  local Tag = require("vault.tag")
 
 	local cmd = "rg"
 	local tag_pattern = [[#[A-Za-z0-9_][A-Za-z0-9-_/]+]]
@@ -89,30 +118,6 @@ function Vault.get_tags(tag_prefix)
 		end,
 	}):sync()
 
-	---@param line string - The line to parse.
-	---@param tbl table - The table to insert the tags into.
-  ---@return table|nil - The table with the tags.
-	local function parse_line_with_tags(line, tbl)
-		local path, line_with_tag = line:match("^(.*" .. config.ext .. "):(.+)")
-		if path == nil or line_with_tag == nil then
-			return
-		end
-		for tag_value in line:gmatch("#([A-Za-z0-9_][A-Za-z0-9-_/]+)") do
-      if Tag.is_tag(tag_value) == false then
-        goto continue
-      end
-
-      if tbl[tag_value] == nil then
-				local tag = Tag:new({ value = tag_value, notes_paths = { path } })
-        tbl[tag_value] = tag
-			else
-        vim.list_extend(tbl[tag_value].notes_paths, { path })
-			end
-      ::continue::
-		end
-    return tbl
-	end
-
 	local tags = {}
 
   for _, line in pairs(stdout) do
@@ -137,7 +142,5 @@ function Vault.test()
   ---@diagnostic disable-next-line
   P(notes)
 end
-
-
 
 return Vault
