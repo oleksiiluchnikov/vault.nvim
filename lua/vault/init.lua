@@ -1,5 +1,4 @@
 local Job = require("plenary.job")
-
 local Tag = require("vault.tag")
 
 ---@class Vault
@@ -21,45 +20,10 @@ end
 local config
 
 ---Setup the vault plugin.
----@return nil
 function Vault.setup()
   config = require("vault.config")
   require("vault.commands")
   require("vault.cmp").setup()
-end
-
----Retrieve notes from your vault.
----@return Note[]
-function Vault.notes()
-  local notes = {}
-  Job:new({
-    command = "find",
-    args = {
-      ".",
-      "-type",
-      "f",
-      "-name",
-      "*" .. config.ext,
-      "-not",
-      "-path",
-      "*/\\.[^_]*",
-    },
-    cwd = config.dirs.root,
-    on_exit = function(j, return_val)
-      if return_val ~= 0 then
-        return
-      end
-      local stdout = j:result()
-      for _, path in ipairs(stdout) do
-        local relpath = path.sub(path, 3)
-        path = config.dirs.root .. "/" .. relpath
-        local note = require("vault.note"):new({ path = path, relpath = relpath})
-        table.insert(notes, note)
-      end
-    end
-  }):sync()
-
-  return notes
 end
 
 ---@param line string - The line to parse.
@@ -87,12 +51,46 @@ local function parse_line_with_tags(line, tbl)
   return tbl
 end
 
+---Retrieve notes from vault.
+---@return Note[] - Array of Note objects.
+function Vault.notes()
+  local notes = {}
+  Job:new({
+    command = "find",
+    args = {
+      ".",
+      "-type",
+      "f",
+      "-name",
+      "*" .. config.ext,
+      "-not",
+      "-path",
+      "*/\\.[^_]*",
+    },
+    cwd = config.dirs.root,
+    on_exit = function(j, return_val)
+      if return_val ~= 0 then
+        return
+      end
+      local stdout = j:result()
+      for _, path in ipairs(stdout) do
+        local relpath = path.sub(path, 3)
+        local note = require("vault.note"):new({
+          path = config.dirs.root .. "/" .. relpath,
+          relpath = relpath
+        })
+        table.insert(notes, note)
+      end
+    end
+  }):sync()
+
+  return notes
+end
+
 --- Retrieve tags from your vault.
 ---@param tag_prefix string|nil - Prefix to filter tags (optional).
 ---@return Tag[] - Array of Tag objects.
 function Vault.get_tags(tag_prefix)
-	tag_prefix = tag_prefix or nil
-
 	local cmd = "rg"
 	local tag_pattern = [[#[A-Za-z0-9_][A-Za-z0-9-_/]+]]
 	local root_dir = config.dirs.root
@@ -132,6 +130,14 @@ function Vault.get_tags(tag_prefix)
     ::continue::
 	end
 
+  if tag_prefix ~= nil then
+    for tag_value, _ in pairs(tags) do
+      if tag_value:sub(1, #tag_prefix) ~= tag_prefix then
+        tags[tag_value] = nil
+      end
+    end
+  end
+
 	return tags
 end
 
@@ -142,5 +148,6 @@ function Vault.test()
   ---@diagnostic disable-next-line
   P(notes)
 end
+
 
 return Vault
