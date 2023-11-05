@@ -44,6 +44,7 @@ return {
     'nvim-telescope/telescope.nvim',
     'hrsh7th/nvim-cmp',
     'oleksiiluchnikov/gradient.nvim',
+    'oleksiiluchnikov/dates.nvim',
   },
   config = function()
     require('vault').setup()
@@ -97,6 +98,9 @@ The plugin provides the following commands for seamless navigation and searching
 
 - `:VaultNotes`: Opens the Telescope note search picker. It autocompletes arguments as note filenames. For quick access to a specific note, use `:VaultNotes <filename>` to open it immediately.
 - `:VaultTags`: Opens the Telescope tag search picker. It autocompletes arguments as tag names. Use `:VaultTags <tag>` to swiftly access notes associated with the specified tag.
+- `:VaultDates`: Opens the Telescope date search picker. It autocompletes arguments as dates.
+- `:VaultToday`: Opens the today's daily journal note, even if it doesn't exist yet.
+- `:VaultInbox`: Opens the Telescope note search picker for the inbox directory.
 
 ### API
 
@@ -111,7 +115,7 @@ require('vault').notes()
 --- Fetch an array of all tags in vault.
 ---@param tags_prefix string? @ Optional prefix to filter tags by. E.g. "status/". If not provided, all tags in vault will be returned.
 ---@type table[] @ An array of tag objects.
-require('vault').get_tags(tag_prefix)
+require('vault').tags(tag_prefix)
 
 ---Open Telescope note search picker.
 ---@param notes table[]? @ An optional array of note objects to search. If not provided, all notes in vault will be searched.
@@ -126,6 +130,14 @@ require('vault.pickers').notes_with_tags(tag_values)
 
 ---Open Telescope picker to browse nested tags from a root tag.
 require('vault.pickers').root_tags()
+
+---Open Telescope picker for dates.
+---@param start_date string @ Start date in ISO 8601 format. E.g. "2023-01-01". If not provided, the week ago date will be used.
+---@param end_date string @ End date in ISO 8601 format. E.g. "2023-01-31". If not provided, the current date will be used.
+require('vault.pickers').dates(start_date, end_date)
+
+---Open Telescope picker for notes in the inbox directory.
+require('vault.pickers').inbox()
 ```
 
 ## 🤝 Similar Plugins

@@ -214,7 +214,7 @@ local vault = {}
 local M = {}
 ---@class NoteClass
 ---@field description string
----@field dir string|nil
+---@field dir string?
 ---@field emoji string
 ---@field tags string[]
 function M.NoteClass.new()

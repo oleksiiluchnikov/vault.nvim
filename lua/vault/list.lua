@@ -5,8 +5,8 @@ local Log = require("plenary.log")
 local config = require("vault.config")
 
 --- Fetch list of {note_paths} from vault.
---- @param root_path string|nil - Root path to search from. If nil, use the vault root directory.
---- @param ignore string[]|nil - List of ignore patterns in glob format (e.g., ".obdidian/*, .git/*").
+--- @param root_path string? - Root path to search from. If nil, use the vault root directory.
+--- @param ignore string[]? - List of ignore patterns in glob format (e.g., ".obdidian/*, .git/*").
 --- @return string[] - List of markdown files.
 function list.notes_paths(root_path, ignore)
   root_path = root_path or config.dirs.root
@@ -55,7 +55,7 @@ end
 
 
 ---List all roots of nested tags. e.g., #foo/bar/baz -> #foo, #foo/bar
----@return string[]|nil
+---@return string[]?
 function list.root_tags()
   local root_dir = config.dirs.root
 

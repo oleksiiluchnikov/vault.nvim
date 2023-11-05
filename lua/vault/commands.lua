@@ -38,7 +38,7 @@ vim.api.nvim_create_user_command("VaultTags", function(args)
 		Pickers.tags()
 		return
 	end
-	local tags = require("vault").get_tags()
+	local tags = require("vault").tags()
 	local tag_values = {}
 	for _, tag in ipairs(tags) do
 		for _, farg in ipairs(fargs) do
@@ -51,7 +51,7 @@ vim.api.nvim_create_user_command("VaultTags", function(args)
 end, {
 	nargs = "*",
 	complete = function()
-		local tags = require("vault").get_tags()
+		local tags = require("vault").tags()
 		local tag_values = {}
 		for _, tag in ipairs(tags) do
 			table.insert(tag_values, tag.value)
@@ -60,13 +60,45 @@ end, {
 	end,
 })
 
+--- Vault Dates
+vim.api.nvim_create_user_command("VaultDates", function(args)
+  local fargs = args.fargs
+  if #fargs == 0 then
+    Pickers.dates()
+    return
+  end
+  local today = os.date("%Y-%m-%d")
+  local year_ago = os.date("%Y-%m-%d", os.time() - 60 * 60 * 24 * 365)
+  Pickers.dates(today, year_ago)
+end, {
+  nargs = "*",
+  complete = function()
+    local dates = require("dates").from_to(os.date("%Y-%m-%d"), os.date("%Y-%m-%d", os.time() - 60 * 60 * 24 * 365))
+    local date_values = {}
+    for _, date in ipairs(dates) do
+      table.insert(date_values, date.value)
+    end
+    return date_values
+  end,
+})
+
+--- Vault Today
+vim.api.nvim_create_user_command("VaultToday", function()
+  local config = require("vault.config")
+  local today = os.date("%Y-%m-%d %A")
+  local path = config.dirs.root .. "/Journal/Daily/" .. today .. ".md"
+  vim.cmd("e " .. path)
+end, {
+  nargs = 0,
+})
+
 vim.api.nvim_create_user_command("VaultNotesStatus", function(args)
   local fargs = args.fargs
   if #fargs == 0 then
     Pickers.root_tags()
     return
   end
-  local tags = require("vault").get_tags()
+  local tags = require("vault").tags()
   local statuses = {}
   for _, tag in ipairs(tags) do
     for _, farg in ipairs(fargs) do
@@ -82,7 +114,7 @@ end, {
     local notes = require("vault").notes()
     local statuses = {}
     for _, note in ipairs(notes) do
-      local tags = note.get_tags()
+      local tags = note.tags()
       for _, tag in ipairs(tags) do
         if tag.value:match("^status") and #tag.children > 0 then
           local status = tag.children[1]

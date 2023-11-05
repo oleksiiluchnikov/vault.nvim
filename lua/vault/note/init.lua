@@ -16,19 +16,33 @@ local config = require("vault.config")
 ---@field inlinks string[]|function - List of inlinks to the note.
 ---@field outlinks string[]|function - List of outlinks from the note.
 ---@field class string|function - The class of the note.
----@field status string|nil - The status of the note.
+---@field status string? - The status of the note.
 
 ---@param obj table
 ---@return Note
 function Note:new(obj)
   obj = obj or {}
-  obj.path = obj.path
   obj.relpath = obj.relpath or utils.to_relpath(obj.path)
   obj.basename = obj.basename or vim.fn.fnamemodify(obj.path, ":t")
   obj.content = obj.content or self:content(obj.path)
-  -- setmetatable(opts, self)
+  obj.class = obj.class or self:class(obj.content)
+  setmetatable(obj, self)
   self.__index = self
 	return obj
+end
+
+---Fetch class from the specified path.
+---@param content string - The content of the note.
+---@return string?
+function Note:class(content)
+  content = content or self.content
+  local class
+  local pattern = config.search_pattern.class
+  local match = content:match(pattern)
+  if match ~= nil then
+    class = match
+  end
+  return class
 end
 
 ---Write note filet to the specified path.
@@ -40,25 +54,25 @@ function Note:write(path, content)
 	local ext = config.ext
 
 	if path.gmatch(path, ext) == nil then
-		print("Invalid file extension: " .. path)
+		error("Invalid file extension: " .. path)
 		return false
 	end
 
 	if path.gmatch(path, root_dir) == nil then
-		print("Invalid path: " .. path)
+		error("Invalid path: " .. path)
 		return false
 	end
 
 	local f = io.open(path, "r")
 	if f ~= nil then
 		f:close()
-		print("File already exists: " .. path)
+		error("File already exists: " .. path)
 		return false
 	end
 
 	f = io.open(path, "w")
 	if f == nil then
-		print("Failed to open file: " .. path)
+		error("Failed to open file: " .. path)
 		return false
 	end
 
@@ -94,8 +108,8 @@ end
 
 
 ---Fetch content from the specified path.
----@param path string|nil - The path to the note to fetch content from.
----@return string|nil
+---@param path string? - The path to the note to fetch content from.
+---@return string?
 function Note:content(path)
 	path = path or self.path
 
@@ -118,17 +132,21 @@ function Note:preview()
 	vim.cmd("Glow " .. self.path)
 end
 
----@param path string|nil
----@param content string|nil
+---@param path string?
+---@param content string|function?
 ---@return table -- 
 function Note:tags(path, content)
   path = path or self.path
-  content = content or self:content(path)
+  content = content or self.content or self:content(path)
 
+  local Tag = require("vault.tag")
 	local tags = {}
-	for match in content:gmatch(config.search_pattern.tag) do
-    -- local tag = Tag:new(match)
-    table.insert(tags, match)
+	for match in content:gmatch([[#([A-Za-z0-9_][A-Za-z0-9-_/]+)]]) do
+    local tag = Tag:new({
+      value = match,
+      notes_paths = { path },
+    })
+    table.insert(tags, tag)
   end
 	return tags
 end
@@ -137,12 +155,12 @@ end
 ---@field raw string - The raw link as it appears in the note. e.g. [[link|title]]
 ---@field link string - The link as it appears in the note. e.g. link
 ---@field source string - The path to the note that contains the link. e.g. /home/user/notes/link.md
----@field heading string|nil - The heading of the link. e.g. link#heading
----@field custom_title string|nil - The custom title of the link. e.g. link|title
+---@field heading string? - The heading of the link. e.g. link#heading
+---@field custom_title string? - The custom title of the link. e.g. link|title
 
 -- FIXME: This function is slow, and not working properly.
----@param path string|nil
----@return Wikilink[]|nil
+---@param path string?
+---@return Wikilink[]?
 function Note:inlinks(path)
   path = path or self.path
 	local root_dir = config.dirs.root
@@ -211,7 +229,7 @@ end
 -- FIXME: This function returns nil. It should return a list of outlinks.
 ---Fetch outlinks from the specified path.
 ---@param path string
----@return Wikilink[]|nil
+---@return Wikilink[]?
 function Note:outlinks(path, content)
   path = path or self.path
   content = content or self.content or self:content(path)
@@ -286,7 +304,7 @@ end
 -- FIXME: This function returns nil. 
 ---Fetch dataview like keys from the specified path.
 ---@param path string
----@return string[]|nil
+---@return string[]?
 function Note:keys(path, content)
   path = path or self.path
   content = content or self.content or Note.content(path)
@@ -321,10 +339,7 @@ end
 function Note:edit(path)
   path = path or self.path
 	if vim.fn.filereadable(path) == 0 then
-		vim.notify("File not found: " .. path, vim.log.levels.ERROR, {
-			title = "vault",
-			timeout = 200,
-		})
+    error("File not found: " .. path)
 		return
 	end
 	vim.cmd("e " .. path)
