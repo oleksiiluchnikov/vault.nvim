@@ -186,23 +186,45 @@ function M.notes(notes)
 		:find()
 end
 
----Open picker with notes containing tags
----@param tag_values string[]
----@param match string? @Match type: "EXACT", "CONTAINS", "STARTSWITH", "ENDSWITH"
----@param behavior string?
-function M.notes_with_tags(tag_values, match, behavior)
-	local notes_with_tags = require("vault").notes_with_tags(tag_values, match, behavior)
-	if #notes_with_tags == 0 then
+---Open picker with notes filtered by tags
+---@param include string[]? - List of tags_values to include
+---@param exclude string[]? - List of tags_values to exclude
+---@param match_opt string? - "exact", "startswith", "contains", "regex", "fuzzy"
+---@param mode string? - "all", "any"
+function M.notes_filter_by_tags(include, exclude, match_opt, mode)
+	local notes = require("vault").notes_filter_by_tags(include, exclude, match_opt, mode)
+	if #notes == 0 then
 		Log.info("No notes found in vault")
 		return
 	end
-	M.notes(notes_with_tags)
+	M.notes(notes)
+end
+
+---Open picker with notes containing tags
+---@param tags_values string[]? - List of tags_values to include
+---@param match_opt string? - "exact", "startswith", "contains", "regex", "fuzzy"
+---@param mode string? - "all", "any"
+function M.notes_with_tags(tags_values, match_opt, mode)
+  local notes = require("vault").notes_filter_by_tags(tags_values, {}, match_opt, mode)
+  if #notes == 0 then
+    Log.info("No notes found in vault")
+    return
+  end
+  M.notes(notes)
 end
 
 ---Search for tags
----@param tag_prefix string?
-function M.tags(tag_prefix)
-	local tags = require("vault").tags(tag_prefix)
+---@param opts table?
+---@param include string[]? - List of tags_values to include
+---@param exclude string[]? - List of tags_values to exclude
+---@param match_opt string? - "AND" or "OR"
+function M.tags(opts, include, exclude, match_opt)
+  opts = opts or {}
+  include = include or {}
+  exclude = exclude or {}
+  match_opt = match_opt or "AND"
+
+	local tags = require("vault").tags(include, exclude, match_opt)
 
 	if next(tags) == nil then
 		Log.info("No tags found in vault")
@@ -237,7 +259,7 @@ function M.tags(tag_prefix)
 				{ width = entry_width },
 				{ remaining = true },
 				{ width = count_length },
-				{ remaining = false },
+				{ remaining = true },
 			},
 		})
 		local tag_value = entry.value.value
@@ -362,7 +384,7 @@ function M.notes_by(tag_prefix) -- software or software/Blender(if we selected s
 		local tag_value = parent_tag:gsub(tag_prefix .. "/", "") -- now we have software/Blender/extensions
 		vim.notify(tag_value)
 		M._cache.parent_tag = "" -- reset parent_tag
-		M.notes_with_tags({ tag_value }) -- now we have { software/Blender/extensions }
+		M.notes_filter_by_tags({ tag_value }) -- now we have { software/Blender/extensions }
 		return
 	end
 
@@ -609,18 +631,18 @@ function M.inbox()
 end
 
 M.test = function()
-	M.notes_with_tags({ "status/TODO", "class/Action" })
+	M.notes_filter_by_tags({ "status/TODO", "class/Action" })
 end
 
 M.todos = function()
-	M.notes_with_tags({ "status/TODO" })
+	M.notes_filter_by_tags({ "status/TODO" })
 end
 
 M.in_progress = function()
-	M.notes_with_tags({ "status/IN-PROGRESS" })
+	M.notes_filter_by_tags({ "status/IN-PROGRESS" })
 end
 
 M.done = function()
-	M.notes_with_tags({ "status/DONE" })
+	M.notes_filter_by_tags({ "status/DONE" })
 end
 return M

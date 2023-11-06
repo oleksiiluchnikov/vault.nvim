@@ -1,12 +1,12 @@
 local Pickers = require("vault.pickers")
 
-vim.api.nvim_create_user_command("VaultList", "lua P(require('vault').list(<f-args>))", {
-	nargs = "*",
-	complete = function()
-		local list = require("vault").list()
-		return list
-	end,
-})
+-- vim.api.nvim_create_user_command("VaultList", "lua P(require('vault').list(<f-args>))", {
+-- 	nargs = "*",
+-- 	complete = function()
+-- 		local list = require("vault").list()
+-- 		return list
+-- 	end,
+-- })
 
 vim.api.nvim_create_user_command("VaultNotes", function(args)
 	local query = args.args
@@ -47,7 +47,7 @@ vim.api.nvim_create_user_command("VaultTags", function(args)
 			end
 		end
 	end
-	Pickers.notes_with_tags(tag_values)
+	Pickers.notes_filter_by_tags(tag_values)
 end, {
 	nargs = "*",
 	complete = function()
@@ -69,7 +69,7 @@ vim.api.nvim_create_user_command("VaultDates", function(args)
   end
   local today = os.date("%Y-%m-%d")
   local year_ago = os.date("%Y-%m-%d", os.time() - 60 * 60 * 24 * 365)
-  Pickers.dates(today, year_ago)
+  Pickers.dates(tostring(today), tostring(year_ago))
 end, {
   nargs = "*",
   complete = function()
@@ -107,7 +107,7 @@ vim.api.nvim_create_user_command("VaultNotesStatus", function(args)
       end
     end
   end
-  Pickers.notes_with_tags(statuses)
+  Pickers.notes_filter_by_tags(statuses)
 end, {
   nargs = "*",
   complete = function()

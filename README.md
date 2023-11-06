@@ -104,36 +104,58 @@ The plugin provides the following commands for seamless navigation and searching
 
 ### API
 
+### Vault module
 ```lua
 --- Setup vault.
-require('vault').setup()
+---@param opts table? -- An optional table of options.
+require('vault').setup(opts)
 
 ---Fetch an array of all notes in vault.
----@type table[] @ An array of note objects.
+---@type table[] -- An array of note objects.
 require('vault').notes()
 
---- Fetch an array of all tags in vault.
----@param tags_prefix string? @ Optional prefix to filter tags by. E.g. "status/". If not provided, all tags in vault will be returned.
----@type table[] @ An array of tag objects.
-require('vault').tags(tag_prefix)
+---Fetch an array of notes filtered by tags.
+---@param include table[]? -- An array of tag values to include.
+---@param exclude table[]? -- An array of tag values to exclude.
+---@param match_opt string? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
+---@param mode string? -- A mode to filter notes by. E.g. "all", "any", "none". If not provided, "all" will be used.
+---@type table[] -- An array of note objects.
+require('vault').notes_filter_by_tags(include, exclude, match_opts, mode)
 
+--- Fetch an array of all tags in vault.
+---@param include table[]? -- An optional array of tag values to include.
+---@param exclude table[]? -- An optional array of tag values to exclude.
+---@param match_opt string? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
+---@type table[] -- An array of tag objects.
+require('vault').tags(include, exclude, match_opt)
+```
+
+### Telescope pickers
+
+```lua
 ---Open Telescope note search picker.
----@param notes table[]? @ An optional array of note objects to search. If not provided, all notes in vault will be searched.
+---@param notes table[]? -- An optional array of Note objects to search. If not provided, all notes in vault will be searched.
 require('vault.pickers').notes(notes)
 
 ---Open Telescope tag search picker.
-require('vault.pickers').tags()
+---@param include table[]? -- An optional array of tag values to include.
+---@param exclude table[]? -- An optional array of tag values to exclude.
+---@param match_opt string? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
+require('vault.pickers').tags(include, exclude, match_opt)
 
 ---Open Telescope notes picker for a specific tags.
----@param tag_values string[] @ An array of tag values to search.
-require('vault.pickers').notes_with_tags(tag_values)
+---@param include table[]? -- An array of tag values to include.
+---@param exclude table[]? -- An array of tag values to exclude.
+---@param match_opt string? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
+---@param mode string? -- A mode to filter notes by. E.g. "all", "any", "none". If not provided, "all" will be used.
+require('vault.pickers').notes_filter_by_tags(include, exclude, match_opts, mode)
 
 ---Open Telescope picker to browse nested tags from a root tag.
 require('vault.pickers').root_tags()
 
 ---Open Telescope picker for dates.
----@param start_date string @ Start date in ISO 8601 format. E.g. "2023-01-01". If not provided, the week ago date will be used.
----@param end_date string @ End date in ISO 8601 format. E.g. "2023-01-31". If not provided, the current date will be used.
+---@param start_date string -- Start date in ISO 8601 format. E.g. "2023-01-01". If not provided, the week ago date will be used.
+---@param end_date string -- End date in ISO 8601 format. E.g. "2023-01-31". If not provided, the current date will be used.
 require('vault.pickers').dates(start_date, end_date)
 
 ---Open Telescope picker for notes in the inbox directory.
