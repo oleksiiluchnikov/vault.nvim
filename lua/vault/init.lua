@@ -115,21 +115,21 @@ end
 ---@param include string[] - Array of tag values to include.
 ---@param exclude string[] - Array of tag values to exclude.
 ---@param match_opt string? - Match type for filtering notes (optional). Options: "exact", "contains", "startswith", "endswith", "regex". "fuzzy"
----@param mode_opt string? - Behavior for filtering notes (optional). Options: "all", "or".
+---@param mode string? - Behavior for filtering notes (optional). Options: "all", "any"
 ---@return Note[] - Array of Note objects.
-function Vault.notes_filter_by_tags(include, exclude, match_opt, mode_opt)
+function Vault.notes_filter_by_tags(include, exclude, match_opt, mode)
 	include = include or {}
 	exclude = exclude or {}
 	match_opt = match_opt or "exact"
-	mode_opt = mode_opt or "all"
+	mode = mode or "all"
 
-	local valid_modes = { "all", "or" }
+	local valid_modes = { "all", "any" }
 	local valid_matches = { "exact", "contains", "startswith", "endswith", "regex" }
 
-	if not vim.tbl_contains(valid_modes, mode_opt) then
+	if not vim.tbl_contains(valid_modes, mode) then
 		error(
 			"Invalid mode: "
-				.. mode_opt
+				.. mode
 				.. ". Valid modes are: "
 				.. table.concat(valid_modes, ", ")
 		)
@@ -190,7 +190,7 @@ function Vault.notes_filter_by_tags(include, exclude, match_opt, mode_opt)
 		end
 	end
 
-	---Handles the or mode for filtering notes.
+	---Handles the any mode for filtering notes.
 	local function handle_any_mode(tag, tag_value)
 		--- Make sure that tag.notes_paths is table
 		if has_match(tag.value, tag_value, match_opt) then
@@ -210,9 +210,9 @@ function Vault.notes_filter_by_tags(include, exclude, match_opt, mode_opt)
 	end
 
 	for _, tag in pairs(tags) do
-		if mode_opt == "all" then
+		if mode == "all" then
 			handle_all_mode(tag)
-		elseif mode_opt == "or" then
+		elseif mode == "any" then
 			for _, tag_value in ipairs(include) do
 				handle_any_mode(tag, tag_value)
 			end
