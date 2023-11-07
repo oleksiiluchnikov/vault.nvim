@@ -39,24 +39,24 @@ vim.api.nvim_create_user_command("VaultTags", function(args)
 		return
 	end
 	local tags = require("vault").tags()
-	local tag_values = {}
+	local tags_values = {}
 	for _, tag in ipairs(tags) do
 		for _, farg in ipairs(fargs) do
 			if tag.value == farg then
-				table.insert(tag_values, tag.value)
+				table.insert(tags_values, tag.value)
 			end
 		end
 	end
-	Pickers.notes_filter_by_tags(tag_values)
+	Pickers.notes_filter_by_tags(tags_values)
 end, {
 	nargs = "*",
 	complete = function()
 		local tags = require("vault").tags()
-		local tag_values = {}
+		local tags_values = {}
 		for _, tag in ipairs(tags) do
-			table.insert(tag_values, tag.value)
+			table.insert(tags_values, tag.value)
 		end
-		return tag_values
+		return tags_values
 	end,
 })
 

@@ -1,48 +1,39 @@
----@class Note
-local Note = {}
 
 local utils = require("vault.utils")
 local list = require("vault.list")
 local config = require("vault.config")
+
 
 ---Create a new note if it does not exist.
 ---@class Note
 ---@field path string - The absolute path to the note.
 ---@field relpath string - The relative path to the root directory of the note.
 ---@field basename string - The basename of the note.
----@field title string|function - The title of the note.
+---@field frontmatter string|function - The frontmatter of the note.
 ---@field content string|function - The content of the note.
+---@field body string|function - The body of the note.
+---@field title string|function - The title of the note.
 ---@field tags Tag[]|function - The tags of the note.
 ---@field inlinks string[]|function - List of inlinks to the note.
 ---@field outlinks string[]|function - List of outlinks from the note.
 ---@field class string|function - The class of the note.
 ---@field status string? - The status of the note.
+local Note = {}
 
 ---@param obj table
 ---@return Note
 function Note:new(obj)
-  obj = obj or {}
-  obj.relpath = obj.relpath or utils.to_relpath(obj.path)
-  obj.basename = obj.basename or vim.fn.fnamemodify(obj.path, ":t")
-  obj.content = obj.content or self:content(obj.path)
-  obj.class = obj.class or self:class(obj.content)
-  setmetatable(obj, self)
-  self.__index = self
-	return obj
-end
+	obj = obj or {}
+	obj.relpath = obj.relpath or utils.to_relpath(obj.path)
+	obj.basename = obj.basename or vim.fn.fnamemodify(obj.path, ":t")
+	obj.content = obj.content or self:content(obj.path)
+  obj.frontmatter = obj.frontmatter or self:frontmatter(obj.path, obj.content)
+  obj.body = obj.body or self:body(obj.path, obj.content, obj.frontmatter)
 
----Fetch class from the specified path.
----@param content string - The content of the note.
----@return string?
-function Note:class(content)
-  content = content or self.content
-  local class
-  local pattern = config.search_pattern.class
-  local match = content:match(pattern)
-  if match ~= nil then
-    class = match
-  end
-  return class
+	setmetatable(obj, self)
+	self.__index = self
+
+	return obj
 end
 
 ---Write note filet to the specified path.
@@ -81,31 +72,48 @@ function Note:write(path, content)
 	return true
 end
 
----Fetch class from the specified path.
----@param path string - The {absolute} path to the note to fetch class from.
----@param content string - The content of the note.
----@return string
-function Note:title(path, content)
-  path = path or self.path
-  content = content or self:content(path)
-
-	local title = self.basename
-
-  -- local pattern = "\n# (.*)\n"
-  -- local match = content:match(pattern)
-  -- if match ~= nil then
-  --   title = match
-  -- end
-
-  for line in content:gmatch("([^\n]*)\n?") do
-    if line:sub(1, 1) == "#" then
-      title = line:sub(3)
-      break
-    end
-  end
-	return title
+---Edit note
+---@class Note
+---@param path string
+function Note:edit(path)
+	path = path or self.path
+	if vim.fn.filereadable(path) == 0 then
+		error("File not found: " .. path)
+		return
+	end
+	vim.cmd("e " .. path)
 end
 
+---Open a note in the vault
+---@class Note
+---@param path string
+function Note:open(path)
+	path = path or self.path
+	-- if path.sub(1, -4) ~= ".md" then
+	local ext = config.ext
+	local pattern = ext .. "$"
+	if path:match(pattern) == nil then
+		---@type Note
+		local note = Note:new({
+			path = path,
+		})
+		if note == nil then
+			return
+		end
+		path = note.path
+	end
+
+	vim.cmd("e " .. path)
+end
+
+--- Preview with Glow.nvim
+function Note:preview()
+	if vim.fn.executable("glow") == 0 and package.loaded["glow"] == nil then
+		vim.notify("Glow is not installed")
+		return
+	end
+	vim.cmd("Glow " .. self.path)
+end
 
 ---Fetch content from the specified path.
 ---@param path string? - The path to the note to fetch content from.
@@ -123,32 +131,90 @@ function Note:content(path)
 	return content
 end
 
---- Preview with Glow.nvim
-function Note:preview()
-	if vim.fn.executable("glow") == 0 and package.loaded["glow"] == nil then
-		vim.notify("Glow is not installed")
+---Fetch frontmatter from the specified path.
+---@param path string? - The path to the note to fetch frontmatter from.
+---@param content string|function? - The content of the note.
+---@return table?
+function Note:frontmatter(path, content)
+	path = path or self.path
+	content = content or (type(self.content) == "function" and self:content()) or self.content
+	if content == nil then
 		return
 	end
-	vim.cmd("Glow " .. self.path)
+	local frontmatter = content:match([[^%s*(%-%-%-.*%-%-%-)%s*.*]])
+	return frontmatter
+end
+
+---Fetch body from the specified path.
+---@param path string? - The path to the note to fetch body from.
+---@param content string|function? - The content of the note.
+---@return string
+function Note:body(path, content, frontmatter)
+	path = path or self.path
+	content = content or (type(self.content) == "function" and self:content()) or self.content
+	if frontmatter == nil then
+		if self.frontmatter == nil or type(self.frontmatter) == "function" then
+			frontmatter = self:frontmatter(path, content)
+		else
+			frontmatter = self.frontmatter
+		end
+	end
+
+	if frontmatter == nil then
+		if type(content) == "string" then
+			return content
+		end
+	end
+
+	return content:sub(frontmatter:len() + 1)
+end
+
+---Fetch class from the specified path.
+---@param path string? - The {absolute} path to the note to fetch class from.
+---@param content string|function? - The content of the note.
+---@return string
+function Note:title(path, content)
+	path = path or self.path
+	content = content or (type(self.content) == "function" and self:content()) or self.content
+
+	local title
+	for line in content:gmatch("([^\n]*)\n?") do
+		if line:sub(1, 1) == "#" then
+			title = line:sub(3)
+			break
+		end
+	end
+	return title
 end
 
 ---@param path string?
----@param content string|function?
----@return table -- 
-function Note:tags(path, content)
-  path = path or self.path
-  content = content or self.content or self:content(path)
+---@param body string|function?
+---@return table --
+function Note:tags(path, body)
+	path = path or self.path
+	body = body or (type(self.body) == "function" and self:body()) or self.body
 
-  local Tag = require("vault.tag")
+	local Tag = require("vault.tag")
 	local tags = {}
-	for match in content:gmatch([[#([A-Za-z0-9_][A-Za-z0-9-_/]+)]]) do
-    local tag = Tag:new({
-      value = match,
-      notes_paths = { path },
-    })
-    table.insert(tags, tag)
-  end
+	for match in body:gmatch([[#([A-Za-z0-9_][A-Za-z0-9-_/]+)]]) do
+		local tag = Tag:new({
+			value = match,
+			notes_paths = { path },
+		})
+		table.insert(tags, tag)
+	end
 	return tags
+end
+
+---Check if note has an exact tag value.
+---@param tag_value string - Exact tag value to search for.
+function Note:has_tag(tag_value, body)
+	body = body or (type(self.body) == "function" and self:body()) or self.body
+	local pattern = config.search_pattern.tag
+	if body:match(pattern) ~= nil then
+		return true
+	end
+	return false
 end
 
 ---@class Wikilink
@@ -162,9 +228,8 @@ end
 ---@param path string?
 ---@return Wikilink[]?
 function Note:inlinks(path)
-  path = path or self.path
+	path = path or self.path
 	local root_dir = config.dirs.root
-
 
 	local notes_paths = list.notes_paths(root_dir, config.ignore)
 	local inlinks = {}
@@ -207,7 +272,7 @@ function Note:inlinks(path)
 
 				if link_title == vim.fn.fnamemodify(note_path, ":t:r") then
 					table.insert(inlinks, {
-            line = line,
+						line = line,
 						link = link,
 						source = {
 							path = note_path,
@@ -231,8 +296,8 @@ end
 ---@param path string
 ---@return Wikilink[]?
 function Note:outlinks(path, content)
-  path = path or self.path
-  content = content or self.content or self:content(path)
+	path = path or self.path
+	content = content or self.content or self:content(path)
 	if type(content) ~= "string" then
 		return
 	end
@@ -255,7 +320,7 @@ end
 -- TEST: This function is not tested.
 ---@param path string - The path to the note to update inlinks.
 function Note.update_inlinks(path)
-  local root_dir = config.dirs.root
+	local root_dir = config.dirs.root
 	if type(root_dir) ~= "string" then
 		return
 	end
@@ -301,105 +366,146 @@ function Note.update_inlinks(path)
 	end
 end
 
--- FIXME: This function returns nil. 
+-- FIXME: This function returns nil.
 ---Fetch dataview like keys from the specified path.
----@param path string
+---@param path string?
 ---@return string[]?
 function Note:keys(path, content)
-  path = path or self.path
-  content = content or self.content or Note.content(path)
+	path = path or self.path
+	content = content or self.content or self:content(path)
 	if type(content) ~= "string" then
 		return
 	end
 
 	local keys = {}
 	local block_field_pattern = "([A-Za-z%-%_]+)::%s*%w+"
-	local inline_field_pattern = "([A-Za-z%-%_]+):%s*%w+"
+	local inline_field_pattern = "([A-Za-z%-%_]+)::%s*%w+"
 	local frontmatter_key_pattern = "([A-Za-z%-%_]+):%s*%w+"
 
-	for key in content:gmatch(block_field_pattern) do
-		table.insert(keys, key)
-	end
+	local patterns = {
+		block_field_pattern,
+		inline_field_pattern,
+		frontmatter_key_pattern,
+	}
 
-	for key in content:gmatch(frontmatter_key_pattern) do
-		table.insert(keys, key)
-	end
+	-- for line_number, line in ipairs(lines) do
+	-- 	for _, pattern in ipairs(patterns) do
+	-- 		for key in line:gmatch(pattern) do
+	-- 			if key ~= nil then
+	-- 				if keys[line_number] == nil then
+	-- 					keys[line_number] = {}
+	-- 				end
+	-- 				local column_number = 0
+	-- 				for i = 1, #line do
+	-- 					if line:sub(i, i) == key:sub(1, 1) then
+	-- 						column_number = i
+	-- 						break
+	-- 					end
+	-- 				end
+	-- 				keys[line_number] = {}
+	-- 				table.insert(keys[line_number], {
+	-- 					column_number,
+	-- 				})
+	-- 				keys[line_number][column_number] = key
+	-- 			end
+	-- 		end
+	-- 	end
+	-- end
 
-	for key in content:gmatch(inline_field_pattern) do
-		table.insert(keys, key)
-	end
+	-- I want to return something like this:
+	-- keys = {
+	-- {
+	--   ["title"] = {3,1} -- line_number, column_number
+	--   ["created"] = {3,1}
+	--   ["modified"] = {3,1}
+	--   ["class"] = {3,1}
+	--   ["tags"] = {3,1}
+	--   ["inline"] = {3,1}
+	--   ["block"] = {3,1}
+	-- }
+	-- }
+
+	local frontmatter = self.frontmatter or self:frontmatter()
+  for key in frontmatter:gmatch(frontmatter_key_pattern) do
+    if key ~= nil then
+      keys[key] = {1, 1}
+    end
+  end
+
+  local body = self.body or self:body()
+  for key in body:gmatch(block_field_pattern) do
+    if key ~= nil then
+      keys[key] = {1, 1}
+    end
+  end
 
 	return keys
 end
 
-
----Edit note
----@class Note
----@param path string
-function Note:edit(path)
-  path = path or self.path
-	if vim.fn.filereadable(path) == 0 then
-    error("File not found: " .. path)
-		return
+---Fetch class from the specified path.
+---@param content string - The content of the note.
+---@return string?
+function Note:class(content)
+  content = content or (type(self.content) == "function" and self:content()) or self.content
+	local class
+	local pattern = config.search_pattern.class or "%s#class/([A-Za-z0-9_-]+)"
+	local match = content:match(pattern)
+	if match ~= nil then
+		class = match
 	end
-	vim.cmd("e " .. path)
+	return class
 end
 
----Open a note in the vault
----@class Note
----@param path string
-function Note:open(path)
-	path = path or self.path
-	-- if path.sub(1, -4) ~= ".md" then
-  local ext = config.ext
-  local pattern = ext .. "$"
-  if path:match(pattern) == nil then
-
-    ---@type Note
-		local note = Note:new({
-      path = path,
-    })
-		if note == nil then
-			return
-		end
-		path = note.path
-	end
-
-	vim.cmd("e " .. path)
-end
-
-function Note.test_tags()
+function Note.test()
 	vim.cmd("lua package.loaded['vault.note'] = nil")
-	-- local Vault = require("vault")
-	local path = config.dirs.root .. "/Aspiration/Incease my cognitive abilities.md"
-	local note = Note:new(path)
- --  local content = note:content()
-	local tags = note:tags()
-  print(vim.inspect(tags))
-end
+	local raw_content = string.gsub(
+		[[
+---
+uuid: a2b3c4d5b6a7c8d9c0b1a2b3c4d5b6a7
+title: Foo
+created: 2021-01-01 00:00:00
+modified: 2021-01-01 00:00:00
+---
+# Foo
 
----Check if note has an exact tag value.
----@param tag_value string - Exact tag value to search for.
-function Note:has_tag(tag_value)
-  local content = self:content()
-  local pattern = config.search_pattern.tag
-  for tag in content:gmatch(pattern) do
-    if tag == tag_value then
-      return true
-    end
-  end
-  return false
-end
+class:: #class/Meta
+tags:: #tag/foo, #tag/bar, #baz, #qux
 
-function Note:frontmatter(content)
-  content = content or self:content()
-  local frontmatter = {}
-  local pattern = "---\n(.-)---.*"
-  for match in content:gmatch(pattern) do
-    local key, value = match:match("([%w_]+):%s*(.*)")
-    frontmatter[key] = value
-  end
-  return frontmatter
+inline:: 1
+block:: 2 and online:: 4
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+Donec a diam lectus. Sed sit amet ipsum mauris. Maecenas
+congue ligula ac quam viverra nec consectetur ante hendrerit.
+Donec et mollis dolor.
+Praesent et diam eget libero egestas mattis sit amet vitae augue.
+
+## Bar
+
+Integer congue faucibus dapibus. Integer id nisl ut elit
+]],
+		"\n",
+		"\\n"
+	)
+
+	local note = Note:new({
+		path = os.getenv("HOME") .. "/knowledge/Practice/Play Guitar.md",
+	})
+  print(vim.inspect(note:keys()))
+	-- local frontmatter = note.frontmatter or note:frontmatter()
+ --  print("frontmatter:", vim.inspect(frontmatter))
+	--
+	-- local body = note:body()
+
+	-- print("path: " .. note.path)
+	-- print("relpath: " .. note.relpath)
+	-- -- print("content: " .. note.content)
+	-- print("basename: " .. note.basename)
+	-- print("title: " .. note:title())
+ --  print("has_tag:", note:has_tag("View"))
+	--
+	-- -- print("body: " .. body)
+ --  print("outlinks:", vim.inspect(note:outlinks()))
 end
 
 return Note

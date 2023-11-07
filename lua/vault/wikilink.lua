@@ -1,10 +1,13 @@
 local M = {}
 ---@class Wikilink
----@param link string
----@return table
-local wikilink = {}
+---@field raw string - The raw link as it appears in the note. e.g. [[link|title]]
+---@field link string - The link as it appears in the note. e.g. link
+---@field source string - The path to the note that contains the link. e.g. /home/user/notes/link.md
+---@field heading string? - The heading of the link. e.g. link#heading
+---@field custom_title string? - The custom title of the link. e.g. link|title
+local Wikilink = {}
 
-function wikilink:new(link)
+function Wikilink:new(link)
   local o = {}
   setmetatable(o, self)
   self.__index = self

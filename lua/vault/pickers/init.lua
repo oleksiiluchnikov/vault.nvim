@@ -41,8 +41,10 @@ local function detach_hl_groups(hl_groups)
 end
 
 ---Open notes picker
+---@param opts table?
 ---@param notes Note[]?
-function M.notes(notes)
+function M.notes(opts,notes)
+  opts = opts or {}
 	notes = notes or require("vault").notes()
 
 	if not notes then
@@ -192,12 +194,18 @@ end
 ---@param match_opt string? - "exact", "startswith", "contains", "regex", "fuzzy"
 ---@param mode string? - "all", "any"
 function M.notes_filter_by_tags(include, exclude, match_opt, mode)
+  include = include or {}
+  exclude = exclude or {}
+  if #include == 0 and #exclude == 0 then
+    M.notes()
+    return
+  end
 	local notes = require("vault").notes_filter_by_tags(include, exclude, match_opt, mode)
 	if #notes == 0 then
 		Log.info("No notes found in vault")
 		return
 	end
-	M.notes(notes)
+	M.notes({}, notes)
 end
 
 ---Open picker with notes containing tags
@@ -205,12 +213,16 @@ end
 ---@param match_opt string? - "exact", "startswith", "contains", "regex", "fuzzy"
 ---@param mode string? - "all", "any"
 function M.notes_with_tags(tags_values, match_opt, mode)
+  if tags_values == nil then
+    M.notes()
+    return
+  end
   local notes = require("vault").notes_filter_by_tags(tags_values, {}, match_opt, mode)
   if #notes == 0 then
     Log.info("No notes found in vault")
     return
   end
-  M.notes(notes)
+  M.notes({}, notes)
 end
 
 ---Search for tags
@@ -252,7 +264,7 @@ function M.tags(opts, include, exclude, match_opt)
 	local make_display = function(entry)
 		local entry_width = 29
 		local notes_length = #entry.value.notes_paths
-		local count_length = tostring(notes_length):len()
+		local count_length = tostring(notes_length):len() + 1
 		local displayer = entry_display.create({
 			separator = " ",
 			items = {
@@ -615,6 +627,11 @@ function M.dates(date_start, date_end)
 		:find()
 end
 
+---TODO: Make action that will search for notes with similar tags that selected note has
+---If we have note with tags: status/TODO, class/Action, class/Action/Project
+---We could search for notes containing tags: status/TODO, class/Action, class/Action/Project
+---With mode "all" or "any"
+
 ---Search for notes in Inbox directory
 function M.inbox()
 	local inbox_dir = config.dirs.inbox
@@ -627,7 +644,7 @@ function M.inbox()
 		table.insert(notes, note)
 	end
 
-	M.notes(notes)
+	M.notes({}, notes)
 end
 
 M.test = function()
