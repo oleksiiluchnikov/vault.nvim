@@ -36,35 +36,27 @@ function FilterOptions:new(this)
   this.mode = this.mode or "all"
   setmetatable(this, self)
   self.__index = self
+  this:validate()
   return this
 end
 
----Tags filter options.
----@class TagsFilterOptions: FilterOptions - Filter options for tags.
----@field include string[]? - Array of tag values to include (optional).
----@field exclude string[]? - Array of tag values to exclude (optional).
----@field match_opt string? - Match type for filtering notes (optional). Options: "exact", "contains", "startswith", "endswith", "regex". "fuzzy"
----|"'exact'" # Matches exact value. E.g., "foo" matches "foo" but not "foobar".
----|"'contains'" # Matches value if it contains the query. E.g., "foo" matches "foo" and "foobar".
----|"'startswith'" # Matches value if it starts with the query. E.g., "foo" matches "foo" and "foobar".
----|"'endswith'" # Matches value if it ends with the query. E.g., "foo" matches "foo" and "barfoo".
----|"'regex'" # Matches value if it matches the query as a regex. E.g., "foo" matches "foo" and "barfoo".
----@field mode string? - Behavior for filtering notes (optional). Options: "all", "any"
----|"'all'"  # Matches all values.
----|"'any'" # Matches any value.
-local TagsFilterOptions = {
-  include = {},
-  exclude = {},
-  match_opt = "exact",
-  mode = "all",
-}
-
-function TagsFilterOptions:new(this)
-  this = this or {}
-  setmetatable(this, self)
-  self.__index = self
-  return this
+function FilterOptions:validate()
+  local valid_match_opts = { "exact", "contains", "startswith", "endswith", "regex", "fuzzy" }
+  local valid_modes = { "all", "any" }
+  if self.include and type(self.include) ~= "table" then
+    error("include must be a table")
+  end
+  if self.exclude and type(self.exclude) ~= "table" then
+    error("exclude must be a table")
+  end
+  if not vim.tbl_contains(valid_match_opts, self.match_opt) then
+    error("invalid match_opt: `" .. self.match_opt .. "` not in " .. vim.inspect(valid_match_opts))
+  end
+  if not vim.tbl_contains(valid_modes, self.mode) then
+    error("invalid mode: `" .. self.mode .. "` not in " .. vim.inspect(valid_modes))
+  end
 end
+
 
 -- The perform_match function now takes an additional parameter, the match type
 ---@param a string - The value to filter notes.

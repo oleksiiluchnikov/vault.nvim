@@ -47,12 +47,12 @@ function M.notes(opts,filter_opts)
   opts = opts or {}
   ---@type Notes
   print(vim.inspect(filter_opts))
-  local notes = require("vault.notes_data"):new():fetch(filter_opts):to_notes()
+  -- local notes = require("vault.notes_data"):new():fetch(filter_opts):to_notes()
+  local notes = require("vault").notes(filter_opts)
   if notes == nil then
     error("No notes found in vault")
   end
   local notes_values = vim.tbl_values(notes.data)
-  print(vim.inspect(notes_values))
   local notes_array = {}
   for _, note in ipairs(notes_values) do
     table.insert(notes_array, note)
@@ -78,8 +78,42 @@ function M.notes(opts,filter_opts)
 	for _, note in ipairs(notes_array) do
 		average_note_content_length = average_note_content_length + #note.content
 	end
+  average_note_content_length = math.floor(average_note_content_length / #notes_array)
 
-	local prompt_title = tostring(average_note_content_length / #notes_array)
+    
+
+  local prompt_title = ""
+
+  if filter_opts ~= nil then
+    local keys = filter_opts.keys
+    local include = filter_opts.include
+    local exclude = filter_opts.exclude
+    local match_opt = filter_opts.match_opt
+    local mode = filter_opts.mode
+    if keys ~= nil then
+      if #keys == 1 then
+        prompt_title = prompt_title .. " with " .. mode .." " .. keys[1].. " " .. match_opt
+      else
+      for _, v in ipairs(keys) do
+        prompt_title = prompt_title .. " " .. v
+      end
+      end
+    end
+    if include ~= nil and #include > 0 then
+      prompt_title = prompt_title .. " including:"
+      for _, v in ipairs(include) do
+        prompt_title = prompt_title .. " [" .. v .. "]"
+      end
+    end
+    if exclude ~= nil and #exclude > 0 then
+      prompt_title = prompt_title .. " excluding:"
+      for _, v in ipairs(exclude) do
+        prompt_title = prompt_title .. " [" .. v .. "]"
+      end
+    end
+    prompt_title = prompt_title .. " " .. tostring(average_note_content_length / #notes_array)
+
+  end
 
 	-- entry maker
 	local steps = 64

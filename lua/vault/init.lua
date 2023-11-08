@@ -4,6 +4,7 @@
 ---@field notes_with_tags function|Note[] - Retrieve notes from vault with tags.
 ---@field tags function|Tag[] - Retrieve tags from vault.
 local Vault = {}
+local NotesData = require("vault.notes_data")
 
 ---Create a new Vault object.
 ---@return Vault
@@ -25,7 +26,7 @@ end
 ---@param filter_opts FilterOptions? - Filter options (optional).
 ---@return Notes
 function Vault.notes(filter_opts)
-  return require("vault.notes_data"):new():fetch(filter_opts):to_notes()
+  return NotesData:new():fetch(filter_opts):to_notes()
 end
 
 ---Retrieve tags from your vault.
