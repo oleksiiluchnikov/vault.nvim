@@ -42,17 +42,32 @@ end
 
 ---Open notes picker
 ---@param opts table?
----@param notes Note[]?
-function M.notes(opts,notes)
+---@param filter_opts table?
+function M.notes(opts,filter_opts)
   opts = opts or {}
-	notes = notes or require("vault").notes()
+  ---@type Notes
+  print(vim.inspect(filter_opts))
+  local notes = require("vault.notes_data"):new():fetch(filter_opts):to_notes()
+  if notes == nil then
+    error("No notes found in vault")
+  end
+  local notes_values = vim.tbl_values(notes.data)
+  print(vim.inspect(notes_values))
+  local notes_array = {}
+  for _, note in ipairs(notes_values) do
+    table.insert(notes_array, note)
+  end
+  if #notes_array == 0 then
+    Log.info("No notes found in vault")
+    return
+  end
 
-	if not notes then
+	if not notes_array then
 		error("No notes found in vault")
 	end
 
 	-- sort notes by content length
-	table.sort(notes, function(a, b)
+	table.sort(notes_array, function(a, b)
 		local a_count = #a.content
 		local b_count = #b.content
 		return a_count < b_count
@@ -60,11 +75,11 @@ function M.notes(opts,notes)
 
 	-- prompt title
 	local average_note_content_length = 0
-	for _, note in ipairs(notes) do
+	for _, note in ipairs(notes_array) do
 		average_note_content_length = average_note_content_length + #note.content
 	end
 
-	local prompt_title = tostring(average_note_content_length / #notes)
+	local prompt_title = tostring(average_note_content_length / #notes_array)
 
 	-- entry maker
 	local steps = 64
@@ -75,7 +90,7 @@ function M.notes(opts,notes)
 	--- found the longest location_path and set it as width
 	--- so we can have nice alignment
 	local location_path_width = 0
-	for _, note in ipairs(notes) do
+	for _, note in ipairs(notes_array) do
 		local location_path = ""
 		if note.relpath:find("/") ~= nil then
 			location_path = note.relpath:sub(1, note.relpath:len() - vim.fn.fnamemodify(note.path, ":t"):len() - 1)
@@ -140,7 +155,7 @@ function M.notes(opts,notes)
 	end
 
 	local finder = finders.new_table({
-		results = notes,
+		results = notes_array,
 		entry_maker = entry_maker,
 	})
 
@@ -662,4 +677,13 @@ end
 M.done = function()
 	M.notes_filter_by_tags({ "status/DONE" })
 end
+
+M.test2 = function()
+  vim.cmd("lua package.loaded['vault.pickers'] = nil")
+  vim.cmd("lua package.loaded['vault.notes_data'] = nil")
+  vim.cmd("lua package.loaded['vault.tags_data'] = nil")
+  -- M.notes({},{"tags", {'status'}, { "class" }, 'startswith'})
+  M.notes({},{"tags", {'status'}, { }, 'startswith'})
+end
+
 return M

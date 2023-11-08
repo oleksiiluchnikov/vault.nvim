@@ -1,33 +1,25 @@
 ---@class Notes - Retrieve notes from vault.
 ---@field data Note[] - Array of Note objects.
 local Notes = {}
+local Note = require("vault.note")
 
 ---Create a new Notes object.
----@param this? table - The table to create the Notes object from.
+---@param data? NotesData - The table to create the Notes object from.
 ---@return Notes
-function Notes:new(this)
-  this = this or {}
+function Notes:new(data)
+  data = data or {}
+  for note_path, note_data in pairs(data) do
+    local note = Note:new(note_data)
+    data[note_path] = note
+  end
+  local this = {}
+  this.data = data
   setmetatable(this, self)
   self.__index = self
   return this
 end
 
----@class NotesFilterOptions: FilterOptions -- Filter options for notes.
----@field keys string[]? - Array of keys to filter notes.
----|"'title'" # Matches note title.
----|"'tags'" # Matches note tags.
----|"'content'" # Matches note content.
-local NotesFilterOptions = {
-  keys = {},
-  include = {},
-  exclude = {},
-  match_opt = "exact",
-  mode = "all",
-}
-
-function NotesFilterOptions:new(this)
-  this = this or {}
-  setmetatable(this, self)
-  self.__index = self
-  return this
-end
+-- function Notes:from_data(data)
+--   return Notes:new(data)
+-- end
+return Notes

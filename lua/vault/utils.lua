@@ -33,9 +33,9 @@ end
 
 
 ---@param line string - The line to parse.
----@param tags_values table - The table to store the tag values.
----@return string[]? - Array of tag values.
-function M.parse_line_for_tags(line, tags_values)
+---@return table<string, string[]>? - Table of tag values and their notes paths. E.g., { ["status"] = { "foo.md", "bar.md" } }
+function M.parse_line_for_tags(line)
+  local tags_data_from_line = {}
 	local path, line_with_tag = line:match("^(.*" .. config.ext .. "):(.+)")
 	if path == nil or line_with_tag == nil then
 		return
@@ -46,18 +46,16 @@ function M.parse_line_for_tags(line, tags_values)
 			goto continue
 		end
 
-		if tags_values[tag_value] == nil then
-			-- Initialize tags_values[tag_value] as table
-			tags_values[tag_value] = { path }
-		elseif not vim.tbl_contains(tags_values[tag_value], path) then
-			vim.list_extend(tags_values[tag_value], { path })
-		end
-		-- elseif not vim.tbl_contains(tags_values[tag_value], path) then
-		--     vim.tbl_extend("force", tags_values[tag_value], { path })
-		-- end
+    if tags_data_from_line[tag_value] == nil then
+      tags_data_from_line[tag_value] = {}
+    end
+
+    if not vim.tbl_contains(tags_data_from_line[tag_value], path) then
+      table.insert(tags_data_from_line[tag_value], path)
+    end
 		::continue::
 	end
-	return tags_values
+    return tags_data_from_line
 end
 
 return M

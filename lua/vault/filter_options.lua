@@ -30,10 +30,10 @@ local FilterOptions = {}
 
 function FilterOptions:new(this)
   this = this or {}
-  this.include = {}
-  this.exclude = {}
-  this.match_opt = "exact"
-  this.mode = "all"
+  this.include = this.include or {}
+  this.exclude = this.exclude or {}
+  this.match_opt = this.match_opt or "exact"
+  this.mode = this.mode or "all"
   setmetatable(this, self)
   self.__index = self
   return this
@@ -130,14 +130,14 @@ function FilterOptions.handle_mode(mode, tbl, key, a, b, match_opt, notes, exist
       return false
     end
   end
-  if has_match(tbl, b, match_opt) then
+  if FilterOptions.has_match(tbl, b, match_opt) then
     ---@type table
     for _, note_path in ipairs(tbl.notes_paths) do
       local note = require("vault.note"):new({ path = note_path })
       local note_tags = note:tags()
 
       for _, note_tag in ipairs(note_tags) do
-        if has_match(note_tag.value, b, match_opt) and not existing_notes[note.path] then
+        if FilterOptions.has_match(note_tag.value, b, match_opt) and not existing_notes[note.path] then
           table.insert(notes, note)
           existing_notes[note.path] = true
         end
@@ -201,5 +201,22 @@ end
 			end
 		end
 	end
+
+function FilterOptions.match_all(tbl, b, match_opt)
+  -- for _, opt in ipairs(MatchOptions) do
+  --   if match_opt ~= opt then
+  --     error("Invalid match: " .. match_opt .. ". Valid matches are: " .. table.concat(MatchOptions, ", "))
+  --     return false
+  --   end
+  -- end
+  local result = true
+  for _, a in ipairs(tbl) do
+    if not FilterOptions.has_match(a, b, match_opt) then
+      result = false
+      break
+    end
+  end
+  return result
+end
 
 return FilterOptions
