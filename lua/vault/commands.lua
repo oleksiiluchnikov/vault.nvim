@@ -1,13 +1,5 @@
 local Pickers = require("vault.pickers")
 
--- vim.api.nvim_create_user_command("VaultList", "lua P(require('vault').list(<f-args>))", {
--- 	nargs = "*",
--- 	complete = function()
--- 		local list = require("vault").list()
--- 		return list
--- 	end,
--- })
-
 vim.api.nvim_create_user_command("VaultNotes", function(args)
 	local query = args.args
 	if query == "" then
@@ -23,9 +15,9 @@ vim.api.nvim_create_user_command("VaultNotes", function(args)
 end, {
 	nargs = "*",
 	complete = function()
-		local notes = require("vault").notes()
+		local notes = require("vault.notes.map"):fetch()
 		local note_names = {}
-		for _, note in ipairs(notes) do
+		for _, note in pairs(notes) do
 			table.insert(note_names, note.basename)
 		end
 		return note_names
@@ -38,12 +30,12 @@ vim.api.nvim_create_user_command("VaultTags", function(args)
 		Pickers.tags()
 		return
 	end
-	local tags = require("vault").tags()
+	local tags = require("vault.tags.map"):new():fetch()
 	local tags_values = {}
-	for _, tag in ipairs(tags) do
+	for k, tag in pairs(tags) do
 		for _, farg in ipairs(fargs) do
 			if tag.value == farg then
-				table.insert(tags_values, tag.value)
+				table.insert(tags_values, k)
 			end
 		end
 	end
@@ -51,12 +43,8 @@ vim.api.nvim_create_user_command("VaultTags", function(args)
 end, {
 	nargs = "*",
 	complete = function()
-		local tags = require("vault").tags()
-		local tags_values = {}
-		for _, tag in ipairs(tags) do
-			table.insert(tags_values, tag.value)
-		end
-		return tags_values
+		local tags = require("vault.tags.map"):fetch()
+		return vim.tbl_keys(tags)
 	end,
 })
 

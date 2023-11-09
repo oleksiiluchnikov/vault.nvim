@@ -35,27 +35,27 @@ end
 ---@param line string - The line to parse.
 ---@return table<string, string[]>? - Table of tag values and their notes paths. E.g., { ["status"] = { "foo.md", "bar.md" } }
 function M.parse_line_for_tags(line)
-  local tags_data_from_line = {}
+  local tags_map_from_line = {}
 	local path, line_with_tag = line:match("^(.*" .. config.ext .. "):(.+)")
 	if path == nil or line_with_tag == nil then
 		return
 	end
 
 	for tag_value in line:gmatch("#([A-Za-z0-9_][A-Za-z0-9-_/]+)") do
-		if require('vault.tag').is_tag(tag_value) == false then
+		if require('vault.tags.tag').is_tag(tag_value) == false then
 			goto continue
 		end
 
-    if tags_data_from_line[tag_value] == nil then
-      tags_data_from_line[tag_value] = {}
+    if tags_map_from_line[tag_value] == nil then
+      tags_map_from_line[tag_value] = {}
     end
 
-    if not vim.tbl_contains(tags_data_from_line[tag_value], path) then
-      table.insert(tags_data_from_line[tag_value], path)
+    if not vim.tbl_contains(tags_map_from_line[tag_value], path) then
+      table.insert(tags_map_from_line[tag_value], path)
     end
 		::continue::
 	end
-    return tags_data_from_line
+    return tags_map_from_line
 end
 
 return M

@@ -21,22 +21,22 @@ end
 
 function M.parse(link)
   local link_pattern = "%[%[[^%]]+%]%]"
-  local wikilink_data = link:match(link_pattern)
-  if wikilink_data == nil then
+  local wikilink_map = link:match(link_pattern)
+  if wikilink_map == nil then
     return {}
   end
 
-  local link_title = wikilink_data:match("%[%[(.-)%]%]")
+  local link_title = wikilink_map:match("%[%[(.-)%]%]")
   if link_title == nil then
     return {}
   end
 
-  local link_heading = wikilink_data:match("#(.+)")
+  local link_heading = wikilink_map:match("#(.+)")
   if link_heading == nil then
     link_heading = ""
   end
 
-  local link_custom_title = wikilink_data:match("|(.+)")
+  local link_custom_title = wikilink_map:match("|(.+)")
   if link_custom_title == nil then
     link_custom_title = ""
   end

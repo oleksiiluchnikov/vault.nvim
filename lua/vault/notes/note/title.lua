@@ -1,5 +1,5 @@
 local Title = {}
-local Note = require("vault.note")
+local Note = require("vault.notes.note")
 
 ---Sync title with filename and update {inlinks}.
 ---@class Title

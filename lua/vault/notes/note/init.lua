@@ -194,7 +194,7 @@ function Note:tags(path, body)
 	path = path or self.path
 	body = body or (type(self.body) == "function" and self:body()) or self.body
 
-	local Tag = require("vault.tag")
+	local Tag = require("vault.tags.tag")
 	local tags = {}
 	for match in body:gmatch([[#([A-Za-z0-9_][A-Za-z0-9-_/]+)]]) do
 		local tag = Tag:new({
@@ -307,8 +307,8 @@ function Note:outlinks(path, content)
 	local pattern = config.search_pattern.wikilink
 
 	for link in content:gmatch(pattern) do
-		-- local wikilink_data = wikilink.parse(link)
-		-- if wikilink_data == nil then
+		-- local wikilink_map = wikilink.parse(link)
+		-- if wikilink_map == nil then
 		-- 	goto continue
 		-- end
 		table.insert(outlinks, link)
@@ -367,7 +367,7 @@ function Note.update_inlinks(path)
 end
 
 -- FIXME: This function returns nil.
----Fetch dataview like keys from the specified path.
+---Fetch mapview like keys from the specified path.
 ---@param path string?
 ---@return string[]?
 function Note:keys(path, content)
@@ -457,7 +457,7 @@ function Note:class(content)
 end
 
 function Note.test()
-	vim.cmd("lua package.loaded['vault.note'] = nil")
+	vim.cmd("lua package.loaded['vault.notes.note'] = nil")
 	local raw_content = string.gsub(
 		[[
 ---

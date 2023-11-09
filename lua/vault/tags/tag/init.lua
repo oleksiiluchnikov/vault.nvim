@@ -1,5 +1,5 @@
 local config = require("vault.config")
-local TagDocumentation = require("vault.tag.documentation")
+local TagDocumentation = require("vault.tags.tag.documentation")
 
 ---@class Tag
 ---@field value string - The value of the tag. e.g., "foo/bar".
@@ -105,8 +105,8 @@ function Tag:children(value)
 end
 
 function Tag.test()
-	vim.cmd("lua package.loaded['vault.tag'] = nil")
-	vim.cmd("lua package['vault.tag'] = nil")
+	vim.cmd("lua package.loaded['vault.tags.tag'] = nil")
+	vim.cmd("lua package['vault.tags.tag'] = nil")
 end
 
 ---@class TagChild

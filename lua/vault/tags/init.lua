@@ -1,6 +1,6 @@
 ---Tags
 ---@class Tags - Retrieve tags from vault.
----@field data Tag[] - Array of Tag objects.
+---@field map Tag[] - Array of Tag objects.
 ---@field fetch function - Fetch tags from vault.
 ---@field filter function - Filter tags from vault.
 local Tags = {}
@@ -16,7 +16,7 @@ function Tags:new(this)
 end
 
 -- ---Fetch tags from vault.
--- ---@param filter_opts TagsFilterOptions? - Filter options for tags.
+-- ---@param filter_opts TagsFilterOpts? - Filter options for tags.
 -- ---@return Tag[] - Array of Tag objects.
 -- function Tags:fetch(filter_opts)
 --   return  TagsValues:new():fetch():to_tags(filter_opts)

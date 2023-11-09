@@ -6,7 +6,7 @@ local config = require("vault.config")
 ---@param title string
 function todo.add(title)
   local Vault = require("vault")
-  local Note = require("vault.note")
+  local Note = require("vault.notes.note")
   local note = Vault.find(title)
 
 	if note ~= nil then

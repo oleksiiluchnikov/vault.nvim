@@ -1,10 +1,6 @@
 ---@class Vault
----@field setup function - Setup the vault plugin.
----@field notes function|Note[] - Retrieve notes from vault.
----@field notes_with_tags function|Note[] - Retrieve notes from vault with tags.
----@field tags function|Tag[] - Retrieve tags from vault.
 local Vault = {}
-local NotesData = require("vault.notes_data")
+local NotesMap = require("vault.notes.map")
 
 ---Create a new Vault object.
 ---@return Vault
@@ -23,10 +19,10 @@ function Vault.setup()
 end
 
 ---Retrieve notes from vault.
----@param filter_opts FilterOptions? - Filter options (optional).
+---@param filter_opts FilterOpts? - Filter options (optional).
 ---@return Notes
 function Vault.notes(filter_opts)
-  return NotesData:new():fetch(filter_opts):to_notes()
+  return require('vault.notes'):new(filter_opts)
 end
 
 ---Retrieve tags from your vault.
@@ -40,7 +36,7 @@ end
 ---|"'regex'" # Matches value if it matches the query as a regex. E.g., "foo" matches "foo" and "barfoo".
 ---@return Tag[] - Array of Tag objects.
 function Vault.tags(include, exclude, match_opt)
-	local TagsData = require("vault.tags_data")
+	local TagsMap = require("vault.tags.map")
 	include = include or {}
 	exclude = exclude or {}
 	match_opt = match_opt or "exact"
@@ -50,7 +46,7 @@ function Vault.tags(include, exclude, match_opt)
 		exclude = exclude,
 		match_opt = match_opt,
 	}
-	return TagsData:new():fetch(filter_opts):to_tags()
+	return TagsMap:new():fetch(filter_opts):to_tags()
 end
 
 ---Test function.
@@ -61,14 +57,14 @@ function Vault.test()
 	-- local output = Vault.notes_filter_by_tags({ "status" }, { "status/TODO" }, "startswith", "all")
 	-- local output = Vault.tags({ "status" }, { "status/TODO" }, "startswith")
 	-- require("vault.pickers").notes({},output)
-	vim.cmd("lua package.loaded['vault.notes_data'] = nil")
-	vim.cmd("lua package.loaded['vault.tags_data'] = nil")
+	vim.cmd("lua package.loaded['vault.notes.map'] = nil")
+	vim.cmd("lua package.loaded['vault.tags.map'] = nil")
 	vim.cmd("lua package.loaded['vault.utils'] = nil")
-	vim.cmd("lua package.loaded['vault.filter_options'] = nil")
+	vim.cmd("lua package.loaded['vault.filter'] = nil")
 	vim.cmd("lua package.loaded['vault.notes'] = nil")
 	vim.cmd("lua package.loaded['vault.pickers'] = nil")
-	-- local output = NotesData:new():fetch():to_notes()[44]:tags()
-	local output = Vault.notes({'tags',{},{'class'}, "startswith", "all"}).data
+	-- local output = NotesMap:new():fetch():to_notes()[44]:tags()
+	local output = Vault.notes({'tags',{},{'class'}, "startswith", "all"}).map
   print(vim.inspect(#vim.tbl_keys(output)))
   for k,v in pairs(output) do
     print(k,v)

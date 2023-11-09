@@ -12,7 +12,7 @@ local actions_state = require("telescope.actions.state")
 local entry_display = require("telescope.pickers.entry_display")
 
 local config = require("vault.config")
-local Note = require("vault.note")
+local Note = require("vault.notes.note")
 local utils = require("vault.utils")
 
 local Layouts = require("vault.pickers.layouts")
@@ -46,13 +46,12 @@ end
 function M.notes(opts,filter_opts)
   opts = opts or {}
   ---@type Notes
-  print(vim.inspect(filter_opts))
-  -- local notes = require("vault.notes_data"):new():fetch(filter_opts):to_notes()
+  -- local notes = require("vault.notes.map"):new():fetch(filter_opts):to_notes()
   local notes = require("vault").notes(filter_opts)
   if notes == nil then
     error("No notes found in vault")
   end
-  local notes_values = vim.tbl_values(notes.data)
+  local notes_values = vim.tbl_values(notes.map)
   local notes_array = {}
   for _, note in ipairs(notes_values) do
     table.insert(notes_array, note)
@@ -213,7 +212,6 @@ function M.notes(opts,filter_opts)
 
 	local function enter(bufnr)
 		local selection = actions_state.get_selected_entry()
-		print(vim.inspect(selection))
 		local path = selection.filename
 		close(bufnr)
 		vim.cmd("edit " .. path)
@@ -714,10 +712,20 @@ end
 
 M.test2 = function()
   vim.cmd("lua package.loaded['vault.pickers'] = nil")
-  vim.cmd("lua package.loaded['vault.notes_data'] = nil")
-  vim.cmd("lua package.loaded['vault.tags_data'] = nil")
+  vim.cmd("lua package.loaded['vault.notes.map'] = nil")
+  vim.cmd("lua package.loaded['vault.tags.map'] = nil")
   -- M.notes({},{"tags", {'status'}, { "class" }, 'startswith'})
   M.notes({},{"tags", {'status'}, { }, 'startswith'})
+end
+
+function M.tasks()
+  -- TODO: Add tasks picker
+  -- It should list all tasks from all notes. that match "- [.]" pattern
+  -- Display entry like this:[status] [priority] [date] [note_path] [line_number] [line_content]
+  -- And then we should be able to mark them or switch marks on a fly
+  -- We could use rg for this
+  -- rg -n --vimgrep "\- \[.\]" ~/vault/notes
+
 end
 
 return M
