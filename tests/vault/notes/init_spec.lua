@@ -1,0 +1,27 @@
+local Notes = require("vault.notes")
+local assert = require("luassert")
+
+describe("Notes", function()
+    it("should return some notes", function()
+        local notes = Notes()
+        assert.is_true(#notes > 1)
+    end)
+    it("should return list of note objects", function()
+        local notes = Notes().map
+        assert.is_true(vim.tbl_islist(notes))
+    end)
+end)
+
+describe("Notes:by", function()
+    it("should return notes by key", function()
+        local notes = Notes():by("basename", "todo.md")
+        assert.is_true(#notes == 1)
+    end)
+end)
+
+describe("Notes:values_by_key", function()
+  it("should return values by key that note not yet have", function()
+    local notes = Notes():values_by_key("frontmatter")
+    assert.is_true(#notes > 1)
+  end)
+end)

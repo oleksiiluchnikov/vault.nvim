@@ -128,7 +128,8 @@ local function register_date_source()
 end
 
 local function register_tag_source()
-	local tags = require("vault").tags()
+	local Tags = require("vault.tags")
+  local tags = Tags()
 	local source = {}
 
 	source.new = function()
@@ -157,10 +158,10 @@ local function register_tag_source()
 			local items = {}
 			for _, tag in pairs(tags) do
 				table.insert(items, {
-					label = tag.value,
+					label = tag.data.name,
 					kind = 12,
 					textEdit = {
-						newText = tag.value,
+						newText = tag.data.name,
 						range = {
 							start = {
 								line = request.context.cursor.row - 1,
@@ -174,7 +175,7 @@ local function register_tag_source()
 					},
 					documentation = {
 						kind = "markdown",
-						value = tag.documentation:content(tag.value),
+						value = tag.data.documentation:content(tag.data.name),
 					},
 				})
 			end

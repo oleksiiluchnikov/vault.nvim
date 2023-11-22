@@ -28,7 +28,7 @@ function todo.add(title)
 status:: #status/TODO
   ]]
 
-  note = Note:new(path)
+  note = Note(path)
 
   note:write(path, content)
 end

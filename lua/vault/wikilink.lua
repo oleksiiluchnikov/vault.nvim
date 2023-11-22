@@ -1,25 +1,27 @@
-local M = {}
 ---@class Wikilink
----@field raw string - The raw link as it appears in the note. e.g. [[link|title]]
----@field link string - The link as it appears in the note. e.g. link
----@field source string - The path to the note that contains the link. e.g. /home/user/notes/link.md
----@field heading string? - The heading of the link. e.g. link#heading
----@field custom_title string? - The custom title of the link. e.g. link|title
+---@field raw string - The raw link as it appears in the note. e.g. [[foo|title]]
+---@field link string - The link as it appears in the note. e.g. foo
+---@field source string - The path to the note that contains the link. e.g. /home/user/notes/foo.md
+---@field heading string? - The heading of the link. e.g. foo#heading
+---@field custom_title string? - The custom title of the link. e.g. foo|title
 local Wikilink = {}
 
+---Create a new Wikilink object.
+---@param link string - The raw link as it appears in the note. e.g. [[foo|title]]
+---@return Wikilink
 function Wikilink:new(link)
-  local o = {}
-  setmetatable(o, self)
+  local this = {}
+  this.raw = link
+  this.link = link
+  this.title = ""
+  this.heading = ""
+  this.custom_title = ""
+  setmetatable(this, self)
   self.__index = self
-  self.link = link
-  self.title = ""
-  self.heading = ""
-  self.custom_title = ""
-  return o
+  return this
 end
-  
 
-function M.parse(link)
+function Wikilink.parse(link)
   local link_pattern = "%[%[[^%]]+%]%]"
   local wikilink_map = link:match(link_pattern)
   if wikilink_map == nil then
@@ -49,4 +51,6 @@ function M.parse(link)
   }
 end
 
-return M
+return function(link)
+  return Wikilink(link)
+end

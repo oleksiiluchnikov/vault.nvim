@@ -291,7 +291,7 @@ function M.Practice.new()
 end
 
 ---@class Goal: NoteClass
----@field status string[] - Possible status values for goals.
+---@field status string[] - Possible status names for goals.
 function M.Goal.new()
 	return {
 		status = {
@@ -304,7 +304,7 @@ function M.Goal.new()
 end
 
 ---@class Project: NoteClass
----@field status string[] - Possible status values for projects.
+---@field status string[] - Possible status names for projects.
 function M.Project.new()
 	return {
 		status = {
@@ -319,7 +319,7 @@ function M.Project.new()
 end
 
 ---@class Task: NoteClass
----@field status string[] - Possible status values for tasks.
+---@field status string[] - Possible status names for tasks.
 function M.Task.new()
 	return {
 		status = {
@@ -334,7 +334,7 @@ function M.Task.new()
 end
 
 ---@class Routine: NoteClass
----@field status string[] - Possible status values for routines.
+---@field status string[] - Possible status names for routines.
 function M.Routine.new()
 	return {
 		status = {},
@@ -342,7 +342,7 @@ function M.Routine.new()
 end
 
 ---@class Action: NoteClass
----@field status string[] - Possible status values for actions.
+---@field status string[] - Possible status names for actions.
 function M.Action.new()
 	return {
 		status = {
@@ -368,7 +368,7 @@ function M.AwesomeList.new()
 end
 
 ---@class Course: NoteClass
----@field status string[] - Possible status values for courses.
+---@field status string[] - Possible status names for courses.
 function M.Course.new()
 	return {
 		status = {},
@@ -453,7 +453,7 @@ function M.YearlyJournal.new()
 	return {}
 end
 
----@class Frontmatter: Note
+---@class Frontmatter: VaultNote
 ---@field uuid string
 ---@field date-created string
 ---@field date-modified string

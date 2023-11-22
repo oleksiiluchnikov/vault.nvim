@@ -1,4 +1,6 @@
 local Pickers = require("vault.pickers")
+local Notes = require("vault.notes")
+local Tags = require("vault.tags")
 
 vim.api.nvim_create_user_command("VaultNotes", function(args)
 	local query = args.args
@@ -6,49 +8,53 @@ vim.api.nvim_create_user_command("VaultNotes", function(args)
 		Pickers.notes()
 		return
 	end
-	local notes = require("vault").notes()
-	for _, note in ipairs(notes) do
-		if note.basename:lower() == query:lower() then
-			vim.cmd("e " .. note.path)
+	local notes_map = Notes().map
+	for _, note in pairs(notes_map) do
+		if note.data.basename:lower() == query:lower() then
+			vim.cmd("e " .. note.data.path)
 		end
 	end
 end, {
 	nargs = "*",
 	complete = function()
-		local notes = require("vault.notes.map"):fetch()
-		local note_names = {}
-		for _, note in pairs(notes) do
-			table.insert(note_names, note.basename)
-		end
-		return note_names
+		local basenames = Notes():values_by_key("basename")
+    return basenames
 	end,
 })
 
+  --TODO: Implement
 vim.api.nvim_create_user_command("VaultTags", function(args)
 	local fargs = args.fargs
-	if #fargs == 0 then
+	if next(fargs) == nil then
 		Pickers.tags()
 		return
 	end
-	local tags = require("vault.tags.map"):new():fetch()
-	local tags_values = {}
-	for k, tag in pairs(tags) do
+	local tags = Tags()
+	local tags_names = {}
+	for k, tag in pairs(tags.map) do
 		for _, farg in ipairs(fargs) do
-			if tag.value == farg then
-				table.insert(tags_values, k)
+			if tag.data.name:match(farg) then
+				table.insert(tags_names, tag.data.name)
 			end
 		end
 	end
-	Pickers.notes_filter_by_tags(tags_values)
+
+
+  --FIXME: Now it is not working. It is not filtering the tags
+  Pickers.notes({}, {"tags",{}, tags_names, "exact", "any"})
 end, {
 	nargs = "*",
 	complete = function()
-		local tags = require("vault.tags.map"):fetch()
-		return vim.tbl_keys(tags)
+		local tags = Tags()
+    local tag_names = {}
+    for _, tag in pairs(tags.map) do
+      table.insert(tag_names, tag.data.name)
+    end
+    return tag_names
 	end,
 })
 
---- Vault Dates
+---Vault Dates
 vim.api.nvim_create_user_command("VaultDates", function(args)
   local fargs = args.fargs
   if #fargs == 0 then
@@ -70,7 +76,7 @@ end, {
   end,
 })
 
---- Vault Today
+---Vault Today
 vim.api.nvim_create_user_command("VaultToday", function()
   local config = require("vault.config")
   local today = os.date("%Y-%m-%d %A")
@@ -86,30 +92,34 @@ vim.api.nvim_create_user_command("VaultNotesStatus", function(args)
     Pickers.root_tags()
     return
   end
-  local tags = require("vault").tags()
+  local tags = Tags()
   local statuses = {}
-  for _, tag in ipairs(tags) do
+  for _, tag in pairs(tags.map) do
     for _, farg in ipairs(fargs) do
-      if tag.value == farg then
-        table.insert(statuses, tag.value)
+      if tag.data.name == farg then
+        table.insert(statuses, tag.data.name)
       end
     end
   end
-  Pickers.notes_filter_by_tags(statuses)
+  Pickers.notes({}, {"tags", {statuses},{}, "startswith", "all"})
 end, {
   nargs = "*",
   complete = function()
-    local notes = require("vault").notes()
+    local tags = Tags()
     local statuses = {}
-    for _, note in ipairs(notes) do
-      local tags = note.tags()
-      for _, tag in ipairs(tags) do
-        if tag.value:match("^status") and #tag.children > 0 then
-          local status = tag.children[1]
+      for _, tag in pairs(tags.map) do
+        if tag.data.name:match("^status") and #tag.data.children > 0 then
+          local status = tag.data.children[1]
           table.insert(statuses, status.value)
         end
       end
-    end
     return statuses
   end,
+})
+
+vim.api.nvim_create_user_command("VaultFleetingNote", function(args)
+  local VaultPopupFleetingNote = require("vault.popups.fleeting_note")
+  VaultPopupFleetingNote(args.fargs, {})
+end, {
+  nargs = "*",
 })

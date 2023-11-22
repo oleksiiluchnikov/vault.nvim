@@ -1,8 +1,8 @@
 local Job = require("plenary.job")
 local config = require("vault.config")
 
---- Tag documentation.
---- A tag documentation is an object that represents a documentation file for a tag.
+---Tag documentation.
+---A tag documentation is an object that represents a documentation file for a tag.
 ---@class TagDocumentation
 ---@field description string
 ---@field path string
@@ -10,13 +10,13 @@ local config = require("vault.config")
 ---@field content string|function
 local TagDocumentation = {}
 
----@param tag_value string
+---@param tag_name string
 ---@return TagDocumentation
-function TagDocumentation:new(tag_value)
-  local doc_path = config.dirs.docs .. "/" .. tag_value .. config.ext
+function TagDocumentation:new(tag_name)
+  local doc_path = config.dirs.docs .. "/" .. tag_name .. config.ext
   local tag_documentation = {
     description = "",
-    path = config.dirs.docs .. "/" .. tag_value .. config.ext,
+    path = config.dirs.docs .. "/" .. tag_name .. config.ext,
     exists = vim.fn.filereadable(doc_path) == 1,
   }
   setmetatable(tag_documentation, self)
@@ -45,7 +45,7 @@ function TagDocumentation:write(path)
 	if not is_empty then
 		return
 	end
-	--- title should be last part of path without extension
+	---title should be last part of path without extension
 	local title = vim.fn.fnamemodify(path, ":t:r")
 	local content = "# " .. title .. "\n\n"
 	content = content .. "class:: #class/Meta/Tag\n"
@@ -56,12 +56,12 @@ function TagDocumentation:write(path)
 	vim.cmd("normal! Go")
 end
 
---- Fetch content of tag documentation.
----@param tag_value string
+---Fetch content of tag documentation.
+---@param tag_name string
 ---@return string
-function TagDocumentation:content(tag_value)
+function TagDocumentation:content(tag_name)
   local docs_dir = config.dirs.docs
-  local path = docs_dir .. "/" .. tag_value .. ".md"
+  local path = docs_dir .. "/" .. tag_name .. ".md"
   local f = io.open(path, "r")
   if f == nil then
     return ""
@@ -71,4 +71,12 @@ function TagDocumentation:content(tag_value)
   return content
 end
 
-return TagDocumentation
+TagDocumentation.__call = function(self, tag_name)
+  return TagDocumentation:new(tag_name)
+end
+
+TagDocumentation = setmetatable(TagDocumentation, TagDocumentation)
+
+return function(tag_name)
+  return TagDocumentation(tag_name)
+end

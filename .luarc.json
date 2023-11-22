@@ -1,0 +1,13 @@
+{
+  "diagnostics.globals": [
+    "vim",
+    "use"
+  ],
+  "workspace.library": [
+    "~/vault.nvim",
+    "~/.local/share/nvim/lazy/telescope.nvim",
+    "~/.local/share/nvim/lazy/nui.nvim",
+    "~/.local/share/nvim/lazy/plenary.nvim"
+  ], 
+  "hint.enable": true,
+}

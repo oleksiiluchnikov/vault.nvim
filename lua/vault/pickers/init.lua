@@ -1,4 +1,4 @@
-local M = {}
+local vault_pickers = {}
 
 local Log = require("plenary.log")
 local Gradient = require("gradient")
@@ -12,8 +12,11 @@ local actions_state = require("telescope.actions.state")
 local entry_display = require("telescope.pickers.entry_display")
 
 local config = require("vault.config")
-local Note = require("vault.notes.note")
 local utils = require("vault.utils")
+
+local Notes = require("vault.notes")
+local Tags = require("vault.tags")
+local Note = require("vault.notes.note")
 
 local Layouts = require("vault.pickers.layouts")
 
@@ -43,76 +46,57 @@ end
 ---Open notes picker
 ---@param opts table?
 ---@param filter_opts table?
-function M.notes(opts,filter_opts)
-  opts = opts or {}
-  ---@type Notes
-  -- local notes = require("vault.notes.map"):new():fetch(filter_opts):to_notes()
-  local notes = require("vault").notes(filter_opts)
-  if notes == nil then
-    error("No notes found in vault")
-  end
-  local notes_values = vim.tbl_values(notes.map)
-  local notes_array = {}
-  for _, note in ipairs(notes_values) do
-    table.insert(notes_array, note)
-  end
-  if #notes_array == 0 then
+function vault_pickers.notes(opts, filter_opts)
+	opts = opts or {}
+
+
+  local notes = Notes(filter_opts)
+  local notes_list = vim.tbl_values(notes.map)
+  if next(notes_list) == nil then
     Log.info("No notes found in vault")
     return
   end
 
-	if not notes_array then
-		error("No notes found in vault")
-	end
-
-	-- sort notes by content length
-	table.sort(notes_array, function(a, b)
-		local a_count = #a.content
-		local b_count = #b.content
-		return a_count < b_count
-	end)
-
 	-- prompt title
-	local average_note_content_length = 0
-	for _, note in ipairs(notes_array) do
-		average_note_content_length = average_note_content_length + #note.content
+
+	---@type number
+	local average_content_length = notes.average_content_length
+  average_content_length = math.floor(average_content_length)
+
+	local prompt_title = ""
+
+	if filter_opts then
+		if filter_opts.by and #filter_opts.by == 1 then
+			prompt_title = prompt_title
+				.. " with "
+				.. filter_opts.mode
+				.. " "
+				.. filter_opts.by[1]
+				.. " "
+				.. filter_opts.match_opt
+		elseif filter_opts.by then
+			prompt_title = prompt_title .. table.concat(filter_opts.by, " ")
+		end
+
+		---Append include and exclude filters to prompt title
+		---@param tbl string[]
+		---@param s string
+		local function append_list_info(tbl, s)
+			if tbl and #tbl > 0 then
+				prompt_title = prompt_title .. " " .. s .. ":"
+				for _, v in ipairs(tbl) do
+					prompt_title = prompt_title .. " [" .. v .. "]"
+				end
+			end
+		end
+
+		append_list_info(filter_opts.include, "including")
+		append_list_info(filter_opts.exclude, "excluding")
+
+    if average_content_length then
+      prompt_title = prompt_title .. " " .. tostring(average_content_length)
+    end
 	end
-  average_note_content_length = math.floor(average_note_content_length / #notes_array)
-
-    
-
-  local prompt_title = ""
-
-  if filter_opts ~= nil then
-    local keys = filter_opts.keys
-    local include = filter_opts.include
-    local exclude = filter_opts.exclude
-    local match_opt = filter_opts.match_opt
-    local mode = filter_opts.mode
-    if keys ~= nil then
-      if #keys == 1 then
-        prompt_title = prompt_title .. " with " .. mode .." " .. keys[1].. " " .. match_opt
-      else
-      for _, v in ipairs(keys) do
-        prompt_title = prompt_title .. " " .. v
-      end
-      end
-    end
-    if include ~= nil and #include > 0 then
-      prompt_title = prompt_title .. " including:"
-      for _, v in ipairs(include) do
-        prompt_title = prompt_title .. " [" .. v .. "]"
-      end
-    end
-    if exclude ~= nil and #exclude > 0 then
-      prompt_title = prompt_title .. " excluding:"
-      for _, v in ipairs(exclude) do
-        prompt_title = prompt_title .. " [" .. v .. "]"
-      end
-    end
-    prompt_title = prompt_title .. " " .. tostring(average_note_content_length / #notes_array)
-
-  end
 
 	-- entry maker
 	local steps = 64
@@ -120,13 +104,14 @@ function M.notes(opts,filter_opts)
 
 	local hl_groups = attach_hl_groups("NoteContent", gradient_colors)
 
-	--- found the longest location_path and set it as width
-	--- so we can have nice alignment
+	---found the longest location_path and set it as width
+	---so we can have nice alignment
 	local location_path_width = 0
-	for _, note in ipairs(notes_array) do
+	for _, note in ipairs(notes_list) do
 		local location_path = ""
-		if note.relpath:find("/") ~= nil then
-			location_path = note.relpath:sub(1, note.relpath:len() - vim.fn.fnamemodify(note.path, ":t"):len() - 1)
+    local relpath = note.data.relpath
+		if relpath:find("/") ~= nil then
+			location_path = relpath:sub(1, relpath:len() - vim.fn.fnamemodify(note.data.path, ":t"):len() - 1)
 		end
 		local location_path_length = location_path:len()
 		if location_path_length > location_path_width then
@@ -135,10 +120,10 @@ function M.notes(opts,filter_opts)
 	end
 
 	local function make_display(entry)
-		local basename = vim.fn.fnamemodify(entry.value.path, ":t:r")
+		local basename = vim.fn.fnamemodify(entry.value.data.path, ":t:r")
 		local basename_hl_group = "TelescopeResultsNormal"
 
-		local content = entry.value.content
+		local content = entry.value.data.content
 
 		if content then
 			local content_chars_count = #content
@@ -150,10 +135,10 @@ function M.notes(opts,filter_opts)
 		end
 
 		local location_path = ""
-		if entry.value.relpath:find("/") ~= nil then
-			location_path = entry.value.relpath:sub(
+		if entry.value.data.relpath:find("/") ~= nil then
+			location_path = entry.value.data.relpath:sub(
 				1,
-				entry.value.relpath:len() - vim.fn.fnamemodify(entry.value.path, ":t"):len() - 1
+				entry.value.data.relpath:len() - vim.fn.fnamemodify(entry.value.data.path, ":t"):len() - 1
 			)
 		end
 
@@ -163,7 +148,7 @@ function M.notes(opts,filter_opts)
 			separator = " ",
 			items = {
 				{ width = 2 },
-        { width = location_path_width },
+				{ width = location_path_width },
 				{ remaining = true },
 				{ remaining = true },
 			},
@@ -181,21 +166,25 @@ function M.notes(opts,filter_opts)
 	local function entry_maker(note)
 		return {
 			value = note,
-			ordinal = note.relpath:gsub(".md", ""), -- .. " " .. note.content,
+			ordinal = note.data.relpath,
 			display = make_display,
-			filename = note.path,
+			filename = note.data.path,
 		}
 	end
 
 	local finder = finders.new_table({
-		results = notes_array,
+		results = notes_list,
 		entry_maker = entry_maker,
 	})
 
+
 	-- previewer
-	local previewer = previewers.vim_buffer_cat.new({}, {
+	local previewer = previewers.vim_buffer_cat.new({
 		get_buffer_by_name = function(_, entry)
 			local bufnr = vim.api.nvim_create_buf(false, true)
+      if type(bufnr) ~= "number" then
+        error("bufnr is not a number")
+      end
 			local lines = vim.fn.readfile(entry.filename)
 			vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
 			vim.api.nvim_buf_set_option(bufnr, "filetype", "markdown")
@@ -235,68 +224,26 @@ function M.notes(opts,filter_opts)
 		:find()
 end
 
----Open picker with notes filtered by tags
----@param include string[]? - List of tags_values to include
----@param exclude string[]? - List of tags_values to exclude
----@param match_opt string? - "exact", "startswith", "contains", "regex", "fuzzy"
----@param mode string? - "all", "any"
-function M.notes_filter_by_tags(include, exclude, match_opt, mode)
-  include = include or {}
-  exclude = exclude or {}
-  if #include == 0 and #exclude == 0 then
-    M.notes()
-    return
-  end
-	local notes = require("vault").notes_filter_by_tags(include, exclude, match_opt, mode)
-	if #notes == 0 then
-		Log.info("No notes found in vault")
-		return
-	end
-	M.notes({}, notes)
-end
-
----Open picker with notes containing tags
----@param tags_values string[]? - List of tags_values to include
----@param match_opt string? - "exact", "startswith", "contains", "regex", "fuzzy"
----@param mode string? - "all", "any"
-function M.notes_with_tags(tags_values, match_opt, mode)
-  if tags_values == nil then
-    M.notes()
-    return
-  end
-  local notes = require("vault").notes_filter_by_tags(tags_values, {}, match_opt, mode)
-  if #notes == 0 then
-    Log.info("No notes found in vault")
-    return
-  end
-  M.notes({}, notes)
-end
-
 ---Search for tags
 ---@param opts table?
----@param include string[]? - List of tags_values to include
----@param exclude string[]? - List of tags_values to exclude
----@param match_opt string? - "AND" or "OR"
-function M.tags(opts, include, exclude, match_opt)
-  opts = opts or {}
-  include = include or {}
-  exclude = exclude or {}
-  match_opt = match_opt or "AND"
+---@param filter_opts table?
+function vault_pickers.tags(opts, filter_opts)
+	opts = opts or {}
 
-	local tags = require("vault").tags(include, exclude, match_opt)
+	local tags = Tags(filter_opts)
 
 	if next(tags) == nil then
 		Log.info("No tags found in vault")
 		return
 	end
 
-	---@type Tag[]
-	tags = vim.tbl_values(tags)
+	---@type VaultTag[]
+	local tags_list = vim.tbl_values(tags.map)
 
 	-- sort tags by notes count
-	table.sort(tags, function(a, b)
-		local a_count = #a.notes_paths
-		local b_count = #b.notes_paths
+	table.sort(tags_list, function(a, b)
+		local a_count = a.data.count
+		local b_count = b.data.count
 		return a_count > b_count
 	end)
 
@@ -310,7 +257,7 @@ function M.tags(opts, include, exclude, match_opt)
 
 	local make_display = function(entry)
 		local entry_width = 29
-		local notes_length = #entry.value.notes_paths
+		local notes_length = #entry.value.data.notes_paths
 		local count_length = tostring(notes_length):len() + 1
 		local displayer = entry_display.create({
 			separator = " ",
@@ -321,7 +268,7 @@ function M.tags(opts, include, exclude, match_opt)
 				{ remaining = true },
 			},
 		})
-		local tag_value = entry.value.value
+		local tag_name = entry.value.data.name
 		local index = math.min(math.floor(notes_length / 2), steps)
 		if index == 0 then
 			index = 1
@@ -329,30 +276,38 @@ function M.tags(opts, include, exclude, match_opt)
 		local hl_group = hl_groups[index]
 
 		return displayer({
-			{ tag_value, hl_group },
+			{ tag_name, hl_group },
 			{ tostring(notes_length), "TelescopeResultsNumber" },
 		})
 	end
 
 	local function entry_maker(tag)
+    local tag_name = tag.data.name
+
+    local notes_paths_count = tag.data.count
+
+    if notes_paths_count == 0 then
+      error("Tag `" .. tag_name .. "` has no notes")
+    end
+
 		return {
 			value = tag,
-			ordinal = tag.value .. " " .. #tag.notes_paths,
+			ordinal = tag_name .. " " .. tostring(notes_paths_count),
 			display = make_display,
 		}
 	end
 
 	local finder = finders.new_table({
-		results = tags,
+		results = tags_list,
 		entry_maker = entry_maker,
 	})
 
 	local previewer = previewers.new_buffer_previewer({
 		define_preview = function(self, entry)
-			local notes_paths = entry.value.notes_paths
+			local notes_paths = entry.value.data.notes_paths
 			local lines = {}
 
-			local documentation = entry.value.documentation:content(entry.value.value)
+			local documentation = entry.value.data.documentation:content(entry.value.data.name)
 			if documentation then
 				local doc_lines = vim.split(documentation, "\n")
 				for _, doc_line in ipairs(doc_lines) do
@@ -364,13 +319,16 @@ function M.tags(opts, include, exclude, match_opt)
 
 			local seen_notes_paths = {}
 			for _, note_path in ipairs(notes_paths) do
-				local note = Note:new({ path = note_path })
-				if not seen_notes_paths[note.relpath] then
-					seen_notes_paths[note.relpath] = true
-					table.insert(lines, note.relpath)
+				local note = Note(note_path)
+				if not seen_notes_paths[note.data.relpath] then
+					seen_notes_paths[note.data.relpath] = true
+					table.insert(lines, note.data.relpath)
 				end
 			end
 			local bufnr = self.state.bufnr
+      if type(bufnr) ~= "number" then
+        error("bufnr is not a number")
+      end
 			vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
 			vim.api.nvim_buf_set_option(bufnr, "filetype", "markdown")
 			return vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -384,24 +342,24 @@ function M.tags(opts, include, exclude, match_opt)
 
 	local function enter(bufnr)
 		local selection = actions_state.get_selected_entry()
-		local notes_paths = selection.value.notes_paths
-		local notes = {}
-		for _, note_path in ipairs(notes_paths) do
-			local note = Note:new({
-				path = note_path,
-			})
-			table.insert(notes, note)
-		end
+		-- local notes_paths = selection.value.data.notes_paths
+		-- local notes = {}
+		-- for _, note_path in ipairs(notes_paths) do
+		-- 	local note = Note({
+		-- 		path = note_path,
+		-- 	})
+		-- 	table.insert(notes, note)
+		-- end
 		close(bufnr)
-		M.notes(notes)
+		vault_pickers.notes({}, { "tags", { selection.value.data.name }, {}, "exact", "all" })
 	end
 
 	local function edit_documentation(bufnr)
 		local selection = actions_state.get_selected_entry()
 		close(bufnr)
 		local tag = selection.value
-		if tag.documentation then
-			tag.documentation:open()
+		if tag.data.documentation then
+			tag.data.documentation:open()
 		end
 	end
 
@@ -422,11 +380,11 @@ function M.tags(opts, include, exclude, match_opt)
 		:find()
 end
 
---- I want to browse tag until it has no more nesting,
---- and then return to full tag value like: status/TODO/later
---- and then pick with tags { status/TODO/later} for example
---- For example we have tag: software/Blender/extensions
-function M.notes_by(tag_prefix) -- software or software/Blender(if we selected software)
+---I want to browse tag until it has no more nesting,
+---and then return to full tag name like: status/TODO/later
+---and then pick with tags { status/TODO/later} for example
+---For example we have tag: software/Blender/extensions
+function vault_pickers.notes_by(tag_prefix) -- software or software/Blender(if we selected software)
 	if tag_prefix == nil then
 		return
 	end
@@ -434,22 +392,22 @@ function M.notes_by(tag_prefix) -- software or software/Blender(if we selected s
 	local tags = require("vault"):tags(tag_prefix) -- get all tags with prefix
 	if #tags == 0 then
 		-- if we selected software/Blender and there is no tags with prefix software/Blender
-		-- then we have no more nesting and we need to return to full tag value
+		-- then we have no more nesting and we need to return to full tag name
 		-- our pick._cache.parent_tag will be software/Blender/software/Blender/extensions
-		local parent_tag = M._cache.parent_tag
+		local parent_tag = vault_pickers._cache.parent_tag
 		if parent_tag == "" then
 			return
 		end
-		local tag_value = parent_tag:gsub(tag_prefix .. "/", "") -- now we have software/Blender/extensions
-		vim.notify(tag_value)
-		M._cache.parent_tag = "" -- reset parent_tag
-		M.notes_filter_by_tags({ tag_value }) -- now we have { software/Blender/extensions }
+		local tag_name = parent_tag:gsub(tag_prefix .. "/", "") -- now we have software/Blender/extensions
+		vim.notify(tag_name)
+		vault_pickers._cache.parent_tag = "" -- reset parent_tag
+		vault_pickers.notes_filter_by_tags({ tag_name }) -- now we have { software/Blender/extensions }
 		return
 	end
 
 	local entries = {}
 	for _, tag in ipairs(tags) do
-		local entry = tag.value -- now we have software/Blender/extensions if we selected software
+		local entry = tag.name -- now we have software/Blender/extensions if we selected software
 		-- if we selected software/Blender we need to remove software/Blender from entry
 		if tag_prefix ~= "" then
 			entry = entry:gsub(tag_prefix .. "/", "") -- now we have extensions
@@ -469,13 +427,12 @@ function M.notes_by(tag_prefix) -- software or software/Blender(if we selected s
 		local tag = selection[1]
 		actions.close(bufnr)
 
-		--- if we selected software/Blender we need to save it to cache and remove software/Blender from tag value to left only extensions
-		--- our pick._cache.parent_tag should be updated and conain software/Blender/extensions
-		--- and then we can pick with tags { software/Blender/extensions }
-		print(tag_prefix .. "/" .. tag)
-		if M._cache.parent_tag ~= tag_prefix .. "/" .. tag then
-			M._cache.parent_tag = tag_prefix .. "/" .. tag
-			M.notes_by(tag_prefix .. "/" .. tag)
+		---if we selected software/Blender we need to save it to cache and remove software/Blender from tag value to left only extensions
+		---our pick._cache.parent_tag should be updated and conain software/Blender/extensions
+		---and then we can pick with tags { software/Blender/extensions }
+		if vault_pickers._cache.parent_tag ~= tag_prefix .. "/" .. tag then
+			vault_pickers._cache.parent_tag = tag_prefix .. "/" .. tag
+			vault_pickers.notes_by(tag_prefix .. "/" .. tag)
 			return
 		end
 	end
@@ -493,42 +450,75 @@ function M.notes_by(tag_prefix) -- software or software/Blender(if we selected s
 		:find()
 end
 
-function M.root_tags()
+---Picker for browsing tags from root tag.
+---For example we have tag: status/TODO/later
+---We want to browse it like this:
+---status
+---status/TODO
+---status/TODO/later
+---And then pick we open notes picker filtered by tag: status/TODO/later
+---@param root_tag_name string? - Root tag to start browsing from
+function vault_pickers.root_tags(root_tag_name)
 	local root_dir = config.dirs.root
-	if type(root_dir) ~= "string" then
-		return
+	local tags = {}
+	if root_tag_name ~= nil then
+		tags = Tags():by(root_tag_name)
+	else
+		tags = Tags()
 	end
 
-	local tags = require("vault").tags()
-	local seen_root_tags = {}
-	local entries = {}
-	for _, tag in ipairs(tags) do
-		if tag.value:find("/") ~= nil then
-			local root_tag = tag.value:match("^[^/]+")
-			if not seen_root_tags[root_tag] then
-				seen_root_tags[root_tag] = true
-				table.insert(entries, root_tag)
-			end
-		end
-	end
-
-	if #entries == 0 then
+	if next(tags) == nil then
 		Log.info("No root tags found in vault: " .. root_dir)
 		return
 	end
 
+	local root_tags = {}
+	local seen_root_tags = {}
+	for _, tag in ipairs(tags) do
+		local _root_tag_name = tag.name:match("([^/]+)")
+		if not seen_root_tags[_root_tag_name] then
+			seen_root_tags[_root_tag_name] = true
+			table.insert(root_tags, _root_tag_name)
+		end
+	end
+
+	local function make_display(entry)
+		local entry_width = 29
+		local displayer = entry_display.create({
+			separator = " ",
+			items = {
+				{ width = entry_width },
+				{ remaining = true },
+			},
+		})
+		local tag_name = entry.value
+		return displayer({
+			{ tag_name, "TelescopeResultsNormal" },
+		})
+	end
+
+	local function entry_maker(tag)
+		return {
+			value = tag,
+			ordinal = tag,
+			display = make_display,
+		}
+	end
+
 	local function enter(bufnr)
 		local selection = actions_state.get_selected_entry()
-		local root_tag = selection[1]
-		vim.notify(root_tag)
+		local root_tag = selection.value
+		vault_pickers.root_tags(root_tag)
 		actions.close(bufnr)
-		M.notes_by(root_tag)
 	end
 
 	pickers
 		.new(Layouts.mini(), {
 			prompt_title = "Status",
-			finder = finders.new_table(entries),
+			finder = finders.new_table({
+				results = root_tags,
+				entry_maker = entry_maker,
+			}),
 			sorter = sorters.get_generic_fuzzy_sorter(),
 			attach_mappings = function(_, _)
 				actions.select_default:replace(enter)
@@ -541,7 +531,7 @@ end
 ---Search for date and corresponding note
 ---@param date_start string? @Date in format YYYY-MM-DD
 ---@param date_end string? @Date in format YYYY-MM-DD
-function M.dates(date_start, date_end)
+function vault_pickers.dates(date_start, date_end)
 	date_end = date_end or tostring(os.date("%Y-%m-%d"))
 	-- date_start or os.date("%Y-%m-%d") - 7 days
 	date_start = date_start or tostring(os.date("%Y-%m-%d", os.time() - 7 * 24 * 60 * 60))
@@ -552,7 +542,6 @@ function M.dates(date_start, date_end)
 	local daily_dir = root_dir .. "/" .. config.dirs.journal.root .. "/Daily"
 
 	local date_values = Dates.from_to(date_start, date_end)
-	print(daily_dir)
 
 	local dates = {}
 	for _, date in ipairs(date_values) do
@@ -576,7 +565,7 @@ function M.dates(date_start, date_end)
 	local function enter(bufnr)
 		local selection = actions_state.get_selected_entry()
 		local path = selection.value.path
-		local content = "# " .. selection.value.value .. "\n"
+		local content = "# " .. selection.value.name .. "\n"
 		actions.close(bufnr)
 		vim.cmd("edit " .. path)
 		if selection.value.exists == false then
@@ -587,14 +576,15 @@ function M.dates(date_start, date_end)
 
 	local results_height = #dates + 5
 	local results_width = 0
+
 	for _, date in ipairs(dates) do
 		-- Find the longest date
 		local date_width = date.value:len()
 		if date_width > results_width then
 			results_width = date_width
-			print(results_width)
 		end
 	end
+
 	results_width = results_width + 2
 	local bufwidth = vim.api.nvim_get_option("columns") - 20
 
@@ -646,7 +636,7 @@ function M.dates(date_start, date_end)
 				entry_maker = entry_maker,
 			}),
 			sorter = sorters.get_generic_fuzzy_sorter(),
-			previewer = previewers.vim_buffer_cat.new({}, {
+			previewer = previewers.vim_buffer_cat.new({
 				get_buffer_by_name = function(_, entry)
 					local bufnr = vim.api.nvim_create_buf(false, true)
 					local lines = {}
@@ -655,6 +645,9 @@ function M.dates(date_start, date_end)
 					else
 						lines = { "No notes for this date" }
 					end
+          if type(bufnr) ~= "number" then
+            error("bufnr is not a number")
+          end
 					vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
 					vim.api.nvim_buf_set_option(bufnr, "filetype", "markdown")
 					return bufnr
@@ -680,52 +673,27 @@ end
 ---With mode "all" or "any"
 
 ---Search for notes in Inbox directory
-function M.inbox()
+function vault_pickers.inbox()
 	local inbox_dir = config.dirs.inbox
 
 	local notes = {}
 	for _, note_path in ipairs(vim.fn.globpath(inbox_dir, "**/*" .. config.ext, true, true)) do
-		local note = Note:new({
+		local note = Note({
 			path = note_path,
 		})
 		table.insert(notes, note)
 	end
 
-	M.notes({}, notes)
+	vault_pickers.notes({}, notes)
 end
 
-M.test = function()
-	M.notes_filter_by_tags({ "status/TODO", "class/Action" })
+function vault_pickers.tasks()
+	-- TODO: Add tasks picker
+	-- It should list all tasks from all notes. that match "- [.]" pattern
+	-- Display entry like this:[status] [priority] [date] [note_path] [line_number] [line_content]
+	-- And then we should be able to mark them or switch marks on a fly
+	-- We could use rg for this
+	-- rg -n --vimgrep "\- \[.\]" ~/vault/notes
 end
 
-M.todos = function()
-	M.notes_filter_by_tags({ "status/TODO" })
-end
-
-M.in_progress = function()
-	M.notes_filter_by_tags({ "status/IN-PROGRESS" })
-end
-
-M.done = function()
-	M.notes_filter_by_tags({ "status/DONE" })
-end
-
-M.test2 = function()
-  vim.cmd("lua package.loaded['vault.pickers'] = nil")
-  vim.cmd("lua package.loaded['vault.notes.map'] = nil")
-  vim.cmd("lua package.loaded['vault.tags.map'] = nil")
-  -- M.notes({},{"tags", {'status'}, { "class" }, 'startswith'})
-  M.notes({},{"tags", {'status'}, { }, 'startswith'})
-end
-
-function M.tasks()
-  -- TODO: Add tasks picker
-  -- It should list all tasks from all notes. that match "- [.]" pattern
-  -- Display entry like this:[status] [priority] [date] [note_path] [line_number] [line_content]
-  -- And then we should be able to mark them or switch marks on a fly
-  -- We could use rg for this
-  -- rg -n --vimgrep "\- \[.\]" ~/vault/notes
-
-end
-
-return M
+return vault_pickers

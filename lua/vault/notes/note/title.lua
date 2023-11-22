@@ -1,16 +1,24 @@
-local Title = {}
+local Object = require("nui.object")
 local Note = require("vault.notes.note")
+-- local NoteBasename = require("vault.notes.note.basename")
 
 ---Sync title with filename and update {inlinks}.
----@class Title
----@field new string
----@field sync fun(path: string)
+---@class VaultNoteTitle
+---@field text string
+---@field __index string
+local Title = Object("VaultNoteTitle")
 
----@return Title
--- function Title:new(basename)
---   -- return basename
--- end
+---@param str string
+function Title:init(str)
+  if not str then
+    error("missing argument: str")
+  end
 
+  if type(str) ~= "string" then
+    error("str must be a string")
+  end
+  self.text = str
+end
 
 ---@param path string
 function Title:sync(path)
@@ -22,11 +30,11 @@ function Title:sync(path)
     path = bufpath
 	end
 
-  local note = Note:new({
+  local note = Note({
     path = path,
   })
 
-	local title = note.title(path)
+	local title = note.data.title
 	if title == nil then
 		return
 	end
@@ -64,4 +72,46 @@ function Title:sync(path)
 	vim.cmd("e " .. new_path)
 end
 
-return Title
+function Title:__tostring()
+  return self.__index
+end
+
+---Create a title from a string.
+---@param str string - The string to create the title from.
+function Title:from_string(str)
+  if not str then
+    error("Vault: Title:from_string() - s is nil.")
+  end
+
+  if str:match("^#") then
+    str = str:gsub("^#", "")
+  end
+
+  str = str:gsub("%s+", " ")
+
+  -- Remove trailing whitespace
+  str = str:gsub("%s+$", "")
+
+  -- Remove leading whitespace
+  str = str:gsub("^%s+", "")
+
+  self.text = str
+end
+
+---Convert a title to a basename.
+---@return NoteBasename
+function Title:to_basename()
+  local str = self.__index
+
+  if not str then
+    error("Vault: Title:to_basename() - s is nil.")
+  end
+
+  return require("vault.notes.note.basename"):new(str)
+end
+
+---@alias VaultNoteTitle.constructor fun(str: string): VaultNoteTitle
+---@type VaultNoteTitle.constructor|VaultNoteTitle
+local VaultNoteTitle = Title
+
+return VaultNoteTitle

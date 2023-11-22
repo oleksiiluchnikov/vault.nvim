@@ -1,4 +1,6 @@
-local Match = {}
+---@class Matcher
+local Matcher = {}
+
 ---@enum MatchOpt
 local MatchOpts = {
   exact = 1,
@@ -9,33 +11,29 @@ local MatchOpts = {
   fuzzy = 6,
 }
 
-
-local opts = {}
-
 local function invalid_match_error_msg(match_opt)
    return "Invalid match: " .. vim.inspect(match_opt) .. ". Valid matches are: " .. table.concat(MatchOpts, ", ")
 end
---
--- local function to_num(match_opt)
---   for i, opt in ipairs(MatchOpt) do
---     if match_opt == opt then
---       return i
---     end
---   end
---   return 0
--- end
 
-function opts.is_valid(match_opt)
-  if type(match_opt) ~= "string" then
-    error(invalid_match_error_msg(match_opt))
-    return false
-  end
+---Create a new Matcher object.
+---@param match_opt string - The match type to use.
+---@return Matcher
+function Matcher:new(match_opt)
+  local matcher = {
+    match_opt = match_opt,
+  }
+  setmetatable(matcher, self)
+  self.__index = self
+  -- self:validate(match_opt)
+  return matcher
+end
 
+---Check if `MatchOpt` is valid.
+---@param match_opt string - The match type to use.
+function Matcher:validate(match_opt)
   if not MatchOpts[match_opt] then
     error(invalid_match_error_msg(match_opt))
-    return false
   end
-  return true
 end
 
 -- The perform_match function now takes an additional parameter, the match type
@@ -48,12 +46,11 @@ end
 ---|"'endswith'" # Matches value if it ends with the query. E.g., "foo" matches "foo" and "barfoo".
 ---|"'regex'" # Matches value if it matches the query as a regex. E.g., "foo" matches "foo" and "barfoo".
 ---@return boolean
-function opts.match(a, b, match_opt)
+function Matcher:match(a, b, match_opt)
   if type(a) ~= "string" or type(b) ~= "string" then
-    error("a and b must be strings")
+    error("Invalid match: " .. vim.inspect(a) .. ", " .. vim.inspect(b) .. ". Both values must be strings.")
     return false
   end
-
 
   ---@type number
   local v = MatchOpts[match_opt]
@@ -93,6 +90,10 @@ function opts.match(a, b, match_opt)
   return false
 end
 
-Match.opts = opts
+function Matcher:__call(match_opt)
+  return self:new(match_opt)
+end
 
-return Match
+Matcher = setmetatable(Matcher, Matcher)
+
+return Matcher

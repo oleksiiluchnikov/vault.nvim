@@ -1,34 +1,77 @@
-local M = {}
+---@class NoteCheckbox
+---@field state NoteCheckboxState
+local Checkbox = {}
 -- "- [ ] test line"
 -- "- [x] test line"
 -- "- [i] test line"
 -- "- [c] test line"
 
-M.state = {}
+local default_states = {
+  unchecked = " ",
+  checked = "x",
+  intermediate = "i",
+  cancelled = "c",
+}
 
-function M.state.fetch(line)
-  local state = line:match('%[([%w%s]+)%]')
+
+---@class NoteCheckboxState
+---@field __index string
+local CheckboxState = {}
+
+---@return NoteCheckboxState
+function CheckboxState:new(state)
+  local this = {}
+  setmetatable(this, self)
+  this.__index = state
+  return this
+end
+
+---@return string
+function CheckboxState:__tostring()
+  return self.__index
+end
+
+
+function CheckboxState:from_string(line)
+  local state = line:match("%[([%w%s]+)%]")
   if state == nil then
     return nil
   end
-  return state:sub(1, 1)
+  state = state:sub(1, 1)
+  return self:new(state)
 end
 
-function M.state.set(line, state)
-  local current_state = M.state.fetch(line)
+function Checkbox:new(state)
+  local this = {}
+  setmetatable(this, self)
+  self.__index = self
+  this.state = state
+  return this
+end
+
+function Checkbox:from_string(line)
+  local state = CheckboxState:from_string(line)
+  if state == nil then
+    return nil
+  end
+  return self:new(state)
+end
+
+---@type NoteCheckboxState
+Checkbox.state = CheckboxState
+
+function Checkbox:set(line, state)
+  local current_state = CheckboxState:from_string(line)
   if current_state == nil then
     return line
   end
-  return line:gsub(current_state, state)
+  local checkbox, line_content= line:match("^(.-%])%s*(.*)$")
+  checkbox = checkbox:gsub("%[" .. tostring(current_state) .. "%]", "[" .. tostring(state) .. "]")
+  return checkbox .. " " .. line_content
 end
 
-function M.test(line)
-  local state = M.state.fetch(line)
-  if state == nil then
-    return false
-  end
-  return true
-end
+-- test
+local checkbox = Checkbox:from_string("- [ ] test line"):set("- [ ] test line", "x")
 
 
-return M
+return Checkbox
