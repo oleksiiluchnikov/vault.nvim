@@ -1,112 +1,129 @@
----FrontmatterField class
----@class NoteFrontmatterField - A single field in a frontmatter.
----@field key string - The key of the field. E.g. "date_created"
----@field value string - The value of the field. E.g. "2024-01-01"
-local FrontmatterField = {}
+local Object = require("vault.core.object")
+local Field = require("vault.fields.field")
 
----Create a new FrontmatterField object.
----@param this table - The table to use as the object. If nil, a new table is created.
----@return NoteFrontmatterField
-function FrontmatterField:new(this)
-	this = this or {}
-	setmetatable(this, self)
-	self.__index = this
-	return this
+--- Frontmatter class
+---@class VaultNoteFrontmatter: VaultObject - The frontmatter of a note.
+---@field raw string - The raw frontmatter string.
+local NoteFrontmatter = Object("VaultNoteFrontmatter")
+
+--- Create a new NoteFrontmatter object.
+---@param this VaultNote.data.content - The content of the note.
+function NoteFrontmatter:init(this)
+    if type(this) ~= "string" then
+        error("Invalid argument: " .. vim.inspect(this))
+    end
+    if not this:match("^%-%-%-") then
+        error("NoteFrontmatter must start with ---")
+    end
+    -- local frontmatter = this:gmatch("^%-%-%-(.-)%-%-%-")[1]
+    -- local frontmatter
+    -- for line in this:gmatch("^%-%-%-(.-)%-%-%-") do
+    --     frontmatter = line
+    --     break
+    -- end
+    local frontmatter = this:match("^%-%-%-\n(.-)%-%-%-")
+
+    self.raw = frontmatter
+    -- TODO: add support for tables to extend them
+    self.data = {}
+    self:decode(frontmatter)
 end
 
----Create a new FrontmatterField object from a string.
----@param line string - The string to parse.
----@return NoteFrontmatterField|nil
-function FrontmatterField:from_string(line)
-	local key, value = line:match("^%s*([%w_]+)%s*:%s*(.*)$")
-	if key == nil then
-		return nil
-	end
-	return self:new({ key = key, value = value })
+function NoteFrontmatter:add_field(key, value)
+    self.data[key] = value
+    return self
 end
 
----Convert the FrontmatterField to a string.
----@return string
-function FrontmatterField:__tostring()
-	return self.key .. ": " .. self.value
-end
+--- Decode a frontmatter string to a table.
+---@param s string - The frontmatter string to decode.
+---@return VaultNoteFrontmatter - The decoded frontmatter.
+function NoteFrontmatter:decode(s)
+    local lines = vim.split(s, "\n")
+    for i, line in ipairs(lines) do
+        if line == "" then
+            table.remove(lines, i)
+        elseif line:match("^%s+") then
+            -- it is nested field
+            -- we should merge it with all previous lines until we find a non-nested field
+            local j = i - 1
+            while j > 0 do
+                local prev_line = lines[j]
+                if prev_line:match("^%s+") then
+                    lines[j] = prev_line .. "\n" .. line
+                    table.remove(lines, i)
+                    i = i - 1
+                    j = j - 1
+                else
+                    break
+                end
+            end
 
----Frontmatter class
----@class NoteFrontmatter
-local NoteFrontmatter = {}
+            -- merge with the next line if it is also a nested field
+            lines[i] = lines[i - 1] .. "\n" .. lines[i]
+        end
+    end
+    local raw_fields = lines
+    for _, field_string in ipairs(raw_fields) do
+        if field_string:match("^%s*$") then
+            goto continue
+        end
+        ---@type VaultField
+        local field = Field(field_string)
 
----Create a new NoteFrontmatter object.
----@param this table - The table to use as the object. If nil, a new table is created.
----@return NoteFrontmatter
-function NoteFrontmatter:new(this)
-  if type(this) == "string" then
-    this = self:decode(this)
-    return this
-  end
-	this = this or {}
-	setmetatable(this, self)
-	self.__index = self
-	return this
-end
+        if field == nil then
+            goto continue
+        end
+        if field.key == nil then
+            goto continue
+        end
+        self:add_field(field.key, field.value)
+        ::continue::
+    end
 
----Decode a frontmatter string to a table.
----@param text string - The frontmatter string to decode.
----@return NoteFrontmatter - The decoded frontmatter.
-function NoteFrontmatter:decode(text)
-	local lines = vim.split(text, "\n")
-	for _, line in ipairs(lines) do
-		---@type NoteFrontmatterField|nil
-		local field = FrontmatterField:from_string(line)
-		if field ~= nil then
-			self[field.key] = field.value
-		end
-	end
-	return self
+    return self
 end
 
 function NoteFrontmatter:to_table()
-	local tbl = {}
-	for k, v in pairs(self) do
-		if type(k) ~= "function" then
-			tbl[k] = v
-		end
-	end
-	return tbl
+    local tbl = {}
+    for k, v in pairs(self) do
+        if type(k) ~= "function" then
+            tbl[k] = v
+        end
+    end
+    return tbl
 end
 
----Encode a table to frontmatter string.
+--- Encode a table to frontmatter string.
 ---@param tbl table? - The table to encode.
 ---@return string - The encoded frontmatter.
 function NoteFrontmatter:encode(tbl)
-	tbl = tbl or self:to_table()
-	local frontmatter = "---\n"
-	for key, value in pairs(tbl) do
-		if type(value) == "table" then
-			value = vim.inspect(value)
-		end
-		if type(value) == "boolean" then
-			value = tostring(value)
-		end
-    if type(value) == "number" then
-      value = tostring(value)
+    tbl = tbl or self:to_table()
+    local frontmatter = "---\n"
+    for key, value in pairs(tbl) do
+        if type(value) == "table" then
+            value = vim.inspect(value)
+        end
+        if type(value) == "boolean" then
+            value = tostring(value)
+        end
+        if type(value) == "number" then
+            value = tostring(value)
+        end
+        frontmatter = frontmatter .. key .. ": " .. value .. "\n"
     end
-		frontmatter = frontmatter .. key .. ": " .. value .. "\n"
-	end
 
-	frontmatter = frontmatter .. "---\n"
-	return frontmatter
+    frontmatter = frontmatter .. "---\n"
+    return frontmatter
 end
 
----Convert the NoteFrontmatter to a string.
+--- Convert the NoteFrontmatter to a string.
 ---@return string
 function NoteFrontmatter:__tostring()
-	return self:encode()
+    return self:encode()
 end
 
-function NoteFrontmatter:__call(content)
-	return self:decode(content)
-end
+---@alias NoteFrontmatter.constructor fun(text: string): VaultNoteFrontmatter
+---@type NoteFrontmatter.constructor|VaultNoteFrontmatter
+local VaultNoteFrontmatter = NoteFrontmatter
 
-NoteFrontmatter = setmetatable(NoteFrontmatter, NoteFrontmatter)
-
-return NoteFrontmatter
+return VaultNoteFrontmatter -- [[@as VaultsNoteFrontmatter.constructor]]

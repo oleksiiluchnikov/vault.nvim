@@ -105,27 +105,28 @@ The plugin provides the following commands for seamless navigation and searching
 ### API
 
 ### Vault module
+
 ```lua
----Setup vault.
+--- Setup vault.
 ---@param opts table? -- An optional table of options.
 require("vault").setup(opts)
 
----Fetch an list of all notes in vault.
+--- Fetch an list of all notes in vault.
 ---@type table[] -- An list of note objects.
 require("vault").notes()
 
----Fetch an list of notes filtered by tags.
+--- Fetch an list of notes filtered by tags.
 ---@param include table[]? -- An list of tag names to include.
 ---@param exclude table[]? -- An list of tag names to exclude.
----@param match_opt string? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
+---@param match_opt MatchOptsKeys? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
 ---@param mode string? -- A mode to filter notes by. E.g. "all", "any", "none". If not provided, "all" will be used.
 ---@type table[] -- An list of note objects.
 require("vault").notes_filter_by_tags(include, exclude, match_opts, mode)
 
----Fetch an list of all tags in vault.
+--- Fetch an list of all tags in vault.
 ---@param include table[]? -- An optional list of tag names to include.
 ---@param exclude table[]? -- An optional list of tag names to exclude.
----@param match_opt string? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
+---@param match_opt MatchOptsKeys? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
 ---@type table[] -- An list of tag objects.
 require("vault").tags(include, exclude, match_opt)
 ```
@@ -133,32 +134,32 @@ require("vault").tags(include, exclude, match_opt)
 ### Telescope pickers
 
 ```lua
----Open Telescope note search picker.
+--- Open Telescope note search picker.
 ---@param notes table[]? -- An optional list of Note objects to search. If not provided, all notes in vault will be searched.
 require("vault.pickers").notes(notes)
 
----Open Telescope tag search picker.
+--- Open Telescope tag search picker.
 ---@param include table[]? -- An optional list of tag names to include.
 ---@param exclude table[]? -- An optional list of tag names to exclude.
----@param match_opt string? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
+---@param match_opt MatchOptsKeys? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
 require("vault.pickers").tags(include, exclude, match_opt)
 
----Open Telescope notes picker for a specific tags.
+--- Open Telescope notes picker for a specific tags.
 ---@param include table[]? -- An list of tag names to include.
 ---@param exclude table[]? -- An list of tag names to exclude.
----@param match_opt string? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
+---@param match_opt MatchOptsKeys? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
 ---@param mode string? -- A mode to filter notes by. E.g. "all", "any", "none". If not provided, "all" will be used.
 require("vault.pickers").notes_filter_by_tags(include, exclude, match_opts, mode)
 
----Open Telescope picker to browse nested tags from a root tag.
+--- Open Telescope picker to browse nested tags from a root tag.
 require("vault.pickers").root_tags()
 
----Open Telescope picker for dates.
+--- Open Telescope picker for dates.
 ---@param start_date string -- Start date in ISO 8601 format. E.g. "2023-01-01". If not provided, the week ago date will be used.
 ---@param end_date string -- End date in ISO 8601 format. E.g. "2023-01-31". If not provided, the current date will be used.
 require("vault.pickers").dates(start_date, end_date)
 
----Open Telescope picker for notes in the inbox directory.
+--- Open Telescope picker for notes in the inbox directory.
 require("vault.pickers").inbox()
 ```
 

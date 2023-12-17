@@ -2,7 +2,7 @@ local todo = {}
 local utils = require("vault.utils")
 local config = require("vault.config")
 
----Create a new todo if it does not exist.
+--- Create a new todo if it does not exist.
 ---@param title string
 function todo.add(title)
   local Vault = require("vault")
