@@ -1,13 +1,22 @@
 {
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime.version": "LuaJIT",
+  "diagnotics.enable": true,
   "diagnostics.globals": [
     "vim",
-    "use"
+    "describe",
+    "it",
+    "pending",
+    "before_each",
+    "after_each",
   ],
+  "diagnostics.libraryFiles": "Enable",
   "workspace.library": [
-    "~/vault.nvim",
-    "~/.local/share/nvim/lazy/telescope.nvim",
-    "~/.local/share/nvim/lazy/nui.nvim",
-    "~/.local/share/nvim/lazy/plenary.nvim"
+    "$VIMRUNTIME/lua",
+    "$HOME/vault.nvim/lua",
+    "$HOME/.local/share/nvim/lazy/telescope.nvim/lua",
+    "$HOME/.local/share/nvim/lazy/nui.nvim/lua",
+    "$HOME/.local/share/nvim/lazy/plenary.nvim/lua",
   ], 
   "hint.enable": true,
 }

@@ -1,8 +1,8 @@
-local Object = require("nui.object")
+local Object = require("vault.core.object")
 local Note = require("vault.notes.note")
 -- local NoteBasename = require("vault.notes.note.basename")
 
----Sync title with filename and update {inlinks}.
+--- Sync title with filename and update {inlinks}.
 ---@class VaultNoteTitle
 ---@field text string
 ---@field __index string
@@ -76,7 +76,7 @@ function Title:__tostring()
   return self.__index
 end
 
----Create a title from a string.
+--- Create a title from a string.
 ---@param str string - The string to create the title from.
 function Title:from_string(str)
   if not str then
@@ -98,8 +98,8 @@ function Title:from_string(str)
   self.text = str
 end
 
----Convert a title to a basename.
----@return NoteBasename
+--- Convert a title to a basename.
+---@return VaultNote.data.basename
 function Title:to_basename()
   local str = self.__index
 

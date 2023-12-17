@@ -1,13 +1,12 @@
 local assert = require("luassert")
 local FilterOpts = require("vault.filter_opts")
--- stdpath 
-
+-- stdpath
 
 describe("VaultNotesFilterOpts", function()
   -- add stdpath to be recognized by plenary busted
   vim.g.stdpath = vim.fn.stdpath("config")
   it("should return a new NotesFilterOpts object", function()
-    local opts = FilterOpts({"tags", { "foo", "bar" }, { "baz" }, "exact", "all"})
+    local opts = FilterOpts({ "tags", { "foo", "bar" }, { "baz" }, "exact", "all" })
     assert.is_true(opts.include[1] == "foo")
     assert.is_true(opts.include[2] == "bar")
     assert.is_true(opts.exclude[1] == "baz")
@@ -15,7 +14,7 @@ describe("VaultNotesFilterOpts", function()
     assert.is_true(opts.mode == "all")
   end)
   it("should not return a new NotesFilterOpts object", function()
-    local opts = FilterOpts({"tags", { "foo", "bar" }, { "baz" }, "exact", "all"})
+    local opts = FilterOpts({ "tags", { "foo", "bar" }, { "baz" }, "exact", "all" })
     assert.is_false(opts.include[1] == "foobar")
     assert.is_false(opts.include[2] == "barbuzz")
     assert.is_false(opts.exclude[1] == "foobarbuzz")
