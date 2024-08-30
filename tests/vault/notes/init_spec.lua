@@ -4,17 +4,10 @@ local assert = require("luassert")
 local Notes = require("vault.notes")
 
 --- @param note vault.Note
-local function has_outlinks(note)
-    local outlinks = note.data.outlinks
-    if outlinks and next(outlinks) then
-        return true
-    end
-    return false
-end
-
-local function has_inlinks(note)
-    local inlinks = note.data.inlinks
-    if inlinks and next(inlinks) then
+--- @param key vault.Note.Data._key
+local function has_key(note, key)
+    local note_data = note.data
+    if note_data[key] then
         return true
     end
     return false
@@ -86,7 +79,7 @@ end)
 describe("VaultNotes:values_map_with_key()", function()
     it("should return a map of values with key", function()
         local stems = Notes():values_map_by_key("stem")
-        local random_note = Notes():get_random_note()
+        local random_note = Notes():get_random_note() or error("No notes found")
         assert.is_true(stems[random_note.data.stem] ~= nil)
     end)
 end)
@@ -373,21 +366,18 @@ describe("VaultNotes:with_path()", function()
 end)
 
 describe("VaultNotes:with_relpath()", function()
-    it(
-        "should return a `VaultNotesGroup` object with `string` that starts with",
-        function()
-            local notes = Notes()
-            local note = notes:get_random_note()
-            local relpath = note.data.relpath
-            local relpath_char_count = #relpath
-            local query = relpath:sub(1, math.floor(relpath_char_count / 2))
-            local notes_with_relpath = Notes():with_relpath(query, "startswith", false)
-            for _, note_with_relpath in pairs(notes_with_relpath.map) do
-                relpath = note_with_relpath.data.relpath
-                assert.is_true(relpath:find(query) ~= nil)
-            end
+    it("should return a `VaultNotesGroup` object with `string` that starts with", function()
+        local notes = Notes()
+        local note = notes:get_random_note()
+        local relpath = note.data.relpath
+        local relpath_char_count = #relpath
+        local query = relpath:sub(1, math.floor(relpath_char_count / 2))
+        local notes_with_relpath = Notes():with_relpath(query, "startswith", false)
+        for _, note_with_relpath in pairs(notes_with_relpath.map) do
+            relpath = note_with_relpath.data.relpath
+            assert.is_true(relpath:find(query) ~= nil)
         end
-    )
+    end)
 end)
 
 describe("VaultNotes:with_basename()", function()
@@ -682,7 +672,7 @@ describe("VaultNotes:leaves()", function()
         "should NOT return a `VaultNote` objects with greater than 0 `VaultNote.data.outlinks`",
         function()
             for _, note in pairs(notes.map) do
-                assert.is_false(has_outlinks(note))
+                assert.is_false(has_key(note))
             end
         end
     )
@@ -692,7 +682,7 @@ describe("VaultNotes:leaves()", function()
         function()
             --TODO: Try when `VaultNote.data.inlinks` is implemented.
             for _, note in pairs(notes.map) do
-                assert.is_true(has_inlinks(note))
+                assert.is_true(has_key(note))
             end
         end
     )
