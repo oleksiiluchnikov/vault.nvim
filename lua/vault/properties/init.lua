@@ -52,7 +52,7 @@ function Properties:filter(opts)
     --- @param property_name string Property name
     --- @param queries vault.List List of query strings
     --- @param match_result boolean
-    --- @param match_opt vault.enums.match_opts Match option
+    --- @param match_opt vault.enum.MatchOpts.key Match option
     --- @param case_sensitive boolean Case sensitive
     local function apply_filter(property_name, queries, match_result, match_opt, case_sensitive)
         for _, query in ipairs(queries) do
@@ -95,7 +95,7 @@ end
 --- Filter properties by a specific key and value.
 ---@param key string The key to filter by. |vault.Property.data| key to filter by.
 ---@param value? string The value to filter by. If not provided, all properties with the specified key will be returned.
----@param match_opt? vault.enums.match_opts The match option to use for filtering. Defaults to "exact" if not provided.
+---@param match_opt? vault.enum.MatchOpts.key The match option to use for filtering. Defaults to "exact" if not provided.
 ---@return vault.Properties.map A table containing the filtered properties.
 ---@usage
 ---```lua

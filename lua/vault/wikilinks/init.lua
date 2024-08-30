@@ -136,7 +136,7 @@ function Wikilinks:get_values_by_key(key)
 end
 
 --- @param slug vault.slug
---- @param match_opt vault.enums.match_opts
+--- @param match_opt vault.enum.MatchOpts.key
 --- @param case_sensitive? boolean
 --- @return vault.Wikilinks.map
 function Wikilinks:by_target(slug, match_opt, case_sensitive)

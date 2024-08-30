@@ -7,7 +7,7 @@ local enums = {}
 --- | '"status"' # Filter on status.
 --- | '"type"' # Filter on type.
 
---- @alias vault.enums.match_opts
+--- @alias vault.enum.MatchOpts.key
 --- |"'exact'" -  Matches exact value. E.g., "foo" matches "foo" but not "foobar".
 --- |"'contains'" -  Matches value if it contains the query. E.g., "foo" matches "foo" and "foobar".
 --- |"'startswith'" -  Matches value if it starts with the query. E.g., "foo" matches "foo" and "foobar".
@@ -15,8 +15,9 @@ local enums = {}
 --- |"'regex'" -  Matches value if it matches the query as a regex. E.g., "foo" matches "foo" and "barfoo".
 --- |"'fuzzy'" -  Matches value if it matches the query fuzzily. E.g., "foo" matches "foo" and "barfoo".
 
---- @enum vault.MatchOptsKeys
+--- @enum vault.enum.MatchOpts
 enums.match_opts = {
+    --- Matches exact value. E.g., "foo" matches "foo" but not "foobar".
     exact = 1,
     contains = 2,
     startswith = 3,
@@ -25,11 +26,11 @@ enums.match_opts = {
     fuzzy = 6,
 }
 
---- @alias vault.FilterOpts.mode
+--- @alias vault.enum.MatchOpts.mode
 --- |"'all'"  # Matches all names.
 --- |"'any'" # Matches any value.
 
---- @enum vault.FilterOpts.mode
+--- @enum vault.enum.MatchOpts.mode.key
 enums.filter_mode = {
     all = 1,
     any = 2,

@@ -214,7 +214,7 @@ end
 --- Checks if two strings match based on the given match option
 --- @param a string The first string to compare
 --- @param b string The second string to compare
---- @param match_opt vault.enums.match_opts The match option to use
+--- @param match_opt vault.enum.MatchOpts.key The match option to use
 --- |"'exact'" Matches exact value. E.g., "foo" matches "foo" but not "foobar".
 --- |"'contains'" Matches value if it contains the query. E.g., "foo" matches "foo" and "foobar".
 --- |"'startswith'" Matches value if it starts with the query. E.g., "foo" matches "foo" and "foobar".
