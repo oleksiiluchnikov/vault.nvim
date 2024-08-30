@@ -132,6 +132,9 @@ end
 Data.content = function(note_data)
     local path = note_data.path
     local f, err = io.open(path, "r")
+    if err then
+        error(err)
+    end
 
     local content
     if f ~= nil then
