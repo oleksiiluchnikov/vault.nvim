@@ -1,19 +1,5 @@
 --- @class vault.commands
---- @field edit_random_note fun(args: vault.completions.args): nil
---- @field open_tags_picker fun(args: vault.completions.args): nil
---- @field open_dates_picker fun(args: vault.completions.args): nil
---- @field today fun(): nil
---- @field open_fleeting_note_popup fun(args: vault.completions.args): nil
---- @field open_orphans_picker fun(): nil
---- @field open_linked_picker fun(): nil
---- @field create_new_note fun(args: vault.completions.args): nil
---- @field open_notes_by_dir_picker fun(args: vault.completions.args): nil
---- @field open_note_by_dir_picker fun(args: vault.completions.args): nil
---- @field open_notes_status_picker fun(args: vault.completions.args): nil
---- @field open_note_properties_picker fun(args: vault.completions.args): nil
---- @field note_tags_picker fun(args: vault.completions.args): nil
---- @field note_inlinks_picker fun(): nil
----
+
 --- @class vault.completions.args
 --- @field args string[]
 --- @field bang boolean
@@ -28,87 +14,47 @@
 --- @field smods vim.api.keyset.parse_cmd.mods
 
 --- @class vault.commands.completions
-local completions = {}
+local complete = {}
 
-function completions.note_methods(arg_lead, _, _)
-    local note_methods = vim.tbl_keys(require("vault.notes.note").__meta)
-    for _, method in ipairs(note_methods) do
-        if string.sub(method, 1, string.len(arg_lead)) == arg_lead then
-            table.insert(completions, method)
-        end
-    end
-    return note_methods
-end
-
-function completions.vault_notes_keys_by()
-    return {
-        "tags",
-        "title",
-        "basename",
-        "path",
-        "type",
-        "status",
-        "date",
-        "children",
-    }
-end
-
---- @param arg string
---- @return table<string,any>
-function completions.values_map_by_key(arg)
-    return require("vault.notes")():values_map_by_key(arg)
-end
-
---- @return vault.enum.MatchOpts.key[]
-function completions.match_opts()
-    return require("vault.utils.enums").match_opts
-end
-
---- @return vault.enum.MatchOpts.mode[]
-function completions.match_types()
-    return require("vault.utils.enums").filter_mode
-end
-
---- @param cmd_line string
-function completions.notes_filter(_, cmd_line, _)
-    local args = vim.split(cmd_line, " ")
-    table.remove(args, 1)
-    if #args == 1 then
-        return completions.vault_notes_presets
-    elseif #args == 2 then
-        return completions.vault_notes_keys_by()
-    elseif #args == 3 then
-        return completions.values_map_by_key(args[2])
-    elseif #args == 4 then
-        return completions.values_map_by_key(args[2])
-    elseif #args == 5 then
-        return completions.match_opts()
-    elseif #args == 6 then
-        return completions.match_types()
-    end
-end
-
-function completions.slugs()
+function complete.note_slugs()
     --- @type vault.slug[]
     local notes_slugs = require("vault.core.state").get_global_key("cache.notes.slugs")
         or require("vault.fetcher").slugs()
     return vim.tbl_keys(notes_slugs)
 end
 
-completions.dirs = function(arg_lead, cmd_line, _)
-    if vim.split(cmd_line, " ")[3] then
-        return
+function complete.note_methods(arg_lead, _, _)
+    local note_methods = vim.tbl_keys(require("vault.notes.note").__meta)
+    for _, method in ipairs(note_methods) do
+        if string.sub(method, 1, string.len(arg_lead)) == arg_lead then
+            table.insert(complete, method)
+        end
     end
-    local dirs = require("vault.fetcher").dirs()
-    dirs["."] = true
-    if arg_lead == "." then
-        return
-    end
-    dirs = vim.tbl_keys(dirs)
-    return dirs
+    return note_methods
 end
 
-function completions.tags()
+function complete.note_data_keys()
+    return vim.tbl_keys(require("vault.notes.note.data"))
+end
+
+--- @param cmd_line string
+function complete.dirs(_, cmd_line, _)
+    cmd_line = cmd_line or ""
+    cmd_line = cmd_line:gsub("^%S+%s*", "")
+    --- @type vault.slug[]
+    local dirs = require("vault.fetcher").dirs()
+    dirs = vim.tbl_keys(dirs)
+    local completions = {}
+    local utils = require("vault.utils")
+    for _, dir in ipairs(dirs) do
+        if utils.match(dir, cmd_line, "fuzzy", false) then
+            table.insert(completions, dir)
+        end
+    end
+    return completions
+end
+
+function complete.tags()
     -- tags = vim.tbl_keys(require("vault.fetcher").tags())
     -- return tags
     local tags = require("vault.tags")()
@@ -119,7 +65,42 @@ function completions.tags()
     return tag_names
 end
 
-function completions.note_tags(_, cmd_line, _)
+--- @param arg string
+--- @return table<string,any>
+function complete.values_map_by_key(arg)
+    return require("vault.notes")():values_map_by_key(arg)
+end
+
+--- @return vault.enum.MatchOpts.key[]
+function complete.match_opts()
+    return require("vault.utils.enums").match_opts
+end
+
+--- @return vault.enum.MatchOpts.mode[]
+function complete.match_types()
+    return require("vault.utils.enums").filter_mode
+end
+
+--- @param cmd_line string
+function complete.notes_filter(_, cmd_line, _)
+    local args = vim.split(cmd_line, " ")
+    table.remove(args, 1)
+    if #args == 1 then
+        return complete.vault_notes_presets
+    elseif #args == 2 then
+        return complete.note_data_keys()
+    elseif #args == 3 then
+        return complete.values_map_by_key(args[2])
+    elseif #args == 4 then
+        return complete.values_map_by_key(args[2])
+    elseif #args == 5 then
+        return complete.match_opts()
+    elseif #args == 6 then
+        return complete.match_types()
+    end
+end
+
+function complete.note_tags(_, cmd_line, _)
     local config = require("vault.config")
     local fargs = vim.split(cmd_line, " ")
     if next(fargs) == nil then
@@ -133,7 +114,7 @@ function completions.note_tags(_, cmd_line, _)
     local tags = {}
 
     if not current_path:match(config.options.ext .. "$") then
-        return completions.tags()
+        return complete.tags()
     end
 
     local note = require("vault.notes.note")(vim.fn.expand("%:p"))
@@ -141,11 +122,11 @@ function completions.note_tags(_, cmd_line, _)
     return tags
 end
 
-function completions.vault_notes_presets()
+function complete.vault_notes_presets()
     return { "linked", "orphans", "leaves", "by" }
 end
 
-function completions.dates()
+function complete.dates()
     local from = tostring(os.date("%Y-%m-%d"))
     local to = tostring(os.time() - 60 * 60 * 24 * 365)
     local dates = require("dates").from_to(from, to)
@@ -156,7 +137,7 @@ function completions.dates()
     return date_values
 end
 
-function completions.statuses()
+function complete.statuses()
     --TODO: Moved statuse to the frontmatter. Need to update this
     vim.notify("Implement")
     -- local tags = require("vault.tags")()
@@ -171,7 +152,7 @@ function completions.statuses()
 end
 
 --- @param cmd_line string
-function completions.note(arg_lead, cmd_line, _)
+function complete.note(arg_lead, cmd_line, _)
     local fargs = vim.split(cmd_line, " ")
     --- @type vault.slug[]
     local slugs = vim.tbl_keys(
@@ -181,7 +162,7 @@ function completions.note(arg_lead, cmd_line, _)
     if #fargs == 1 then
         return
     elseif #fargs == 2 then
-        return completions.note_methods(arg_lead)
+        return complete.note_methods(arg_lead)
     elseif #fargs == 3 then
         -- TODO: Decide what to return
         -- return args for the method?
@@ -229,30 +210,15 @@ function callbacks.create_new_note(args)
     note:edit()
 end
 
-function callbacks.open_dir_picker()
-    local dirs = require("vault.fetcher").dirs()
-    local actions = require("telescope.actions")
-    local action_state = require("telescope.actions.state")
-    local picker = require("telescope.pickers").new({
-        prompt_title = "Directories",
-        finder = require("telescope.finders").new_table({
-            results = vim.tbl_keys(dirs),
-        }),
-        sorter = require("telescope.sorters").get_fzy_sorter(),
-        attach_mappings = function(prompt_bufnr, _)
-            actions.select_default:replace(function()
-                local current_picker = action_state.get_current_picker(prompt_bufnr)
-                local selection = current_picker:get_selection()
-                actions.close(prompt_bufnr)
-                require("vault.pickers").notes(
-                    nil,
-                    require("vault.notes")():with_relpath(selection.value, "startswith", false)
-                )
-            end)
-            return true
-        end,
-    }, {})
-    picker:find()
+--- @param args vault.completions.args
+function callbacks.pick_dirs(args)
+    require("vault.pickers").dirs()
+    if next(args.fargs) ~= nil then
+        vim.api.nvim_buf_set_lines(0, 0, -1, false, args.fargs)
+        vim.defer_fn(function()
+            vim.fn.feedkeys("\r", "i")
+        end, 1)
+    end
 end
 
 ---Edits a random note from the vault.
@@ -264,7 +230,7 @@ function callbacks.edit_random_note(args)
     if #args.fargs == 0 then
         notes = require("vault.notes")()
     else
-        notes = require("vault.notes")():with_relpath(args.fargs[1], "regex", false)
+        notes = require("vault.notes")():with_slug(table.concat(args.fargs, " "), "fuzzy")
     end
     local random_note = notes:get_random_note()
     if random_note == nil then
@@ -288,11 +254,10 @@ function callbacks.open_tags_picker(args)
         search_term = "tags",
         include = tags_names,
         exclude = {},
-        match_opt = "startswith",
+        match_opt = "contains",
         mode = "all",
     }
 
-    -- local notes = Notes():filter(filter_opts)
     require("vault.pickers").notes(nil, require("vault.notes")():filter(filter_opts))
 end
 
@@ -689,13 +654,13 @@ local function construct_notes_picker_args(input)
 
     -- Check if the first argument is a valid preset
     -- if no preset is provided, use filter directly
-    if vim.tbl_contains(completions.vault_notes_presets(), input[1]) then
+    if vim.tbl_contains(complete.vault_notes_presets(), input[1]) then
         args[1] = input[1]
     end
     vim.notify(vim.inspect(args))
 
     -- Check if the second argument is a valid key
-    if vim.tbl_contains(completions.vault_notes_keys_by(), input[2]) then
+    if vim.tbl_contains(complete.note_data_keys(), input[2]) then
         input[2] = input[2] or error("Invalid key: " .. input[2])
         args[2] = input[2] -- key - key to filter by (tags, title, basename, path, type, status, date, children)
         args[3] = input[3] -- include - table of values to include
@@ -769,6 +734,11 @@ function callbacks.notes(args)
     end
 end
 
+function callbacks.tasks()
+    -- TODO: Implement to complete by status
+    require("vault.pickers").tasks()
+end
+
 -- Commands for the plugin
 local M = {
     ["VaultNote"] = {
@@ -781,25 +751,29 @@ local M = {
         --- @command ]]
         callback = callbacks.note,
         opts = {
-            nargs = "*",
-            complete = completions.note,
             desc = "Open a note in the vault",
+            complete = complete.note,
+            nargs = "*",
         },
     },
     ["VaultRandomNote"] = {
+        --- @command :VaultRandomNote {slug} [[
+        --- Open a random note
+        --- @command ]]
         callback = callbacks.edit_random_note,
         opts = {
-            nargs = "*",
             desc = "Open a random note",
+            complete = complete.note_slugs,
+            nargs = "*",
         },
     },
     ["VaultNotes"] = {
         --- Generates a picker with certain collection of notes
         callback = callbacks.notes,
         opts = {
-            nargs = "*",
-            complete = completions.notes_filter,
             desc = "Open a picker with a collection of notes",
+            complete = complete.notes_filter,
+            nargs = "*",
         },
     },
     ["VaultTags"] = {
@@ -808,9 +782,9 @@ local M = {
         --- @command ]]
         callback = callbacks.open_tags_picker,
         opts = {
-            nargs = "*",
-            complete = completions.tags,
             desc = "Open a picker with the notes that have the tags",
+            complete = complete.tags,
+            nargs = "*",
         },
     },
     ["VaultDates"] = {
@@ -819,8 +793,9 @@ local M = {
         --- @command ]]
         callback = callbacks.open_dates_picker,
         opts = {
+            desc = "Open a picker with the dates",
+            complete = complete.dates,
             nargs = "*",
-            complete = completions.dates,
         },
     },
     ["VaultToday"] = {
@@ -829,6 +804,7 @@ local M = {
         --- @command ]]
         callback = callbacks.today,
         opts = {
+            desc = "Opens the today's journal note",
             nargs = 0,
         },
     },
@@ -838,8 +814,9 @@ local M = {
         --- @command ]]
         callback = callbacks.open_notes_status_picker,
         opts = {
+            desc = "Open a picker with the statuses",
+            complete = complete.statuses,
             nargs = "*",
-            complete = completions.statuses,
         },
     },
     ["VaultFleetingNote"] = {
@@ -848,6 +825,7 @@ local M = {
         --- @command ]]
         callback = callbacks.open_fleeting_note_popup,
         opts = {
+            desc = "Open a popup to create a fleeting note",
             nargs = "*",
         },
     },
@@ -857,6 +835,7 @@ local M = {
         --- @command ]]
         callback = callbacks.open_orphans_picker,
         opts = {
+            desc = "Open a picker with the orphans",
             nargs = 0,
         },
     },
@@ -866,6 +845,7 @@ local M = {
         --- @command ]]
         callback = callbacks.open_linked_picker,
         opts = {
+            desc = "Open a picker with the linked notes",
             nargs = 0,
         },
     },
@@ -875,8 +855,9 @@ local M = {
             require("vault.pickers").notes(nil, require("vault.notes")():internals())
         end,
         opts = {
+            desc = "Open a picker with the internals",
+            complete = complete.notes_filter,
             nargs = "*",
-            complete = completions.notes_filter,
         },
     },
     ["VaultLeaves"] = {
@@ -884,7 +865,8 @@ local M = {
             require("vault.pickers").notes(nil, require("vault.notes")():leaves())
         end,
         opts = {
-            complete = completions.notes_filter,
+            desc = "Open a picker with the leaves",
+            complete = complete.notes_filter,
             nargs = "*",
         },
     },
@@ -893,7 +875,8 @@ local M = {
             require("vault.pickers").notes(nil, require("vault.notes")():with_outlinks_unresolved())
         end,
         opts = {
-            complete = completions.notes_filter,
+            desc = "Open a picker with the dangling links",
+            complete = complete.notes_filter,
             nargs = "*",
         },
     },
@@ -902,7 +885,8 @@ local M = {
             require("vault.pickers").notes(nil, require("vault.notes")():with_outlinks_unresolved())
         end,
         opts = {
-            complete = completions.notes_filter,
+            desc = "Open a picker with the outlinks unresolved",
+            complete = complete.notes_filter,
             nargs = "*",
         },
     },
@@ -914,7 +898,8 @@ local M = {
             )
         end,
         opts = {
-            complete = completions.notes_filter,
+            desc = "Open a picker with the outlinks resolved only",
+            complete = complete.notes_filter,
             nargs = "*",
         },
     },
@@ -923,29 +908,16 @@ local M = {
             require("vault.pickers").wikilinks()
         end,
         opts = {
+            desc = "Open a picker with the wikilinks",
+            complete = complete.note_slugs,
             nargs = "*",
-            complete = function(_, cmd_line, _)
-                local arguments = vim.split(cmd_line, " ")
-                table.remove(arguments, 1)
-
-                local groups = {
-                    "outlinks",
-                    "resolved",
-                    "unresolved",
-                }
-
-                if #arguments == 1 then
-                    return groups
-                end
-            end,
         },
     },
     ["VaultTasks"] = {
-        callback = function()
-            require("vault.pickers").tasks()
-        end,
+        callback = callbacks.tasks,
         opts = {
-            complete = completions.statuses,
+            desc = "Open a picker with the tasks accross the vault",
+            complete = complete.statuses,
             nargs = "*",
         },
     },
@@ -974,8 +946,9 @@ local M = {
             require("vault.pickers").notes(nil, cluster)
         end,
         opts = {
+            desc = "Open a picker with the notes that are in the same cluster",
+            complete = complete.note_slugs,
             nargs = "*",
-            complete = completions.slugs,
         },
     },
     ["VaultMove"] = {
@@ -1037,7 +1010,7 @@ local M = {
         end,
         opts = {
             nargs = "*",
-            complete = completions.dirs,
+            complete = complete.dirs,
         },
     },
     ["VaultGrep"] = {
@@ -1076,7 +1049,7 @@ local M = {
         opts = {
             nargs = "*",
             range = true,
-            complete = completions.note_tags,
+            complete = complete.note_tags,
             desc = "Open a picker with the notes that have the tags and the note",
         },
     },
@@ -1085,7 +1058,7 @@ local M = {
         opts = {
             nargs = "*",
             range = true,
-            complete = completions.slugs,
+            complete = complete.note_slugs,
         },
     },
     ["VaultProperties"] = {
@@ -1192,9 +1165,11 @@ local M = {
         },
     },
     ["VaultDirs"] = {
-        callback = callbacks.open_dir_picker,
+        callback = callbacks.pick_dirs,
         opts = {
             desc = "Open a picker with the directories in the vault",
+            complete = complete.dirs,
+            nargs = "*",
         },
     },
 }

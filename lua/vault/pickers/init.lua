@@ -1199,4 +1199,32 @@ function vault_pickers.properties(opts, query)
     end
 end
 
+--- @param opts? table
+--- @param query? string[] - List of property names to show. If not provided, all properties will be shown.
+function vault_pickers.dirs(opts, query)
+    opts = opts or vault_layouts.mini()
+    query = query or require("vault.fetcher").dirs()
+    local action_state = require("telescope.actions.state")
+    local picker = require("telescope.pickers").new({
+        prompt_title = "Directories",
+        finder = require("telescope.finders").new_table({
+            results = vim.tbl_keys(query),
+        }),
+        sorter = require("telescope.sorters").get_fzy_sorter(),
+        attach_mappings = function(prompt_bufnr, _)
+            actions.select_default:replace(function()
+                local current_picker = action_state.get_current_picker(prompt_bufnr)
+                local selection = current_picker:get_selection()
+                actions.close(prompt_bufnr)
+                require("vault.pickers").notes(
+                    nil,
+                    require("vault.notes")():with_relpath(selection.value, "startswith", false)
+                )
+            end)
+            return true
+        end,
+    }, {})
+    picker:find()
+end
+
 return vault_pickers
