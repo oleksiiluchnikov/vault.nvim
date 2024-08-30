@@ -1,6 +1,5 @@
 local actions_state = require("telescope.actions.state")
 local actions = require("telescope.actions")
-local actions_utils = require("telescope.actions.utils")
 local vault_state = require("vault.core.state")
 local highlights = require("vault.highlights")
 local utils = require("vault.utils")
@@ -13,8 +12,7 @@ local event = require("nui.utils.autocmd").event
 --- @class vault.Picker.actions.note
 
 --- @class vault.Picker.actions
---- @field get_picker_selection fun(prompt_bufnr: integer): Picker, TelescopeEntry,
---- @field note vault.Picker.actions.note
+--- @field get_picker_selection fun(prompt_bufnr: integer): Picker, TelescopeEntry, TelescopeEntry[]
 local vault_actions = {}
 
 --- @param prompt_bufnr integer
@@ -35,11 +33,17 @@ local function get_picker_selection(prompt_bufnr)
     return current_picker, selection, selections
 end
 
+function vault_actions.refresh(bufnr)
+    local current_picker = vault_state.get_global_key("picker")
+    current_picker:refresh()
+end
+
 --- Close the picker
 --- @param bufnr integer
 function vault_actions.close(bufnr)
     actions.close(bufnr)
     highlights.detach()
+    vault_actions.refresh(bufnr)
 end
 
 vault_actions.note = {}
@@ -184,6 +188,7 @@ local batch_rename = function(bufnr, selections)
 
     popup:on(event.BufLeave, function()
         popup:unmount()
+        vault_actions.refresh(bufnr)
     end)
 end
 

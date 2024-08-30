@@ -1,10 +1,10 @@
 --- @class vault.Pickers
--- TODO: Picker
-------@field assign_tags fun(opts: table?, tags: string[]): nil - Picker to choose the tag to assign, or do this as action
-------for tags picker?
-------@field put_links fun(opts: table?, links: string[]): nil - Picker to choose the link to put, or do this as action
-------for notes picker?
-------@field put_wikilinks fun(opts: table?, wikilinks: string[]): nil - Picker to choose the wikilink to put, or do this as action
+--- TODO: Picker
+--- assign_tags fun(opts: table?, tags: string[]): nil - Picker to choose the tag to assign, or do this as action
+--- for tags picker?
+--- put_links fun(opts: table?, links: string[]): nil - Picker to choose the link to put, or do this as action
+--- for notes picker?
+--- put_wikilinks fun(opts: table?, wikilinks: string[]): nil - Picker to choose the wikilink to put, or do this as action
 local vault_pickers = {}
 
 local Log = require("plenary.log")
@@ -240,6 +240,7 @@ function vault_pickers.notes(opts, notes)
 
     vault_state.set_global_key("picker", picker)
     picker:find()
+    return picker
 end
 
 --- Search for tags
@@ -335,8 +336,8 @@ function vault_pickers.tags(opts, tags)
     }
     local picker = pickers.new(vault_layouts.tags(), picker_opts)
     picker:find()
-
     vault_state.set_global_key("picker", picker)
+    return picker
 end
 
 --- I want to browse tag until it has no more nesting,
@@ -396,7 +397,7 @@ function vault_pickers.notes_by(tag_prefix) -- software or software/Blender(if w
         end
     end
 
-    pickers
+    local picker = pickers
         .new(vault_layouts.mini(), {
             prompt_title = "Status",
             finder = finders.new_table(entries),
@@ -407,6 +408,8 @@ function vault_pickers.notes_by(tag_prefix) -- software or software/Blender(if w
             end,
         })
         :find()
+    vault_state.set_global_key("picker", picker)
+    return picker
 end
 
 --- Picker for browsing tags from root tag.
@@ -471,7 +474,7 @@ function vault_pickers.root_tags(root_tag_name)
         vault_actions.close(bufnr)
     end
 
-    pickers
+    local picker = pickers
         .new(vault_layouts.mini(), {
             prompt_title = "Status",
             finder = finders.new_table({
@@ -485,6 +488,8 @@ function vault_pickers.root_tags(root_tag_name)
             end,
         })
         :find()
+    vault_state.set_global_key("picker", picker)
+    return picker
 end
 
 --- Search for date and corresponding note
@@ -588,7 +593,7 @@ function vault_pickers.dates(start_date, end_date)
         }
     end
 
-    pickers
+    local picker = pickers
         .new({}, {
             prompt_title = "Dates",
             finder = finders.new_table({
@@ -625,6 +630,8 @@ function vault_pickers.dates(start_date, end_date)
             end,
         })
         :find()
+    vault_state.set_global_key("picker", picker)
+    return picker
 end
 
 function vault_pickers.wikilinks()
@@ -662,7 +669,7 @@ function vault_pickers.wikilinks()
         }
     end
 
-    pickers
+    local picker = pickers
         .new({}, {
             prompt_title = "Wikilinks",
             finder = finders.new_table({
@@ -685,6 +692,8 @@ function vault_pickers.wikilinks()
             sorting_strategy = "ascending",
         })
         :find()
+    vault_state.set_global_key("picker", picker)
+    return picker
 end
 
 --- TODO: Make action that will search for notes with similar tags that selected note has
@@ -698,13 +707,11 @@ function vault_pickers.inbox()
 
     local notes = {}
     for _, note_path in ipairs(vim.fn.globpath(inbox_dir, "**/*" .. config.options.ext, true, true)) do
-        local note = Note({
-            path = note_path,
-        })
+        local note = Note(note_path)
         table.insert(notes, note)
     end
 
-    vault_pickers.notes({}, notes)
+    vault_pickers.notes(nil, notes)
 end
 
 function vault_pickers.tasks()
@@ -715,7 +722,7 @@ function vault_pickers.tasks()
             if task.status == "[x]" then
                 goto continue
             end
-            local task = {
+            task = {
                 line_number = line_number,
                 slug = slug,
                 line = task.line,
@@ -820,7 +827,7 @@ function vault_pickers.tasks()
         }
     end
 
-    pickers
+    local picker = pickers
         .new({}, {
             prompt_title = "Tasks",
             finder = finders.new_table({
@@ -839,6 +846,8 @@ function vault_pickers.tasks()
             end,
         })
         :find()
+    vault_state.set_global_key("picker", picker)
+    return picker
 end
 
 --- @param opts table
@@ -919,7 +928,7 @@ function vault_pickers.move_note_to(opts, note)
         table.insert(results, dir)
     end
 
-    pickers
+    local picker = pickers
         .new({}, {
             prompt_title = "Move note to",
             finder = finders.new_table({
@@ -930,6 +939,8 @@ function vault_pickers.move_note_to(opts, note)
             attach_mappings = attach_mappings,
         })
         :find()
+    vault_state.set_global_key("picker", picker)
+    return picker
 end
 
 --- Open picker for |vault.Notes.Cluster| from provided `vault.Note`. Default is current buffer.
@@ -972,7 +983,10 @@ function vault_pickers.live_grep(opts, query)
 
     -- merge opts with default opts
     opts = vim.tbl_deep_extend("force", default_opts, opts or {})
-    require("telescope.builtin").live_grep(opts)
+    -- require("telescope.builtin").live_grep(opts)
+    local picker = require("telescope.builtin").live_grep(opts)
+    picker:find()
+    return picker
 end
 
 -- --- Picker for browsing properties
@@ -1102,7 +1116,7 @@ local function pick_property(opts, properties, callback)
     --     }
     -- end
 
-    pickers
+    local picker = pickers
         .new(opts, {
             prompt_title = "Properties",
             finder = finders.new_table({
@@ -1113,6 +1127,8 @@ local function pick_property(opts, properties, callback)
             attach_mappings = attach_mappings,
         })
         :find()
+    vault_state.set_global_key("picker", picker)
+    return picker
 end
 
 --- Pick a value from the selected property.
@@ -1134,7 +1150,34 @@ local function pick_value(opts, property_name, values, callback)
         return true
     end
 
-    pickers
+    local make_display = function(entry)
+        local entry_width = entry.value:len()
+        local displayer = entry_display.create({
+            separator = " ",
+            items = {
+                { width = entry_width },
+                { remaining = true },
+            },
+        })
+        local display_value = {
+            -- entry.value,
+            utils.path_to_relpath(entry.value),
+            "TelescopeResultsNormal",
+        }
+        return displayer({
+            display_value,
+        })
+    end
+
+    local entry_maker = function(entry)
+        return {
+            value = entry,
+            ordinal = entry,
+            display = make_display,
+        }
+    end
+
+    local picker = pickers
         .new(opts, {
             prompt_title = property_name,
             finder = finders.new_table({
@@ -1145,12 +1188,14 @@ local function pick_value(opts, property_name, values, callback)
             attach_mappings = attach_mappings,
         })
         :find()
+    vault_state.set_global_key("picker", picker)
+    return picker
 end
 
 --- @param opts? table
 --- @param query? string[] - List of property names to show. If not provided, all properties will be shown.
 function vault_pickers.properties(opts, query)
-    opts = opts or vault_layouts.mini()
+    opts = opts or {}
     query = query or {}
     local notes = require("vault.notes")()
     -- local properties = require("vault.fetcher").properties()
@@ -1225,6 +1270,7 @@ function vault_pickers.dirs(opts, query)
         end,
     }, {})
     picker:find()
+    return picker
 end
 
 return vault_pickers
