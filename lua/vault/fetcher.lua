@@ -675,7 +675,7 @@ end
 --- TODO: Since we look for the properties in the frontmatter, we should workaround to look at the fronmatter of the note only.
 --- @return vault.Properties.map
 function Fetcher.properties()
-    local frontmatter_pattern = [[(?s)^--- \n(.*?)\n---]]
+    local frontmatter_pattern = [[(?s)^---\n(.*?)\n---]]
     local args = {
         "--json",
         "-t" .. filetype,

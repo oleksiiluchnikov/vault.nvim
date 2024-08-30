@@ -289,7 +289,7 @@ end
 --- ```
 --- @param key VaultNoteDataString - The key to search by.
 --- @param query? string - The value to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use.
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use.
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return boolean
 function Notes:has_note(key, query, match_opt, case_sensitive)
@@ -437,7 +437,7 @@ end
 --- ```
 --- @param search_term VaultNotesSearchTerm - The key to search by.
 --- @param query string - The value to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use. Default: "exact"
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use. Default: "exact"
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Note|nil
 function Notes:fetch_note_by(search_term, query, match_opt, case_sensitive)
@@ -463,7 +463,7 @@ end
 --- Find note by slug.
 ---
 --- @param query string - The query to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use. Default: "exact"
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use. Default: "exact"
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Note|nil
 function Notes:fetch_note_by_slug(query, match_opt, case_sensitive)
@@ -478,7 +478,7 @@ end
 --- Find note by |vault.Note.data.path|.
 ---
 --- @param query string - The query to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use. Default: "exact"
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use. Default: "exact"
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Note|nil
 function Notes:fetch_note_by_path(query, match_opt, case_sensitive)
@@ -505,7 +505,7 @@ end
 --- assert(note.class.name == "VaultNote")
 --- ```
 --- @param query string - The query to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use. Default: "exact"
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use. Default: "exact"
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Note|nil
 function Notes:fetch_note_by_relpath(query, match_opt, case_sensitive)
@@ -650,7 +650,7 @@ end
 ---
 --- @param search_term VaultNotesSearchTerm - The key to search by.
 --- @param query string - The query to search by.
---- @param match_opt vault.enums.match_opts - The match option to use.
+--- @param match_opt vault.enum.MatchOpts.key - The match option to use.
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Notes.Group
 function Notes:with(search_term, query, match_opt, case_sensitive)
@@ -687,7 +687,7 @@ end
 --- If no query is provided, it will return `VaultNotesGroup` that have `VaultNote.data.slug` set
 ---
 --- @param query string - The query to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use. Default: "exact"
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use. Default: "exact"
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Notes.Group
 function Notes:with_slug(query, match_opt, case_sensitive)
@@ -705,7 +705,7 @@ end
 --- If no query is provided, it will return `VaultNotesGroup` that have `VaultNote.data.path` set
 ---
 --- @param query string - The query to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use. Default: "startswith"
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use. Default: "startswith"
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Notes.Group
 function Notes:with_path(query, match_opt, case_sensitive)
@@ -724,7 +724,7 @@ end
 --- Useful for filtering notes that are in the same directory.
 ---
 --- @param query string - The query to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use. Default: "startswith"
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use. Default: "startswith"
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Notes.Group
 function Notes:with_relpath(query, match_opt, case_sensitive)
@@ -747,7 +747,7 @@ end
 --- If no query is provided, it will return `VaultNotesGroup` that have `VaultNote.data.basename` set
 ---
 --- @param query string - The query to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use. Default: "startswith"
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use. Default: "startswith"
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Notes.Group
 function Notes:with_basename(query, match_opt, case_sensitive)
@@ -765,7 +765,7 @@ end
 --- If no query is provided, it will return `VaultNotesGroup` that have `VaultNote.data.stem` set
 ---
 --- @param query string - The query to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use. Default: "startswith"
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use. Default: "startswith"
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Notes.Group
 function Notes:with_stem(query, match_opt, case_sensitive)
@@ -783,7 +783,7 @@ end
 --- If no query is provided, it will return `VaultNotesGroup` that have `VaultNote.data.title` set
 ---
 --- @param query? string - The query to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use. Default: "startswith"
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use. Default: "startswith"
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Notes.Group
 function Notes:with_title(query, match_opt, case_sensitive)
@@ -806,7 +806,7 @@ end
 --- If no query is provided, it will return `VaultNotesGroup` that have not empty `VaultNote.data.content` set
 ---
 --- @param query? string - The query to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use. Default: "contains"
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use. Default: "contains"
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Notes.Group
 function Notes:with_content(query, match_opt, case_sensitive)
@@ -829,7 +829,7 @@ end
 --- If no query is provided, it will return `VaultNotesGroup` that have `VaultNote.data.frontmatter` set
 ---
 --- @param query? string - The query to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use. Default: "contains"
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use. Default: "contains"
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Notes.Group
 function Notes:with_frontmatter(query, match_opt, case_sensitive)
@@ -852,7 +852,7 @@ end
 --- If no query is provided, it will return `VaultNotesGroup` that have not empty `VaultNote.data.body` set
 ---
 --- @param query? string- The query to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use. Default: "contains"
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use. Default: "contains"
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Notes.Group
 function Notes:with_body(query, match_opt, case_sensitive)
@@ -875,7 +875,7 @@ end
 --- If no query is provided, it will return `VaultNotesGroup` that have `VaultNote.data.type` set
 ---
 --- @param query? string - The query to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use. Default: "exact"
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use. Default: "exact"
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Notes.Group
 function Notes:with_type(query, match_opt, case_sensitive)
@@ -897,7 +897,7 @@ end
 --- Get notes with `VaultNote.data.status`.
 --- If no query is provided, it will return `VaultNotesGroup` that have `VaultNote.data.status` set
 --- @param query string - The query to search by.
---- @param match_opt? vault.enums.match_opts - The match option to use. Default: "exact"
+--- @param match_opt? vault.enum.MatchOpts.key - The match option to use. Default: "exact"
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
 --- @return vault.Notes.Group
 function Notes:with_status(query, match_opt, case_sensitive)

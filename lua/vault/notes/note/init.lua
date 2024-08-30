@@ -183,7 +183,7 @@ end
 --- Check if note has an exact tag name.
 ---
 --- @param tag_name string - Exact tag name to search for.
---- @param match_opt? vault.enums.match_opts - Match option. @see utils.matcher
+--- @param match_opt? vault.enum.MatchOpts.key - Match option. @see utils.matcher
 function Note:has_tag(tag_name, match_opt)
     if not tag_name then
         error("`tag_name` is required")

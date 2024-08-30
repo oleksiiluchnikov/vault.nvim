@@ -1,6 +1,6 @@
 -- local PropertyDocumentation = require("vault.propertys.property.documentation")
 --- @alias vault.Property.Data.name string - The name of the property. e.g., "foo-bar".
---- @alias vault.Property.Data.values vault.Property.data.value[] - The values of the property.
+--- @alias vault.Property.Data.values vault.Property.Value[] - The values of the property.
 --- @alias vault.Property.data.sources vault.Notes.data.slugs - The notes slugs of notes with the property.
 --- @alias vault.Property.data.documentation vault.Property.documentation
 --- @alias vault.Property.data.count number - The number of notes with the property.
@@ -29,7 +29,7 @@ data.sources = function(property_data) end
 
 --- Fetch the values of a property.
 --- @param property_data vault.Property.data
---- @return vault.PropertyChildren
+--- @return vault.Property.Value[]
 data.values = function(property_data)
     local property_name = property_data.name
     if not property_name then

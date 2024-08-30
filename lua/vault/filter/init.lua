@@ -7,11 +7,11 @@ local enums = require("vault.utils.enums")
 
 --- @class vault.Filter.option: vault.Object
 --- Array of query terms to include.
---- @field include string[]
+--- @field include string[]|number[]
 --- Array of tag names to exclude.
---- @field exclude string[]
---- @field match_opt vault.enums.match_opts
---- @field mode vault.FilterOpts.mode
+--- @field exclude string[]|number[]
+--- @field match_opt vault.enum.MatchOpts.key
+--- @field mode vault.enum.MatchOpts.mode
 --- Whether or not to match case sensitively.
 --- @field case_sensitive boolean
 

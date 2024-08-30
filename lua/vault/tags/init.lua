@@ -57,7 +57,7 @@ function Tags:filter(opts)
     --- @param tag_name string Tag name
     --- @param queries vault.List List of query strings
     --- @param match_result boolean
-    --- @param match_opt vault.enums.match_opts Match option
+    --- @param match_opt vault.enum.MatchOpts.key Match option
     --- @param case_sensitive boolean Case sensitive
     local function apply_filter(tag_name, queries, match_result, match_opt, case_sensitive)
         if not queries then
