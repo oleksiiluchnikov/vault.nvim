@@ -48,7 +48,7 @@ local utils = require("vault.utils")
 
 --- @alias vault.Note.data.field {line:{ row: vault.lnum, col: {start: integer, end: integer}, text: string}, data: table<string, any>} - A key in the note.
 
---- @alias VaultNoteDataString
+--- @alias vault.Note.Data._key
 --- | '"path"' - The absolute path to the note.
 --- | '"relpath"' - The relative path to the root directory of the note.
 --- | '"slug"' - The slug of the note. E.g. "Project/notename".

@@ -287,7 +287,7 @@ end
 ---
 --- assert(has_note == true)
 --- ```
---- @param key VaultNoteDataString - The key to search by.
+--- @param key vault.Note.Data._key - The key to search by.
 --- @param query? string - The value to search by.
 --- @param match_opt? vault.enum.MatchOpts.key - The match option to use.
 --- @param case_sensitive? boolean - Whether to use case sensitive search. Default: false
@@ -383,7 +383,7 @@ function Notes:add_note(note)
 end
 
 --- Delete note by key.
---- @param key VaultNoteDataString - The key to search by.
+--- @param key vault.Note.Data._key - The key to search by.
 function Notes:delete_note_by_key(key, query, match_opt, case_sensitive)
     if not key then
         error(fmt_error.MISSING_PARAMETER("key"))
