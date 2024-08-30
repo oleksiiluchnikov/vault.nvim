@@ -1,35 +1,35 @@
 --- That module contains `VaultNotesCluster` class.
 local state = require("vault.core.state")
-local error_formatter = require("vault.utils.error_formatter")
+local error_msg = require("vault.utils.fmt.error")
 
----@type VaultNotes.constructor
-local Notes = state.get_global_key("_class.VaultNotes") or require("vault.notes")
+--- @type vault.Notes.constructor|vault.Notes
+local Notes = require("vault.notes")
 
----@class VaultNotesCluster: VaultNotes
+--- @class VaultNotesCluster: vault.Notes
 --- Is sub set of `VaultNotes` object.
 --- It used to build local scope of notes based on the note.
 --- We could explore to look related notes.
 --- On :increase_depth() it will expand the cluster by one level(one nesting level).
 --- On :decrease_depth() it will decrease the cluster by one level(one nesting level).
 --- On :reset_depth() it will reset the cluster to the initial state.
----@field notes VaultNotes|VaultNotesGroup -- The notes object which is the source of the cluster.
----@field note VaultNote -- The note which is the center of the cluster.
----@field depth number -- How deep we should go to fetch the cluster.
----@field map VaultMap.notes
----@diagnostic disable-next-line: undefined-field
+--- @field notes vault.Notes|vault.Notes.Group -- The notes object which is the source of the cluster.
+--- @field note vault.Note -- The note which is the center of the cluster.
+--- @field depth number -- How deep we should go to fetch the cluster.
+--- @field map vault.Notes.map
+--- @diagnostic disable-next-line: undefined-field
 local NotesCluster = Notes:extend("VaultNotesCluster")
 
 --- Create new instance of `VaultNotesCluster`.
 ---
----@param notes VaultNotes
----@param note VaultNote
----@param depth number
+--- @param notes vault.Notes
+--- @param note vault.Note
+--- @param depth number
 function NotesCluster:init(notes, note, depth)
     if not note then
-        error(error_formatter.missing_parameter("note"))
+        error(error_msg.MISSING_PARAMETER("note"))
     end
     if not depth then
-        error(error_formatter.missing_parameter("depth"))
+        error(error_msg.MISSING_PARAMETER("depth"))
     end
 
     self.notes = notes
@@ -44,7 +44,7 @@ end
 
 --- Increase the depth of the cluster.
 ---
----@return VaultNotesCluster
+--- @return VaultNotesCluster
 function NotesCluster:increase_depth()
     self.depth = self.depth + 1
     -- self:reset()
@@ -54,7 +54,7 @@ end
 
 --- Decrease the depth of the cluster.
 ---
----@return VaultNotesCluster
+--- @return VaultNotesCluster
 function NotesCluster:decrease_depth()
     self.depth = self.depth - 1
     -- self:reset()
@@ -64,7 +64,7 @@ end
 
 --- Reset the cluster to the initial state.
 ---
----@return VaultNotesCluster
+--- @return VaultNotesCluster
 function NotesCluster:reset_depth()
     self.depth = 0
     -- self:reset()
@@ -74,17 +74,14 @@ end
 
 --- Fetch cluster of notes.
 ---
----@return VaultNotesCluster
+--- @return VaultNotesCluster
 function NotesCluster:fetch_cluster()
-    ---@type VaultWikilinks
-    local wikilinks = state.get_global_key("wikilinks") or self.notes:wikilinks()
     local notes = self.notes
-
     --- Fetch cluster recursively.
     ---
-    ---@param note VaultNote
-    ---@param depth number
-    ---@return nil
+    --- @param note vault.Note
+    --- @param depth number
+    --- @return nil
     local function fetch_cluster_recursively(note, depth)
         -- depth = depth - 1
         if not note or not depth then
@@ -94,57 +91,48 @@ function NotesCluster:fetch_cluster()
 
         --- Process note.
         ---
-        ---@param target_note VaultNote
-        ---@return nil
+        --- @param target_note vault.Note
+        --- @return nil
         local function process_note(target_note)
             if not target_note then
                 return
-            end
-            if not target_note.class or target_note.class.name ~= "VaultNote" then
+            elseif not target_note.class or target_note.class.name ~= "VaultNote" then
                 return
             end
 
-            if target_note then
-                -- self:add_note(target_note)
-                self.map[target_note.data.slug] = target_note
-                if depth > 0 then
-                    fetch_cluster_recursively(target_note, depth - 1)
+            self.map[target_note.data.slug] = target_note
+            if depth > 0 then
+                fetch_cluster_recursively(target_note, depth - 1)
+            end
+        end
+
+        local inlinks = note.data.inlinks
+
+        --- @type table<vault.slug, vault.Note>
+        local inlinks_sources = {}
+        for slug, wikilinks in pairs(inlinks) do
+            for _, wikilink in pairs(wikilinks) do
+                local sources = wikilink.data.sources
+                for source, _ in pairs(sources) do
+                    inlinks_sources[source] = self.notes._raw_map[source]
                 end
             end
         end
 
-        ---@type VaultWikilinksGroup
-        local wikilinks_group = {
-            inlinks = wikilinks:by_target(note.data.slug, "exact"),
-            outlinks = note.data.outlinks,
-            resolved = {},
-            unresolved = {},
-        }
-
-        for link_type, link in pairs(wikilinks_group) do
-            for _, link in pairs(link) do
-                if link_type == "inlinks" then
-                    ---@type VaultMap.sources
-                    local sources = link.sources
-                    if sources then
-                        for source, _ in pairs(sources) do
-                            if not self.map[source] then
-                                process_note(notes._raw_map[source])
-                                goto continue
-                            end
-                        end
-                    end
-                end
-                if link_type == "outlinks" then
-                    local target = link.target
-                    if target then
-                        if not self.map[target] then
-                            process_note(notes._raw_map[target])
-                        end
-                    end
-                end
-                ::continue::
+        local outlinks = note.data.outlinks
+        --- @type table<vault.slug, vault.Note>
+        local targets = {}
+        for slug, wikilink in pairs(outlinks) do
+            local target = wikilink.data.target
+            if target then
+                targets[target] = self.notes._raw_map[target]
             end
+        end
+
+        local notes_group = vim.tbl_extend("keep", inlinks_sources, targets)
+
+        for _, target_note in pairs(notes_group) do
+            process_note(target_note)
         end
     end
 
@@ -154,9 +142,9 @@ function NotesCluster:fetch_cluster()
     return self
 end
 
----@alias VaultNotesCluster.constructor fun(notes: VaultNotes, note: VaultNote, depth: number): VaultNotesCluster
----@type VaultNotesCluster.constructor|VaultNotesCluster
+--- @alias VaultNotesCluster.constructor fun(notes: vault.Notes, note: vault.Note, depth: number): VaultNotesCluster
+--- @type VaultNotesCluster.constructor|VaultNotesCluster
 local VaultNotesCluster = NotesCluster
 
-state.set_global_key("_class.VaultNotesCluster", VaultNotesCluster)
+state.set_global_key("class.vault.NotesCluster", VaultNotesCluster)
 return VaultNotesCluster

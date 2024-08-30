@@ -1,14 +1,14 @@
 local state = require("vault.core.state")
-local error_formatter = require("vault.utils.error_formatter")
----@type VaultNotes.constructor|VaultNotes
-local Notes = state.get_global_key("_class.VaultNotes") or require("vault.notes")
+local error_formatter = require("vault.utils.fmt.error")
+--- @type vault.Notes.constructor|vault.Notes
+local Notes = state.get_global_key("class.vault.Notes") or require("vault.notes")
 
----@class VaultNotesGroup: VaultNotes
----@field init fun(self: VaultNotesGroup, notes: VaultNotes)
----@diagnostic disable-next-line: assign-type-mismatch
+--- @class vault.Notes.Group: vault.Notes
+--- @field init fun(self: vault.Notes.Group, notes: vault.Notes)
+--- @diagnostic disable-next-line: assign-type-mismatch
 local NotesGroup = Notes:extend("VaultNotesGroup")
 
----@param notes VaultNotes
+--- @param notes vault.Notes
 function NotesGroup:init(notes)
     if not notes then
         error(error_formatter.missing_parameter("notes"))
@@ -17,9 +17,9 @@ function NotesGroup:init(notes)
     self.map = notes.map
 end
 
----@alias VaultNotesGroup.constructor fun(notes: VaultNotes): VaultNotesGroup
----@type VaultNotesGroup.constructor|VaultNotesGroup
+--- @alias VaultNotesGroup.constructor fun(notes: vault.Notes): vault.Notes.Group
+--- @type VaultNotesGroup.constructor|vault.Notes.Group
 local VaultNotesGroup = NotesGroup
 
-state.set_global_key("_class.VaultNotesGroup", VaultNotesGroup)
+state.set_global_key("class.vault.NotesGroup", VaultNotesGroup)
 return VaultNotesGroup

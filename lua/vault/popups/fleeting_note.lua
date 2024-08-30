@@ -8,77 +8,119 @@ local Popup = require("nui.popup")
 local event = require("nui.utils.autocmd").event
 
 local Object = require("vault.core.object")
----@type VaultConfig|VaultConfig.options
+
+--- @type vault.Config|vault.Config.options
 local config = require("vault.config")
 local utils = require("vault.utils")
 
+--- @type vault.Notes|vault.Notes.constructor
 local Notes = require("vault.notes")
-local Note = require("vault.notes.note")
 local NoteTitle = require("vault.notes.note.title")
 
 --- Popup for creating fleeting notes.
----@class VaultPopup.fleeting_note: VaultObject
+--- @class vault.ui.Popup.FleetingNote: vault.Object
 local PopupFleetingNote = Object("VaultPopup.fleeting_note")
 
----@class VaultPopup.fleeting_note.options: nui_popup_options
----@field title VaultPopup.fleeting_note.title
----@field editor VaultPopup.fleeting_note.options.editor
----@field results VaultPopup.fleeting_note.options.results
+--- @class vault.ui.Popup.FleetingNote.options: nui_popup_options
+--- @field title vault.ui.Popup.fleeting_note.title
+--- @field editor vault.ui.Popup.fleeting_note.options.editor
+--- @field results vault.ui.Popup.fleeting_note.options.results
 
----@class VaultPopup.fleeting_note.options.editor: nui_popup_options
+--- @class vault.ui.Popup.fleeting_note.options.editor: nui_popup_options
 
----@class VaultPopup.fleeting_note.options.results: nui_popup_options
+--- @class vault.ui.Popup.fleeting_note.options.results: nui_popup_options
 
----@class VaultPopup.fleeting_note.title: { text: string, preview: string }
+--- @class vault.ui.Popup.fleeting_note.title: { text: string, preview: string }
 
---- Create a new `VaultPopupFleetingNote` instance.
+local function check_if_note_exists(path)
+    return vim.fn.filereadable(path) == 1
+end
+
+--- Callback executed when the escape key is pressed in the editor popup
+--- @param path string Path to write the new note
+--- @param content string|string[] Content of the new note
+--- @param opts table Editor popup options
+--- @return nil
+local function write_note(path, content, opts)
+    if check_if_note_exists(path) then
+        -- TODO: Handle note already exists case
+        return nil
+    end
+    -- Concatenate multiline content for performance
+    -- Use vim.split & vim.fn.writefile to avoid manual looping
+    if type(content) == "table" then
+        content = table.concat(content, "\n")
+        content = vim.trim(content)
+    end
+
+    if content == "" then
+        vim.notify("Dismissing note creation: " .. path, vim.log.levels.INFO)
+        return nil
+    end
+
+    if content:find("^.+$") then
+        content = "# " .. opts.title.text .. "\n" .. content
+    end
+
+    local lines = vim.split(content, "\n")
+    vim.fn.writefile(lines, path)
+    if not check_if_note_exists(path) then
+        vim.notify("Failed to create note: " .. path, vim.log.levels.ERROR)
+        return nil
+    end
+    vim.notify("Note created: " .. path, vim.log.levels.INFO)
+
+    return nil
+end
+
+--- Create a new |vault.ui.Popup.FleetingNote` instance.
 ---
----@param s string? - The content for the note (optional).
----@param opts VaultPopup.fleeting_note.options? - The options for the popup (optional).
----@return nil
-function PopupFleetingNote:init(s, opts)
-    s = s or ""
+--- @param content? string - The content for the note (optional).
+--- @param opts? vault.ui.Popup.FleetingNote.options - The options for the popup (optional).
+--- @return nil
+function PopupFleetingNote:init(content, opts)
+    content = content or ""
     if not opts or next(opts) == nil then
-        opts = config.popups.fleeting_note
+        opts = config.options.popups.fleeting_note
     end
     opts.title = opts.title or { text = "Fleeting Note", preview = "border" }
     if opts.title.preview then
         if opts.title.preview == "border" then
-            ---@type _nui_popup_border_style_list
+            --- @type _nui_popup_border_style_list
             opts.editor.border.style = { "╭", "─", "╮", "│", "┤", "─", "├", "│" }
         elseif opts.title.preview == "prompt" then
-            ---@type _nui_popup_border_style_list
+            --- @type _nui_popup_border_style_list
             opts.editor.border.style = { "├", "─", "┤", "│", "┤", "─", "├", "│" }
         end
     end
 
-    ---@type TelescopeLayout
+    --- @type TelescopeLayout
     local telescope_layout
-    ---@type VaultNotes
+    --- @type vault.Notes
     local notes = Notes()
-    ---@type VaultArray.notes
+    --- @type vault.Notes.list
     local notes_list = notes:list()
-    ---@type VaultNote.data.path
-    local new_note_path = config.dirs.inbox .. "/" .. opts.title.text .. config.ext
-    ---@type NuiPopup
+    --- @type vault.path
+    local new_note_path = config.options.dirs.inbox .. "/" .. opts.title.text .. config.options.ext
+    --- @type NuiPopup
     local editor_popup = Popup(opts.editor)
     local is_note_exist = false
-    ---@type number
+    --- @type number
     local prompt_bufnr
 
     --- Create Telescope layout.
     ---
-    ---@see TelescopeLayout
-    ---@param picker Picker
-    ---@return TelescopeLayout
+    --- @see TelescopeLayout
+    --- @param picker Picker
+    --- @return TelescopeLayout
     local create_layout = function(picker)
         --- Get the window configurations for the Popup windows.
         ---
-        ---@param win_opts vim.api.keyset.float_config @see `nvim_open_win` for opts
-        ---@param win_type string - The type of window.
-        ---@return vim.api.keyset.float_config
+        --- @param win_opts vim.api.keyset.float_config @see `nvim_open_win` for opts
+        --- @param win_type string - The type of window.
+        --- @return vim.api.keyset.float_config
         local function get_configs(win_opts, win_type)
-            ---@type nui_popup_win_config
+            --- @type nui_popup_win_config
             local win_config = {
                 relative = "editor",
                 width = win_opts.width,
@@ -91,7 +133,7 @@ function PopupFleetingNote:init(s, opts)
             local border_hl_group_name = "TelescopeBorder"
 
             if win_type == "title" then
-                ---@type _nui_popup_border_style_list
+                --- @type _nui_popup_border_style_list
                 win_config.border = {
                     { "╭", border_hl_group_name },
                     { "─", border_hl_group_name },
@@ -103,7 +145,7 @@ function PopupFleetingNote:init(s, opts)
                     { "│", border_hl_group_name },
                 }
             elseif win_type == "results" then
-                ---@type _nui_popup_border_style_list
+                --- @type _nui_popup_border_style_list
                 win_config.border = {
                     { " ", border_hl_group_name },
                     { " ", border_hl_group_name },
@@ -121,10 +163,10 @@ function PopupFleetingNote:init(s, opts)
 
         --- Open a window.
         ---
-        ---@param enter boolean - Whether to enter the window.
-        ---@param win_opts vim.api.keyset.float_config - The options for the window.
-        ---@param win_type string - The type of window.
-        ---@return TelescopeWindow
+        --- @param enter boolean - Whether to enter the window.
+        --- @param win_opts vim.api.keyset.float_config - The options for the window.
+        --- @param win_type string - The type of window.
+        --- @return TelescopeWindow
         local function open_window(enter, win_opts, win_type)
             local bufnr = vim.api.nvim_create_buf(false, true)
             if type(bufnr) ~= "number" then
@@ -134,14 +176,14 @@ function PopupFleetingNote:init(s, opts)
                 prompt_bufnr = bufnr
             end
 
-            ---@type vim.api.keyset.float_config
+            --- @type vim.api.keyset.float_config
             local win_config = get_configs(win_opts, win_type)
             local winid = vim.api.nvim_open_win(bufnr, enter, win_config)
             if type(winid) ~= "number" then
                 error("Failed to open window: " .. vim.inspect(bufnr, vim.inspect(win_config)))
             end
             vim.wo[winid].winhighlight = "NormalFloat:TelescopeNormal"
-            ---@type TelescopeWindow.config
+            --- @type TelescopeWindow.config
             local telescope_layout_win_config = {
                 bufnr = bufnr,
                 winid = winid,
@@ -150,10 +192,8 @@ function PopupFleetingNote:init(s, opts)
             return TelescopeLayout.Window(telescope_layout_win_config)
         end
 
-        --- Destroy a window.
-        ---
-        ---@param window TelescopeWindow - The window to destroy.
-        ---@return nil
+        --- @param window TelescopeWindow - The window to destroy.
+        --- @return nil
         local function destroy_window(window)
             if window then
                 if vim.api.nvim_win_is_valid(window.winid) then
@@ -165,11 +205,9 @@ function PopupFleetingNote:init(s, opts)
             end
         end
 
-        --- Update a window.
-        ---
-        ---@param window TelescopeWindow - The window to update.
-        ---@param win_opts vim.api.keyset.float_config - The options for the window.
-        ---@return nil
+        --- @param window TelescopeWindow - The window to update.
+        --- @param win_opts vim.api.keyset.float_config - The options for the window.
+        --- @return nil
         local function update_window(window, win_opts)
             if not window then
                 error("Unable to update window: " .. vim.inspect(win_opts))
@@ -183,20 +221,22 @@ function PopupFleetingNote:init(s, opts)
 
             local prev_win_config = vim.api.nvim_win_get_config(window.winid)
 
-            vim.api.nvim_win_set_config(
-                window.winid,
-                vim.tbl_deep_extend("force", prev_win_config, win_opts)
-            )
+            local new_win_config = vim.tbl_deep_extend("force", prev_win_config, win_opts)
+            if not new_win_config then
+                error("Unable to update window: " .. vim.inspect(win_opts))
+            end
+
+            vim.api.nvim_win_set_config(window.winid, new_win_config)
         end
 
         local results_row = opts.editor.position.row + opts.editor.size.height
         local results_col = opts.editor.position.col - 1
-        ---@type integer?
+        --- @type integer?
         local results_width = tonumber(opts.editor.size.width)
-        ---@type integer?
+        --- @type integer?
         local results_height = tonumber(opts.results.size.height)
 
-        ---@type vim.api.keyset.float_config
+        --- @type vim.api.keyset.float_config
         local results_win_opts = {
             row = results_row,
             col = results_col,
@@ -208,12 +248,12 @@ function PopupFleetingNote:init(s, opts)
         -- But we need to keep it, because we need to update the prompt buffer.
         local prompt_row = opts.editor.position.row - 1
         local prompt_col = opts.editor.position.col - 1
-        ---@type integer?
+        --- @type integer?
         local prompt_width = results_width
-        ---@type integer?
+        --- @type integer?
         local prompt_height = 1
 
-        ---@type vim.api.keyset.float_config
+        --- @type vim.api.keyset.float_config
         local prompt_win_opts = {
             row = prompt_row,
             col = prompt_col,
@@ -221,24 +261,24 @@ function PopupFleetingNote:init(s, opts)
             width = prompt_width,
         }
 
-        ---@param this TelescopeLayout
-        ---@return nil
+        --- @param this TelescopeLayout
+        --- @return nil
         local mount = function(this)
             -- s.prompt = open_window(false, results_width, 1, prompt_row, prompt_col, "title")
             this.results = open_window(false, results_win_opts, "results")
             this.prompt = open_window(false, prompt_win_opts, "title")
         end
 
-        ---@param this TelescopeLayout
-        ---@return nil
+        --- @param this TelescopeLayout
+        --- @return nil
         local unmount = function(this)
             destroy_window(this.prompt)
             destroy_window(this.results)
         end
 
-        ---@param this TelescopeLayout
-        ---@param height number
-        ---@return nil
+        --- @param this TelescopeLayout
+        --- @param height number
+        --- @return nil
         local update = function(this, height)
             results_win_opts.row = opts.editor.position.row + height
             update_window(this.results, {
@@ -247,7 +287,7 @@ function PopupFleetingNote:init(s, opts)
             })
         end
 
-        ---@type TelescopeLayout.config
+        --- @type TelescopeLayout.config
         local telecsope_layout_config = {
             picker = picker,
             mount = mount,
@@ -255,7 +295,7 @@ function PopupFleetingNote:init(s, opts)
             update = update,
         }
 
-        ---@type TelescopeLayout
+        --- @type TelescopeLayout
         telescope_layout = TelescopeLayout(telecsope_layout_config)
 
         return telescope_layout
@@ -264,19 +304,19 @@ function PopupFleetingNote:init(s, opts)
     --- Create a picker for the note popup.
     --- It will display dynamicly the notes in the vault similar title to the title of the note popup.
     ---
-    ---@return Picker
+    --- @return Picker
     local function create_picker()
         local pickers = require("telescope.pickers")
         local sorters = require("telescope.sorters")
         local finders = require("telescope.finders")
 
-        ---@type VaultNote.data.relpath[]
+        --- @type string[]
         local entries = {}
         for _, note in ipairs(notes_list) do
             table.insert(entries, "/" .. note.data.relpath)
         end
 
-        ---@type table
+        --- @type table
         local finder = finders.new_table({
             results = entries,
 
@@ -286,7 +326,7 @@ function PopupFleetingNote:init(s, opts)
             -- end
         })
 
-        ---@type Picker
+        --- @type Picker
         return pickers.new({}, {
             finder = finder,
             sorter = sorters.get_fzy_sorter(),
@@ -302,9 +342,9 @@ function PopupFleetingNote:init(s, opts)
 
     --- Update the title, and the bottom border of the note popup.
     ---
-    ---@return nil
+    --- @return nil
     local function update_buffers()
-        ---@type string[] -- The input lines of the note popup.
+        --- @type string[] -- The input lines of the note popup.
         local editor_popup_lines = vim.api.nvim_buf_get_lines(editor_popup.bufnr, 0, 1, false)
         if not editor_popup_lines then
             return
@@ -320,8 +360,8 @@ function PopupFleetingNote:init(s, opts)
             editor_popup.border:set_text("top", " " .. opts.title.text .. " ", "center")
         end
 
-        ---@type table<VaultNote.data.stem, boolean>
-        local notes_stems = notes:value_map_with_key("stem", true)
+        --- @type table<vault.stem, boolean>
+        local notes_stems = notes:values_map_by_key("stem", true)
         local query = opts.title.text:lower()
 
         -- Set the border color to `Error` if the note already exists. So we can warn the user.
@@ -333,8 +373,11 @@ function PopupFleetingNote:init(s, opts)
             is_note_exist = true
         else
             editor_popup.border:set_highlight("String")
-            ---@type VaultNote.data.path
-            new_note_path = config.dirs.inbox .. "/" .. opts.title.text .. config.ext
+            --- @type vault.path
+            new_note_path = config.options.dirs.inbox
+                .. "/"
+                .. opts.title.text
+                .. config.options.ext
             is_note_exist = false
         end
 
@@ -373,9 +416,9 @@ function PopupFleetingNote:init(s, opts)
 
     --- Update the prompt buffer.
     ---
-    ---@param bufnr number - The buffer number of the prompt buffer.
-    ---@param new_title_text string? - The new title text.
-    ---@return nil
+    --- @param bufnr number - The buffer number of the prompt buffer.
+    --- @param new_title_text? string - The new title text.
+    --- @return nil
     local function update_prompt(bufnr, new_title_text)
         new_title_text = new_title_text or ""
         local replacement = { new_title_text }
@@ -383,39 +426,23 @@ function PopupFleetingNote:init(s, opts)
     end
 
     --- Create the picker
-    ---@type Picker
+    --- @type Picker
     local results_picker = create_picker()
     -- Open the picker
     results_picker:find()
+    editor_popup:mount()
 
-    --- Map the keys for the note popup.
+    -- map the escape key to close the popup. save the note if it does not exist.
     editor_popup:map("n", "<Esc>", function()
+        local lines = vim.api.nvim_buf_get_lines(editor_popup.bufnr, 0, -1, false)
+        if not lines then
+            return
+        end
         if not is_note_exist then
-            if type(s) == "table" then
-                s = table.concat(s, "\n")
-            end
-            if s == "" then
-                -- s = "# " .. opts.title.text .. "\n"
-                -- dismiss
-                editor_popup.border:set_highlight("Error")
-                return
-            end
-            if s:find("%w") then
-                s = "# " .. opts.title.text .. "\n" .. s
-            end
-
-            ---@type VaultNote
-            local new_note = Note({
-                path = new_note_path,
-                content = s,
-            })
-
-            new_note:write()
+            write_note(new_note_path, lines, opts)
             editor_popup:unmount()
             results_picker.layout:unmount()
         end
-        -- What should we do if the note already exists?
-        -- Ask for a new title
     end)
 
     editor_popup:on(
@@ -430,11 +457,10 @@ function PopupFleetingNote:init(s, opts)
         results_picker.layout:unmount()
     end)
     editor_popup.border:set_highlight("TelescopeBorder")
-    editor_popup:mount()
 end
 
----@alias VaultPopup.fleeting_note.constructor fun(s: string?, opts: VaultPopup.fleeting_note.options?): VaultPopup.fleeting_note
----@type VaultPopup.fleeting_note.constructor|VaultPopup.fleeting_note
+--- @alias vault.ui.Popup.FleetingNote.constructor fun(s: string?, opts: vault.ui.Popup.FleetingNote.options?): vault.ui.Popup.FleetingNote
+--- @type vault.ui.Popup.FleetingNote.constructor|vault.ui.Popup.FleetingNote
 local VaultPopupFleetingNote = PopupFleetingNote
 
 return VaultPopupFleetingNote

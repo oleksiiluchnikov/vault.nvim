@@ -1,18 +1,18 @@
 local Object = require("vault.core.object")
 local config = require("vault.config")
 
----@class VaultNote.data.basename
+--- @class vault.Note.Data.basename
 local NoteBasename = Object("VaultNoteBasename")
 
----@param s string
----@return VaultNote.data.basename
+--- @param s string
+--- @return vault.Note.Data.basename
 function NoteBasename:init(s)
     if not s then
         error("NoteBasename:init() requires a string")
     end
 
     --- Special characters that are not allowed in filenames
-    ---@type table<string, string>
+    --- @type table<string, string>
     local replaces = {
         ["/"] = "-",
         [":"] = "-",
@@ -31,7 +31,7 @@ function NoteBasename:init(s)
         s = s:gsub(k, v)
     end
 
-    local ext = config.ext
+    local ext = config.options.ext
 
     if not s:match(ext .. "$") then
         s = s .. ext
@@ -47,14 +47,14 @@ function NoteBasename:__tostring()
     return self.__index
 end
 
----@return VaultNoteTitle
+--- @return vault.Note.Title
 function NoteBasename:to_title()
     local s = self.__index
     local Title = require("vault.notes.note.title")
 
-    s = s:gsub(config.ext .. "$", "")
+    s = s:gsub(config.options.ext .. "$", "")
 
-    ---@type VaultNoteTitle
+    --- @type vault.Note.Title
     local title = Title:from_string(s)
     return title
 end

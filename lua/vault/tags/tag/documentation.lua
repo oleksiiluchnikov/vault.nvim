@@ -1,23 +1,26 @@
-local Object = require("vault.core.object")
 local Job = require("plenary.job")
----@type VaultConfig|VaultConfig.options
+--- @type vault.Config|vault.Config.options
 local config = require("vault.config")
 local state = require("vault.core.state")
----@type VaultNote.constructor|VaultNote
-local Note = state.get_global_key("_class.VaultNote") or require("vault.notes.note")
+--- @type vault.Note.constructor|vault.Note
+local Note = require("vault.notes.note")
 
 --- Tag documentation.
 --- A tag documentation is an object that represents a documentation file for a tag.
----@class VaultTag.documentation: VaultNote
----@field description string
----@field path string
----@field exists boolean
----@field content string|function
+--- @class vault.Tag.Documentation: vault.Note
+--- @field description vault.Note.body
+--- @field path vault.path
+--- @field exists boolean
+--- @field content string|function
 local TagDocumentation = Note:extend("VaultTagDocumentation")
 
----@param name string
+--- @param name string
 function TagDocumentation:init(name)
-    local doc_path = config.dirs.docs .. "/" .. name .. config.ext
+    if not name then
+        error("Tag documentation name is required")
+    end
+    self.name = name
+    local doc_path = config.options.dirs.docs .. "/" .. name .. config.options.ext
     self.description = ""
     self.path = doc_path
     self.exists = vim.fn.filereadable(doc_path) == 1
@@ -34,7 +37,7 @@ function TagDocumentation:open()
 end
 
 function TagDocumentation:write(path)
-    local root_dir = config.root
+    local root_dir = config.options.root
     local parent_dir = vim.fn.fnamemodify(path, ":h")
     if not parent_dir then
         error("Invalid path: " .. path)
@@ -49,7 +52,7 @@ function TagDocumentation:write(path)
     if not is_empty then
         return
     end
-    ---title should be last part of path without extension
+    --- title should be last part of path without extension
     local title = vim.fn.fnamemodify(path, ":t:r")
     local content = "# " .. title .. "\n\n"
     content = content .. "class:: #class/Meta/Tag\n"
@@ -61,11 +64,10 @@ function TagDocumentation:write(path)
 end
 
 --- Fetch content of tag documentation.
----@param name string
----@return string
-function TagDocumentation:content(name)
-    local docs_dir = config.dirs.docs
-    local path = docs_dir .. "/" .. name .. ".md"
+--- @return string
+function TagDocumentation:content()
+    local docs_dir = config.options.dirs.docs
+    local path = docs_dir .. "/" .. self.name .. ".md"
     local f = io.open(path, "r")
     if f == nil then
         return ""
@@ -75,8 +77,8 @@ function TagDocumentation:content(name)
     return content
 end
 
----@alias VaultTag.documentation.constructor fun(name: string): VaultTag.documentation
----@type VaultTag.documentation.constructor|VaultTag.documentation
+--- @alias VaultTag.documentation.constructor fun(name: string): vault.Tag.Documentation
+--- @type VaultTag.documentation.constructor|vault.Tag.Documentation
 local VaultTagDocumentation = TagDocumentation
 
 return VaultTagDocumentation

@@ -1,33 +1,59 @@
 local Object = require("vault.core.object")
-local note_data = require("vault.notes.note.data")
+--- @type vault.StateManager
+local state = require("vault.core.state")
+--- @type vault.Note.data.constructor|vault.Note.Data
+local NoteData = state.get_global_key("class.vault.Note.data") or require("vault.notes.note.data")
 local enums = require("vault.utils.enums")
----@class VaultFilter.option: VaultObject
----@field include string[] - Array of tag names to include (optal).
----@field exclude string[] - Array of tag names to exclude (optal).
----@field match_opt VaultMatchOptsKey - Match type for filtering notes (optal). Opts: "exact", "contains", "startswith", "endswith", "regex". "fuzzy"
----@field mode - Behavior for filtering notes (optal). Opts: "all", "any"
----|"'all'"  # Matches all names.
----|"'any'" # Matches any value.
----@field case_sensitive boolean - Whether or not to match case sensitively.
 
----@class VaultFilter.option.tags: VaultFilter.option
+--- @class vault.Filter.option: vault.Object
+--- Array of query terms to include.
+--- @field include string[]
+--- Array of tag names to exclude.
+--- @field exclude string[]
+--- @field match_opt vault.enums.match_opts
+--- @field mode vault.FilterOpts.mode
+--- Whether or not to match case sensitively.
+--- @field case_sensitive boolean
 
----@class VaultFilter.option.notes: VaultFilter.option
----@field search_term string - Search term to filter on.
----|"'tag'" # Filter on tags.
----|"'slug'" # Filter on slugs.
----|"'title'" # Filter on title.
----|"'body'" # Filter on body.
----|"'status'" # Filter on status.
----|"'type'" # Filter on type.
+--- @class vault.Filter.option.tags: vault.Filter.option
 
----@class VaultFilter: VaultObject - Filter tags.
+--- @class vault.Filter.option.notes: vault.Filter.option
+--- Search term to filter on.
+--- @field search_term vault.FilterOpts.search_term
+
+--- Filter tags.
+--- @class vault.Filter: vault.Object
+--- This module provides functionality for filtering notes based on various criteria.
+--- It defines a `VaultFilter` class and related types for specifying filter options.
+--- ```lua
+--- local filter = require("vault.filter")
+--- local opts = {
+---    {
+---        search_term = "tags",
+---        include = { "foo" },
+---        exclude = { "bar" },
+---        match_opt = "exact",
+---        mode = "all",
+---        case_sensitive = false,
+---    },
+---    {
+---        search_term = "tags",
+---        include = { "baz" },
+---        exclude = { "qux" },
+---        match_opt = "exact",
+---        mode = "all",
+---        case_sensitive = false,
+---    },
+--- }
+--- local filtered_notes = notes:filter(opts)
+--- ```
 local Filter = Object("VaultFilter")
 
 --- Convert args to opts.
 ---
----@param opt VaultFilter.option|VaultFilter.option[] - Table of filter opts.
----@return VaultFilter.option
+--- Table of filter opts.
+--- @param opt vault.Filter.option|vault.Filter.option[]
+--- @return vault.Filter.option
 local function args_to_opts(opt)
     local new_opts = {}
     -- try to convert to a table
@@ -57,8 +83,10 @@ end
 
 --- Create a new Filter object.
 ---
----@param opts VaultFilter.option|VaultFilter.option[] - Table of filter opts.
----@param search_term string? - Search term to filter on.
+--- Table of filter opts.
+--- @param opts vault.Filter.option|vault.Filter.option[]
+--- Search term to filter on.
+--- @param search_term? string
 function Filter:init(opts, search_term)
     -- if not any valid
     if not opts then
@@ -75,7 +103,7 @@ function Filter:init(opts, search_term)
         opts = { opts }
     end
 
-    ---@type table<string, VaultFilter.option>
+    --- @type table<string, vault.Filter.option>
     self.opts = {}
     for k, opt in pairs(opts) do
         -- Validate opts
@@ -85,6 +113,7 @@ function Filter:init(opts, search_term)
             if not search_term then
                 error("invalid argument: must have a search term: " .. vim.inspect(opt))
             end
+            --- @diagnostic disable-next-line: inject-field
             opt.search_term = search_term
         elseif type(opt.search_term) ~= "string" then
             error("invalid argument: must be a string: " .. vim.inspect(opt.search_term))
@@ -95,13 +124,14 @@ function Filter:init(opts, search_term)
         -- Validate `search_term`
         if type(opt.search_term) ~= "string" or type(opt.search_term) ~= "string" then
             error("invalid argument: must be a string: " .. vim.inspect(opt.search_term))
-        elseif not note_data[opt.search_term] then
+        elseif not NoteData[opt.search_term] then
             error("invalid argument: must be a valid search term: " .. vim.inspect(opt.search_term))
         end
         self.opts[k].search_term = opt.search_term
 
         -- Validate `include`
         if opt.include and type(opt.include) == "string" then
+            --- @diagnostic disable-next-line: assign-type-mismatch
             opt.include = { opt.include }
         end
         if opt.include and type(opt.include) ~= "table" then
@@ -111,6 +141,7 @@ function Filter:init(opts, search_term)
 
         -- Validate `exclude`
         if opt.exclude and type(opt.exclude) == "string" then
+            --- @diagnostic disable-next-line: assign-type-mismatch
             opt.exclude = { opt.exclude }
         end
         if opt.exclude and type(opt.exclude) ~= "table" then
@@ -147,10 +178,28 @@ function Filter:init(opts, search_term)
         end
         self.opts[k].case_sensitive = opt.case_sensitive or false
     end
+    -- Store last filter to state
+    state.set_global_key("recent.filter", self)
 end
 
----@alias VaultFilter.constructor fun(opts: VaultFilter.option|VaultFilter.option[], search_term: string?): VaultFilter
----@type VaultFilter.constructor|VaultFilter
-local VaultFilter = Filter
+-- Invert filter options
+function Filter:invert()
+    for k, opt in pairs(self.opts) do
+        opt.include = vim.tbl_filter(function(v)
+            return not vim.tbl_contains(opt.exclude, v)
+        end, opt.include)
+        opt.exclude = vim.tbl_filter(function(v)
+            return not vim.tbl_contains(opt.include, v)
+        end, opt.exclude)
+    end
+    -- Store last filter to state
+    state.set_global_key("recent.filter", self)
+    return self
+end
 
-return VaultFilter
+--- Filter
+--- @alias vault.Filter.constructor fun(opts:
+--- @type vault.Filter.constructor|vault.Filter
+local M = Filter
+
+return M

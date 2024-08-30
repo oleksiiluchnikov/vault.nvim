@@ -8,3 +8,4 @@ foo.*
 data
 .luarc.json
 .DS_Store
+_scratch.lua

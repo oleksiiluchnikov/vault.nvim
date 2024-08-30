@@ -6,11 +6,11 @@ shared: true
 
 # My Awesome neovim plugin
 
-class:: #class/Project
+type:: #type/Project
 status:: #status/IN-PROGRESS
 tags:: #example, #vault, #neovim, #plugin, #awesome
 
-This is an awesome neovim plugin project note.
+This is an awesome neovim plugin project note, but whas is [[_docs/Project]]?
 
 ## Features
 
@@ -21,6 +21,12 @@ This is an awesome neovim plugin project note.
 
 - [ ] Add more features
 - [ ] write documentation
+- [ ] Refactor code
+- [ ] Improve performance
+- [ ] Add tests
+- [ ] Set up CI/CD
+- [ ] Create example plugins
+- [ ] Write tutorials
 
 ## References
 

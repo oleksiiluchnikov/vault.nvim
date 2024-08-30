@@ -1,13 +1,13 @@
 --- `VaultField` class definition.
 local Object = require("vault.core.object")
 
----@class VaultField: VaultObject
----@field key string - The key of the field.
----@field value any - The value of the field.
----@field source string - The source of the field.
+--- @classsvault.Field: vault.Object
+--- @field key string - The key of the field.
+--- @field value any - The value of the field.
+--- @field source string - The source of the field.
 local Field = Object("VaultNoteFrontmatterField")
 
----@alias VaultField.value table<string, any>
+--- @alias vault.Field.value table<string, any>
 
 local function parse_field_value(value)
     -- Attempt to parse common data types
@@ -69,7 +69,7 @@ local function parse_field_value(value)
 end
 
 --- Create a new FrontmatterField object.
----@param this table|string - The string to parse.
+--- @param this table|string - The string to parse.
 function Field:init(this)
     if type(this) == "string" then
         this = {
@@ -89,11 +89,9 @@ function Field:init(this)
 end
 
 --- Convert the FrontmatterField to a string.
----@return string
+--- @return string
 function Field:__tostring()
     return self.key .. ":: " .. self.value
 end
-
-P(Field("title: Hello World"))
 
 return Field

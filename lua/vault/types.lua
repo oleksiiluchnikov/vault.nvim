@@ -1,21 +1,17 @@
----@alias VaultPath.absolute string
----@alias VaultNote.data.relpath string -- The relative path to the `VaultPathRoot`
----@alias VaultPath.root string -- The root directory of the vault
+--- @alias vault.relpath string -- The relative path to the `VaultPathRoot`
+--- @alias vault.Config.options.root vault.path -- The path to the root of the vault.
 
----@alias VaultMap table<string, any>
----@alias VaultMap.slugs table<VaultNote.data.slug, boolean>
----@alias VaultMap.paths table<VaultPath.absolute, boolean>
----@alias VaultMap.relpaths table<VaultNote.data.relpath, boolean>
+--- @alias vault.map table<string, any>
+--- @alias vault.Notes.data.slugs table<vault.slug, boolean>
+--- @alias vault.map.paths table<vault.path, boolean>
+--- @alias vault.map.relpaths table<vault.relpath, boolean>
 
----@alias VaultArray table<integer, any>
----@alias VaultArray.paths table<integer, VaultPath.absolute>
----@alias VaultArray.relpaths table<integer, VaultNote.data.relpath>
+--- @alias vault.List table<integer, any>
+--- @alias vault.list.paths table<integer, vault.path>
+--- @alias vault.list.relpaths table<integer, vault.relpath>
 
----@alias VaultSource table<string, VaultSource.match[]>
+--- @alias vault.source table<string, vault.source.match[]>
 
----@class VaultSource.match {line: string, start: number, ["end"]: number}
----@field line string - The line where the match was found.
----@field start number - The start position of the match.
----@field end number - The end position of the match.
+--- @alias vault.source.match {line: string, lnum_start: integer, ["end"]: number}
 
----@alias VaultMap.sources table<VaultNote.data.slug, VaultSource>
+--- @alias vault.Sources.map table<vault.slug, vault.source>

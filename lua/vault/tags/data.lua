@@ -1,13 +1,15 @@
+--- @class vault.TagsData
 local data = {}
 
----@param tags VaultTags
+--- @param tags vault.Tags
+--- @return vault.Tags
 data.nested = function(tags)
-  for slug, tag in pairs(tags.map) do
-    if next(tag.data.children) == nil then
-      tags.map[slug] = nil
+    for slug, tag in pairs(tags.map) do
+        if next(tag.data.children) == nil then
+            tags.map[slug] = nil
+        end
     end
-  end
-  return tags
+    return tags
 end
 
 return data

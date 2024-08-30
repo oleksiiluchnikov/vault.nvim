@@ -2,18 +2,18 @@ local Object = require("vault.core.object")
 local Field = require("vault.fields.field")
 
 --- Frontmatter class
----@class VaultNoteFrontmatter: VaultObject - The frontmatter of a note.
----@field raw string - The raw frontmatter string.
+--- @class vault.Note.Frontmatter: vault.Object - The frontmatter of a note.
+--- @field raw string - The raw frontmatter string.
 local NoteFrontmatter = Object("VaultNoteFrontmatter")
 
 --- Create a new NoteFrontmatter object.
----@param this VaultNote.data.content - The content of the note.
+--- @param this vault.Note.data.content - The content of the note.
 function NoteFrontmatter:init(this)
     if type(this) ~= "string" then
         error("Invalid argument: " .. vim.inspect(this))
     end
     if not this:match("^%-%-%-") then
-        error("NoteFrontmatter must start with ---")
+        error("NoteFrontmatter must start with --- ")
     end
     -- local frontmatter = this:gmatch("^%-%-%-(.-)%-%-%-")[1]
     -- local frontmatter
@@ -35,8 +35,8 @@ function NoteFrontmatter:add_field(key, value)
 end
 
 --- Decode a frontmatter string to a table.
----@param s string - The frontmatter string to decode.
----@return VaultNoteFrontmatter - The decoded frontmatter.
+--- @param s string - The frontmatter string to decode.
+--- @return vault.Note.Frontmatter - The decoded frontmatter.
 function NoteFrontmatter:decode(s)
     local lines = vim.split(s, "\n")
     for i, line in ipairs(lines) do
@@ -67,7 +67,7 @@ function NoteFrontmatter:decode(s)
         if field_string:match("^%s*$") then
             goto continue
         end
-        ---@type VaultField
+        --- @type VaultField
         local field = Field(field_string)
 
         if field == nil then
@@ -94,11 +94,11 @@ function NoteFrontmatter:to_table()
 end
 
 --- Encode a table to frontmatter string.
----@param tbl table? - The table to encode.
----@return string - The encoded frontmatter.
+--- @param tbl? table - The table to encode.
+--- @return string - The encoded frontmatter.
 function NoteFrontmatter:encode(tbl)
     tbl = tbl or self:to_table()
-    local frontmatter = "---\n"
+    local frontmatter = "--- \n"
     for key, value in pairs(tbl) do
         if type(value) == "table" then
             value = vim.inspect(value)
@@ -112,18 +112,18 @@ function NoteFrontmatter:encode(tbl)
         frontmatter = frontmatter .. key .. ": " .. value .. "\n"
     end
 
-    frontmatter = frontmatter .. "---\n"
+    frontmatter = frontmatter .. "--- \n"
     return frontmatter
 end
 
 --- Convert the NoteFrontmatter to a string.
----@return string
+--- @return string
 function NoteFrontmatter:__tostring()
     return self:encode()
 end
 
----@alias NoteFrontmatter.constructor fun(text: string): VaultNoteFrontmatter
----@type NoteFrontmatter.constructor|VaultNoteFrontmatter
+--- @alias NoteFrontmatter.constructor fun(text: string): vault.Note.Frontmatter
+--- @type NoteFrontmatter.constructor|vault.Note.Frontmatter
 local VaultNoteFrontmatter = NoteFrontmatter
 
 return VaultNoteFrontmatter -- [[@as VaultsNoteFrontmatter.constructor]]

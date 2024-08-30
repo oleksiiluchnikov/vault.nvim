@@ -1,20 +1,20 @@
-local error_formatter = require("vault.utils.error_formatter")
+local error_formatter = require("vault.utils.fmt.error")
 local TagChildData = require("vault.tags.tag.child.data")
 local state = require("vault.core.state")
 
----@type VaultTag.constructor|VaultTag
-local Tag = state.get_global_key("_class.VaultTag") or require("vault.tags.tag")
+--- @type vault.Tag.constructor|vault.Tag
+local Tag = state.get_global_key("class.vault.Tag") or require("vault.tags.tag")
 
----@alias VaultTagChildren VaultTagChild[]
+--- @alias vault.Tag.children vault.Tag.Child[]
 
----@class VaultTagChild: VaultTag
----@field data VaultTagChild.data
+--- @class vault.Tag.Child: vault.Tag
+--- @field data vault.Tag.Child.data
 local TagChild = Tag:extend("VaultTagChild")
 
 --- Create a new `VaultTagChild` instance.
 ---
----@param parent VaultTag|VaultTagChild
----@param name VaultTagChild.data.name
+--- @param parent vault.Tag|vault.Tag.Child
+--- @param name vault.Tag.Child.data.name
 function TagChild:init(parent, name)
     if not parent then
         error(error_formatter.missing_parameter("parent"), 2)
@@ -33,32 +33,35 @@ end
 
 --- Fetch the data if it is not already cached.
 ---
----@param key string -- `VaultTag.data` key
----@return any
+--- @param key string -- |vault.Tag.data| key
+--- @return any
 function TagChild:__index(key)
     self[key] = rawget(self, key) or TagChildData[key](self)
     if self[key] == nil then
         error(
             "Invalid key: "
-                .. vim.inspect(key)
-                .. ". Valid keys: "
-                .. vim.inspect(vim.tbl_keys(TagChildData))
+            .. vim.inspect(key)
+            .. ". Valid keys: "
+            .. vim.inspect(vim.tbl_keys(TagChildData))
         )
     end
     return self[key]
 end
 
----@alias VaultTagChild.data.name string - The name of the tag. e.g., "foo/bar".
----@alias VaultTagChild.data.root string - The root tag of the tag. e.g., "foo" from "foo/bar".
----@alias VaultTagChild.data.parent string - The parent tag of the tag. e.g., "foo" from "foo/bar".
----@alias VaultTagChild.data.children VaultTagChildren - The children of the tag
----@alias VaultTagChild.data.sources VaultMap.slugs - The notes slugs of notes with the tag.
----@alias VaultTagChild.data.documentation VaultTag.documentation
----@alias VaultTagChild.data.count number - The number of notes with the tag.
+--- ```lua
+--- assert('foo/bar' == vault.Tag.Child.data.name)
+--- ```
+--- @alias vault.Tag.Child.data.name vault.slug
+--- @alias vault.Tag.Child.data.root vault.Tag.data.name
+--- @alias vault.Tag.Child.data.parent string - The parent tag of the tag. e.g., "foo" from "foo/bar".
+--- @alias vault.Tag.Child.data.children vault.Tag.children - The children of the tag
+--- @alias vault.Tag.Child.data.sources vault.Notes.data.slugs - The notes slugs of notes with the tag.
+--- @alias vault.Tag.Child.data.documentation vault.Tag.Documentation
+--- @alias vault.Tag.Child.data.count number - The number of notes with the tag.
 
----@alias VaultTagChild.constructor fun(parent: VaultTag|VaultTagChild, name: string): VaultTagChild
----@type VaultTagChild.constructor|VaultTagChild
-local VaultTagChild = TagChild
+--- @alias vault.Tag.Child.constructor fun(parent: vault.Tag|vault.Tag.Child, name: string): vault.Tag.Child
+--- @type vault.Tag.Child.constructor|vault.Tag.Child
+local M = TagChild
 
-state.set_global_key("_class.VaultTag.VaultTagChild", VaultTagChild)
-return VaultTagChild
+state.set_global_key("class.vault.Tag.Child", M)
+return M

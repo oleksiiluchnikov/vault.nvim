@@ -1,36 +1,61 @@
 local Object = require("vault.core.object")
 local utils = require("vault.utils")
 local state = require("vault.core.state")
----@type VaultConfig|VaultConfig.options
+--- @type vault.Config|vault.Config.options
 local config = require("vault.config")
 local Wikilink = require("vault.wikilinks.wikilink")
 local fetcher = require("vault.fetcher")
 
 local Job = require("plenary.job")
 
----@alias VaultMap.wikilinks table<VaultWikilink.data.stem, VaultWikilink>
----@class VaultWikilinksGroup: VaultWikilinks -- TODO: Make external module
----@field inlinks VaultMap.wikilinks
----@field outlinks VaultMap.wikilinks
----@field resolved VaultMap.wikilinks
----@field unresolved VaultMap.wikilinks
+--- @class vault.Wikilinks.Group: vault.Wikilinks -- TODO: Make external module
+--- @field inlinks vault.Wikilinks.map
+--- @field outlinks vault.Wikilinks.map
+--- @field resolved vault.Wikilinks.map
+--- @field unresolved vault.Wikilinks.map
 
----@class VaultWikilinks: VaultObject
----@field map VaultMap.wikilinks
----@field groups table<string, VaultWikilinksGroup>
+--- @class vault.Wikilinks: vault.Object
+--- @field map vault.Wikilinks.map
+--- @field groups table<string, vault.Wikilinks.Group>
 local Wikilinks = Object("VaultWikilinks")
 
----@param notes VaultNotes
+--- Map of |vault.Wikilink| objects.
+--- Each key is the |vault.slug| of the wikilink.
+--- ```lua
+--- local map = {
+---   ["foo"] = Wikilink("foo"),
+---   ["bar"] = Wikilink("bar"),
+---   ["baz/qux"] = Wikilink("baz/qux"),
+--- }
+---
+--- assert(map["foo"].data.target == "foo")
+--- assert(map["bar"].class.name == "VaultWikilink")
+--- ```
+--- @alias vault.Wikilinks.map table<vault.stem, vault.Wikilink>
+
+--- @example
+--- ```lua
+--- local map = {
+---     Wikilink("foo"),
+---     Wikilink("bar"),
+---     Wikilink("baz/qux"),
+--- }
+--- ```
+--- @alias vault.Wikilinks.list vault.Wikilink[]
+
+--- @param notes vault.Notes
 function Wikilinks:init(notes)
     -- if not notes then
     --     notes = state.get_global_key("notes") or require("vault.notes")()
 
     self.map = {}
 
-    if notes then
+    if not notes then
+        self.map = fetcher.wikilinks()
+    else
         -- Collect wikilinks from notes
         for slug, note in pairs(notes.map) do
-            ---@type VaultWikilinksList
+            --- @type vault.Wikilinks.list
             local note_outlinks = note.data.outlinks
 
             for wikilink_stem, wikilink in pairs(note_outlinks) do
@@ -43,40 +68,34 @@ function Wikilinks:init(notes)
                 end
             end
         end
-    else
-        self.map = fetcher.wikilinks()
     end
 
     state.set_global_key("wikilinks", self)
 end
 
 --- Wikilinks that don't have a target key.
----@return VaultWikilinks
+--- @return vault.Wikilinks
 function Wikilinks:unresolved()
     for stem, wikilink in pairs(self.map) do
         if wikilink.data.target and wikilink.data.target ~= "" then
             self.map[stem] = nil
         end
     end
-
     return self
 end
 
 --- Wikilinks that have a target key.
----
----@return VaultWikilinks
+--- @return vault.Wikilinks
 function Wikilinks:resolved()
     for stem, wikilink in pairs(self.map) do
         if not wikilink.data.target or wikilink.data.target == "" then
             self.map[stem] = nil
         end
     end
-
     return self
 end
 
---- Get targets
----@return VaultMap.slugs
+--- @return vault.Notes.data.slugs
 function Wikilinks:targets()
     local targets = {}
     for _, wikilink in pairs(self.map) do
@@ -87,22 +106,20 @@ function Wikilinks:targets()
     return targets
 end
 
----@alias VaultWikilinksList VaultWikilink[]
-
----@return VaultWikilinksList
+--- @return vault.Wikilinks.list
 function Wikilinks:list()
     return vim.tbl_values(self.map)
 end
 
 --- Get wikilinks length
----@return number
+--- @return integer
 function Wikilinks:len()
     return vim.tbl_count(self:list())
 end
 
 --- Get values by key
----@param key string
----@return table
+--- @param key string
+--- @return table
 function Wikilinks:get_values_by_key(key)
     if not key then
         error("`key` is required")
@@ -118,14 +135,12 @@ function Wikilinks:get_values_by_key(key)
     return values
 end
 
---- Get wikilinks by target
----
----@param target string
----@param match_opt VaultMatchOptsKey
----@param case_sensitive boolean?
----@return VaultMap.wikilinks
-function Wikilinks:by_target(target, match_opt, case_sensitive)
-    if not target then
+--- @param slug vault.slug
+--- @param match_opt vault.enums.match_opts
+--- @param case_sensitive? boolean
+--- @return vault.Wikilinks.map
+function Wikilinks:by_target(slug, match_opt, case_sensitive)
+    if not slug then
         error("`target` is required")
     end
 
@@ -137,7 +152,7 @@ function Wikilinks:by_target(target, match_opt, case_sensitive)
         -- if wikilink.target == target then
         --   table.insert(wikilinks, wikilink)
         -- end
-        if utils.match(wikilink.data.target, target, match_opt, case_sensitive) then
+        if utils.match(wikilink.data.target, slug, match_opt, case_sensitive) then
             wikilinks[slug] = wikilink
         end
     end
@@ -145,11 +160,9 @@ function Wikilinks:by_target(target, match_opt, case_sensitive)
     return wikilinks
 end
 
---- Get map of `VaultWikilink.source` values.
----
----@return VaultMap.slugs
+--- @return vault.Notes.data.slugs
 function Wikilinks:sources()
-    ---@type VaultMap.slugs
+    --- @type vault.Notes.data.slugs
     local sources = {}
     for _, wikilink in pairs(self.map) do
         for source, _ in pairs(wikilink.data.sources) do
@@ -161,9 +174,7 @@ function Wikilinks:sources()
     return sources
 end
 
---- Get embeds
----
----@return VaultMap.wikilinks
+--- @return vault.Wikilinks.map
 function Wikilinks:embeds()
     local embeds = {}
     for _, wikilink in pairs(self.map) do
@@ -174,8 +185,9 @@ function Wikilinks:embeds()
     return embeds
 end
 
----@alias VaultWikilinks.constructor fun(notes: VaultNotes|VaultNotesGroup?): VaultWikilinks
----@type VaultWikilinks|VaultWikilinks.constructor
-local VaultWikilinks = Wikilinks
+--- @alias vault.Wikilinks.constructor fun(notes: vault.Notes|vault.Notes.Group?): vault.Wikilinks
+--- @type vault.Wikilinks|vault.Wikilinks.constructor
+local M = Wikilinks
 
-return VaultWikilinks
+state.set_global_key("class.vault.Wikilinks", M)
+return M

@@ -1,20 +1,21 @@
 local Object = require("vault.core.object")
+local fetcher = require("vault.fetcher")
 
 local utils = require("vault.utils")
----@type VaultConfig|VaultConfig.options
+--- @type vault.Config|vault.Config.options
 local config = require("vault.config")
 local metadata = require("vault.notes.note.metadata")
 local data = require("vault.notes.note.data")
 local state = require("vault.core.state")
 
----@class VaultNote.data: VaultObject
+--- State object for |vault.Note|.
+--- @class vault.Note.Data: vault.Object
 local NoteData = Object("VaultNoteData")
 
----@param this VaultNote.data
+--- @param this vault.Note.Data
 function NoteData:init(this)
     this = this or {}
     for k, _ in pairs(this) do
-        -- if not metadata.is_valid(k) then
         if not data[k] then
             error(
                 "Invalid key: " .. vim.inspect(k) .. ". Valid keys: " .. vim.inspect(metadata.keys)
@@ -28,28 +29,44 @@ function NoteData:init(this)
     self.relpath = this.relpath or utils.path_to_relpath(this.path)
 end
 
+--- Metamethod to handle indexing into `VaultNote.data` table.
+---
+--- This allows accessing fields like regular table fields.
+--- It will first check if the field already exists, if not it will initialize it by calling the corresponding function in the data table.
+---
+--- @param key string
+--- @return any
 function NoteData:__index(key)
+    --- Initialize field if not set
     self[key] = rawget(self, key) or data[key](self)
+
     if self[key] == nil then
         error("Invalid key: " .. vim.inspect(key) .. ". Valid keys: " .. vim.inspect(metadata.keys))
     end
+
     return self[key]
 end
 
 --- Create a new note if it does not exist.
 ---
----@class VaultNote: VaultObject
----@field data VaultNote.data - The data of the note.data.
+--- @class vault.Note: vault.Object
+--- @field data vault.Note.Data - The data of the note.data.
 local Note = Object("VaultNote")
 
----@param this VaultPath.absolute|VaultNote.data
+--- Initialize a new Note object.
+---
+--- This handles converting a path string to a note data table.
+--- It also validates the note data and initializes the NoteData object.
+---
+--- @param this vault.path|vault.Note.Data - Either a path string or note data table.
 function Note:init(this)
     if type(this) == "string" then -- it's a possible path to the note
         local path = vim.fn.expand(this)
-        -- assert(type(path) == "string", "Failed to expand path: " .. vim.inspect(path))
+
         if type(path) ~= "string" then
             error("Failed to expand path: " .. vim.inspect(path))
         end
+
         this = {
             path = path,
         }
@@ -63,62 +80,85 @@ function Note:init(this)
         error("missing `path` : " .. vim.inspect(this))
     end
 
-    -- this.relpath = this.relpath or utils.path_to_relpath(this.path)
+    utils.validate_path(this.path)
 
-    ---@type VaultNote.data
+    --- @type vault.Note.Data
     local note_data = NoteData(this)
+
     self.data = note_data
 end
 
-function Note:__tostring()
-    return "VaultNote: " .. vim.inspect(self)
-end
-
---- Write note file to the specified path.
----
----@param path string?
----@param content string?
-function Note:write(path, content)
-    path = path or self.data.path
+--- @param path vault.path - The path to the note to delete.
+local function validate_new_path(path)
     if type(path) ~= "string" then
         error("Invalid path: " .. vim.inspect(path))
     end
 
-    content = content or self.data.content
+    if path == "" then
+        error("Invalid path: " .. vim.inspect(path))
+    end
 
-    local root_dir = config.root
-    local ext = config.ext
-
-    if not path:match(ext .. "$") then
+    if not path:match(config.options.ext .. "$") then
         error("Invalid file extension: " .. vim.inspect(path))
     end
 
-    if not path:match(root_dir) then
-        error("Invalid path: " .. vim.inspect(path))
+    if vim.fn.filereadable(path) == 1 then
+        error("File already exists: " .. vim.inspect(path))
     end
 
     local basename = vim.fn.fnamemodify(path, ":t")
     if not basename then
         error("Invalid basename: " .. vim.inspect(path))
     end
+end
 
-    local f = io.open(path, "w")
-    if not f then
-        error("Failed to open file: " .. vim.inspect(path))
+--- Write note file to the specified path.
+---
+--- @param path? vault.path - The path to write the note to.
+--- @param force? boolean - Whether to force the write even if the file already exists.
+function Note:write(path, force)
+    path = path or self.data.path
+    validate_new_path(path)
+
+    local content = self.data.content or ""
+    local content_lines = vim.split(content, "\n")
+    if vim.fn.filereadable(path) == 1 then
+        vim.fn.writefile(content_lines, path)
+        if config.options.notify.on_write == true then
+            vim.notify("Note created: " .. path)
+        end
+        return
     end
 
-    f:write(content)
-    f:close()
+    local slug = self.data.slug or utils.path_to_slug(path)
+    -- Check if the note with same basename exists in the whole vault
+    -- if config.options.check_duplicate_basename == true then
+    if config.options.check_duplicate_basename == true or force == false then
+        local new_stem = vim.fn.fnamemodify(path, ":t:r")
+        --- @type table<string, table<string, string>>
+        local paths = fetcher.paths()
+        for _, t in pairs(paths) do
+            local stem = vim.fn.fnamemodify(t.path, ":t:r")
+            if utils.match(stem, new_stem, "exact", false) == true then
+                vim.notify("Note with same stem already exists: " .. vim.inspect(t.slug))
+                return
+            end
+        end
+    end
+    if slug:find("/") then
+        vim.fn.mkdir(vim.fn.fnamemodify(path, ":p:h"), "p")
+    end
 
-    if config.notify.on_write == true then
+    vim.fn.writefile(content_lines, path)
+    if config.options.notify.on_write == true then
         vim.notify("Note created: " .. path)
     end
 end
 
 --- Edit note
 ---
----@class VaultNote
----@param path string
+--- @class vault.Note
+--- @param path? string
 function Note:edit(path)
     path = path or self.data.path
     if vim.fn.filereadable(path) == 0 then
@@ -128,33 +168,12 @@ function Note:edit(path)
     vim.cmd("e " .. path)
 end
 
---- Open a note in the vault
----
----@class VaultNote
----@param path string
-function Note:open(path)
-    path = path or self.data.path
-    -- if path.sub(1, -4) ~= ".md" then
-    local ext = config.ext
-    local pattern = ext .. "$"
-    if path:match(pattern) == nil then
-        ---@type VaultNote
-        local note = Note({
-            path = path,
-        })
-        if note == nil then
-            return
-        end
-        path = note.data.path
-    end
-
-    vim.cmd("e " .. path)
-end
-
 --- Preview with Glow.nvim
 ---
 function Note:preview()
-    if vim.fn.executable("glow") == 0 and package.loaded["glow"] == nil then
+    local previewer = config.options.previewer or "glow"
+
+    if vim.fn.executable(previewer) == 0 and package.loaded["glow"] == nil then
         vim.notify("Glow is not installed")
         return
     end
@@ -163,8 +182,8 @@ end
 
 --- Check if note has an exact tag name.
 ---
----@param tag_name string - Exact tag name to search for.
----@param match_opt VaultMatchOptsKey? - Match option. @see utils.matcher
+--- @param tag_name string - Exact tag name to search for.
+--- @param match_opt? vault.enums.match_opts - Match option. @see utils.matcher
 function Note:has_tag(tag_name, match_opt)
     if not tag_name then
         error("`tag_name` is required")
@@ -176,7 +195,7 @@ function Note:has_tag(tag_name, match_opt)
 
     match_opt = match_opt or "exact"
 
-    for _, tag in ipairs(note_tags) do
+    for _, tag in pairs(note_tags) do
         if utils.match(tag.data.name, tag_name, match_opt) then
             return true
         end
@@ -185,9 +204,9 @@ function Note:has_tag(tag_name, match_opt)
 end
 
 -- TEST: This function is not tested.
----@param path string - The path to the note to update inlinks.
+--- @param path string - The path to the note to update inlinks.
 function Note:update_inlinks(path)
-    local root_dir = config.root
+    local root_dir = config.options.root
     if type(root_dir) ~= "string" then
         return
     end
@@ -235,8 +254,8 @@ end
 
 --- Compare two values of a note keys.
 ---
----@param key_a string - The key to compare.
----@param key_b string - The key to compare.
+--- @param key_a string - The key to compare.
+--- @param key_b string - The key to compare.
 function Note:compare_values_of(key_a, key_b)
     if not metadata.is_valid(key_a) then
         error(
@@ -264,9 +283,218 @@ function Note:compare_values_of(key_a, key_b)
     return false
 end
 
----@alias VaultNote.constructor fun(this: VaultNote|string): VaultNote
----@type VaultNote|VaultNote.constructor
+--- Refreshes the buffers for the given paths in the current Neovim instance.
+---@param paths vault.path[]
+local function refresh_buffers(paths)
+    local bufnrs = vim.fn.getbufinfo({ buflisted = 1 })
+    for _, path in ipairs(paths) do
+        for _, bufinfo in ipairs(bufnrs) do
+            if bufinfo.name == path then
+                vim.api.nvim_buf_call(bufinfo.bufnr, function()
+                    vim.cmd("e")
+                end)
+            end
+        end
+    end
+end
+
+--- Handle existing note stem
+--- @param new_path vault.path
+--- @return vault.slug
+local function handle_existing_note_stem(new_path)
+    --- @type vault.Notes
+    local notes = state.get_global_key("notes") or require("vault.notes")()
+    notes:init()
+    local new_stem = utils.path_to_stem(new_path)
+    local new_slug = utils.path_to_slug(new_path)
+    local is_stem_exists = notes:has_note("stem", new_stem)
+
+    if is_stem_exists == true then
+        new_slug = vim.fn.input("New slug: ")
+    end
+    return new_slug
+end
+
+-- Create parent directories if they don't exist
+--- @param path vault.path
+--- @return nil
+local function create_parent_directories(path)
+    local new_path_dir = vim.fn.fnamemodify(path, ":p:h")
+    vim.fn.mkdir(new_path_dir, "p")
+    -- TODO: notify if the directory doesn't exist and created
+end
+
+--- Rename(Move) a note and update connected notes.
+--- @param new_path vault.path - The new path to move the note to.
+--- @param force? boolean - Whether to force rename even if the note with the same stem already exists.
+--- @param verbose? boolean - Whether to print a notification when the connected notes are updated.
+function Note:move(new_path, force, verbose)
+    if self.data.path == new_path then
+        return
+    end
+    force = force or false
+    verbose = verbose or true
+
+    if new_path == "" then
+        error("Invalid path: " .. vim.inspect(new_path))
+    end
+
+    local new_slug = handle_existing_note_stem(new_path)
+
+    if self.data.slug == new_slug then
+        return
+    end
+
+    -- -- Check if new path is already taken
+    if vim.fn.filereadable(new_path) == 1 then
+        if vim.fn.fnamemodify(self.data.path, ":p") ~= vim.fn.fnamemodify(new_path, ":p") then
+            vim.notify("File already exists: " .. vim.inspect(new_path))
+            return
+        end
+    end
+
+    create_parent_directories(new_path)
+
+    --- @type vault.slug[]
+    local inlinks = vim.tbl_keys(self.data.inlinks)
+    local has_inlinks = next(inlinks) ~= nil
+
+    if has_inlinks then
+        local paths_to_update = vim.tbl_map(function(path)
+            return utils.slug_to_path(path)
+        end, inlinks)
+
+        local prev_wikilink = self.data.slug
+        local new_wikilink = utils.path_to_slug(new_path)
+        local message = ""
+        if verbose then
+            message = prev_wikilink .. " -> " .. new_wikilink .. " in " .. self.data.slug
+        end
+        -- Update connected notes
+        for path, _ in pairs(paths_to_update) do
+            local note = Note({
+                path = path,
+            })
+            note:update_content(prev_wikilink, new_wikilink)
+            if verbose then
+                message = message
+                    .. "\n"
+                    .. prev_wikilink
+                    .. " -> "
+                    .. new_wikilink
+                    .. " in "
+                    .. note.data.slug
+            end
+        end
+        if verbose then
+            vim.notify("", vim.log.levels.INFO, {
+                title = "Vault",
+                on_open = function(win)
+                    local buf = vim.api.nvim_win_get_buf(win)
+                    vim.api.nvim_buf_set_option(buf, "filetype", "markdown")
+                    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { message })
+                end,
+                timeout = 1000,
+            })
+        end
+    end
+
+    vim.fn.rename(self.data.path, new_path)
+    local is_file_readable = vim.fn.filereadable(new_path)
+    if is_file_readable == 0 then
+        error("Failed to rename file: " .. vim.inspect(new_path))
+        return
+    end
+    -- Update note data
+    self.data.path = new_path
+    self.data.slug = utils.path_to_slug(new_path)
+
+    ---@type vault.path[]
+    local paths_to_refresh = {
+        self.data.path,
+    }
+    paths_to_refresh = vim.list_extend(paths_to_refresh, vim.deepcopy(paths_to_update) or {}) -- TODO: check if this is needed
+    refresh_buffers(paths_to_refresh)
+end
+
+--- This will rename the note file and update the note data, and connected notes.
+--- @param slug vault.slug
+function Note:rename(slug)
+    if type(slug) ~= "string" then
+        error("Invalid new name: " .. vim.inspect(slug))
+    end
+
+    local is_slug = slug:find("/") == nil
+    local new_path = ""
+    if is_slug then
+        new_path = utils.slug_to_path(slug)
+    else
+        --  replace last path component without extension
+        local new_slug = self.data.slug:gsub(vim.fn.fnamemodify(self.data.path, ":t:r"), slug)
+        new_path = utils.slug_to_path(new_slug)
+    end
+
+    self:move(new_path)
+end
+
+--- Update content of the note
+--- @param search_string string
+--- @param replace_string string
+function Note:update_content(search_string, replace_string)
+    if type(search_string) ~= "string" then
+        return
+    end
+
+    if type(replace_string) ~= "string" then
+        return
+    end
+    local root_dir = config.options.root
+    local f, err = io.open(self.data.path, "r")
+    if not f then
+        error(err)
+        return
+    end
+    local content = f:read("*all")
+    f:close()
+    local lines = vim.split(content, "\n")
+    if next(lines) == nil then
+        return
+    end
+
+    local line_numbers = {}
+    for i, line in ipairs(lines) do
+        if utils.match(line, search_string, "contains", true) == true then
+            line_numbers[i] = line
+        end
+    end
+
+    if next(line_numbers) == nil then
+        return
+    end
+
+    for i, line in pairs(line_numbers) do
+        local new_line = line:gsub(search_string, replace_string)
+        lines[i] = new_line
+    end
+
+    -- write the new content to the file
+    f, err = io.open(self.data.path, "w")
+    if f == nil then
+        error(err)
+        return
+    end
+    f:write(table.concat(lines, "\n"))
+    f:close()
+end
+
+--- @alias vault.Note.constructor fun(this: vault.Note|string): vault.Note
+--- @type vault.Note|vault.Note.constructor
 local VaultNote = Note
 
-state.set_global_key("_class.VaultNote", VaultNote)
+state.set_global_key("class.vault.Note", VaultNote)
+
+--- @alias vault.Note.data.constructor fun(this: vault.Note.Data): vault.Note.Data -- [[@as VaultNote.data.constructor]]
+--- @type vault.Note.data.constructor|vault.Note.Data
+local VaultNoteData = NoteData
+state.set_global_key("class.vault.NoteData", VaultNoteData)
 return VaultNote -- [[@as VaultNote.constructor]]

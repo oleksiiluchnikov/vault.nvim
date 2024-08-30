@@ -3,7 +3,7 @@ vim.opt.runtimepath:append(vim.fn.getenv("HOME") .. "/.local/share/nvim/lazy/**"
 local assert = require("luassert")
 local Notes = require("vault.notes")
 
----@param note VaultNote
+--- @param note vault.Note
 local function has_outlinks(note)
     local outlinks = note.data.outlinks
     if outlinks and next(outlinks) then
@@ -36,8 +36,8 @@ describe("VaultNotes:init()", function()
         assert.is_true(notes:count() == #vim.tbl_keys(notes.map))
     end)
 
-    it("should return a VaultNote object", function()
-        ---@type VaultNote
+    it("should return a vault.Note object", function()
+        --- @type vault.Note
         local note = vim.tbl_values(notes.map)[1]
         assert.is_true(note.class.name == "VaultNote")
     end)
@@ -73,7 +73,7 @@ describe("VaultNotes:wikilinks()", function()
 end)
 
 describe("VaultNotes:list()", function()
-    it("should return a list of VaultNote objects", function()
+    it("should return a list of vault.Note objects", function()
         local notes = Notes()
         local notes_list = notes:list()
         for i, note in pairs(notes_list) do
@@ -83,9 +83,9 @@ describe("VaultNotes:list()", function()
     end)
 end)
 
-describe("VaultNotes:value_map_with_key()", function()
+describe("VaultNotes:values_map_with_key()", function()
     it("should return a map of values with key", function()
-        local stems = Notes():value_map_with_key("stem")
+        local stems = Notes():values_map_by_key("stem")
         local random_note = Notes():get_random_note()
         assert.is_true(stems[random_note.data.stem] ~= nil)
     end)
@@ -118,7 +118,7 @@ end)
 describe("VaultNotes:get_random_note()", function()
     local notes = Notes()
     it("should return random `VaultNote` object from `VaultNotes`", function()
-        ---@type VaultNote
+        --- @type vault.Note
         local note = notes:get_random_note()
         assert.is_true(note.class.name == "VaultNote")
     end)
@@ -208,7 +208,7 @@ describe("VaultNotes:fetch_note_by_path()", function()
 end)
 
 describe("VaultNotes:fetch_note_by_relpath()", function()
-    it("should return a `VaultNote` with `exact` `VaultNote.data.relpath`", function()
+    it("should return a `VaultNote` with `exact` `string`", function()
         local notes = Notes()
         local random_note = notes:get_random_note()
         local query = random_note.data.relpath
@@ -374,7 +374,7 @@ end)
 
 describe("VaultNotes:with_relpath()", function()
     it(
-        "should return a `VaultNotesGroup` object with `VaultNote.data.relpath` that starts with",
+        "should return a `VaultNotesGroup` object with `string` that starts with",
         function()
             local notes = Notes()
             local note = notes:get_random_note()
@@ -426,7 +426,7 @@ describe("VaultNotes:with_stem()", function()
             local stem = note.data.stem
             local stem_char_count = stem:len()
             local query = stem:sub(1, math.floor(stem_char_count - 2))
-            ---@type VaultNotesGroup
+            --- @type vault.Notes.Group
             local notes_with_stem = Notes():with_stem(query, "startswith", false)
             if notes_with_stem:count() == 0 then
                 error("notes_with_stem:count() == 0")
@@ -549,7 +549,7 @@ describe("VaultNotes:filter_by_tags()", function()
                 end
             end
             local note_tags = note.data.tags
-            ---@type VaultTag
+            --- @type vault.Tag
             local tag = vim.tbl_values(note_tags)[1]
             local tag_name = tag.data.name
             local tag_name_char_count = tag_name:len()
@@ -598,7 +598,7 @@ end)
 describe("VaultNotes:linked()", function()
     local notes = Notes():linked()
     it("should return a `VaultNotesGroup` object", function()
-        ---@diagnostic disable-next-line: undefined-field
+        --- @diagnostic disable-next-line: undefined-field
         assert.is_true(notes.class.name == "VaultNotesGroup")
     end)
 
@@ -607,7 +607,7 @@ describe("VaultNotes:linked()", function()
     end)
 
     it("should return a `VaultNote` object", function()
-        ---@type VaultNote
+        --- @type vault.Note
         local note = vim.tbl_values(notes.map)[1]
         assert.is_true(note.class.name == "VaultNote")
     end)
@@ -629,7 +629,7 @@ end)
 describe("VaultNotes:internals()", function()
     local notes = Notes():internals()
     it("should return a `VaultNotesGroup` object", function()
-        ---@diagnostic disable-next-line: undefined-field
+        --- @diagnostic disable-next-line: undefined-field
         assert.is_true(notes.class.name == "VaultNotesGroup")
     end)
 
@@ -638,7 +638,7 @@ describe("VaultNotes:internals()", function()
     end)
 
     it("should return a `VaultNote` object", function()
-        ---@type VaultNote
+        --- @type vault.Note
         local note = notes:get_random_note()
         assert.is_true(note.class.name == "VaultNote")
     end)
@@ -660,7 +660,7 @@ end)
 describe("VaultNotes:leaves()", function()
     local notes = Notes():leaves()
     it("should return a `VaultNotesGroup` object", function()
-        ---@diagnostic disable-next-line: undefined-field
+        --- @diagnostic disable-next-line: undefined-field
         assert.is_true(notes:is_instance_of(Notes))
     end)
 
@@ -669,8 +669,12 @@ describe("VaultNotes:leaves()", function()
     end)
 
     it("should return a `VaultNote` object", function()
-        ---@type VaultNote
+        print(vim.inspect(notes))
+        --- @type vault.Note
         local note = vim.tbl_values(notes.map)[1]
+        if note.class.name ~= "VaultNote" then
+            print(vim.inspect(notes))
+        end
         assert.is_true(note.class.name == "VaultNote")
     end)
 
@@ -695,7 +699,7 @@ describe("VaultNotes:leaves()", function()
 end)
 
 describe("VaultNotes:orphans()", function()
-    ---@type VaultNotesGroup
+    --- @type vault.Notes.Group
     local notes = Notes():orphans()
 
     it("should return a `VaultNotesGroup` object", function()
@@ -708,7 +712,7 @@ describe("VaultNotes:orphans()", function()
 
     it("should return a `VaultNote` object", function()
         local notes_map = notes.map
-        ---@type VaultNote
+        --- @type vault.Note
         local note = vim.tbl_values(notes_map)[1]
         assert.is_true("VaultNote" == note.class.name)
     end)
@@ -742,7 +746,7 @@ end)
 --FIXME: Figure out how to test this.
 describe("VaultNotes:with_outlinks_resolved_only", function()
     it("should return less notes than the `VaultNotes` object", function()
-        ---@type VaultNotesGroup
+        --- @type vault.Notes.Group
         local notes = Notes():with_outlinks_resolved_only()
         assert.is_true(notes:count() < Notes():count())
     end)
@@ -762,7 +766,7 @@ describe("VaultNotes:with_outlinks_resolved_only", function()
         local notes = Notes()
         local notes_with_resolved_links_only = Notes():with_outlinks_resolved_only()
 
-        ---@param note VaultNote
+        --- @param note vault.Note
         local function has_resolved_links_only(note)
             local outlinks = note.data.outlinks
             for stem, outlink in pairs(outlinks) do
