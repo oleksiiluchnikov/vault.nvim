@@ -79,7 +79,7 @@ end
 
 --- Add a value to the `self.data.values` `VaultMap`.
 --- If the value already exists, it will add the slug to the `self.data.sources` `VaultMap`.
---- @param value VaultPropertyValue
+--- @param value vault.Property.Value
 --- @return vault.Property
 function Property:add_value(value)
     if not self.data.values[value.data.name] then
