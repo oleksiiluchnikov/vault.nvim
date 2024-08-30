@@ -1,4 +1,4 @@
----@class DailyNotePopup
+--- @class DailyNotePopup
 local DailyNotePopup = {}
 
 return DailyNotePopup

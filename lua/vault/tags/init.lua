@@ -4,67 +4,101 @@ local utils = require("vault.utils")
 local Filter = require("vault.filter")
 local fetcher = require("vault.fetcher")
 
----@alias VaultRipGrepMatch {type: string, data: {absolute_offset: number, line_number: number, lines: {text: string}, path: {text: string}, submatches: {match: {text: string}, start: number, end: number}}}
+-- Aliases
+--- @alias vault.Tags.map table<string, vault.Tag> - Map of tags.
+--- @alias vault.Tags.list table<integer, vault.Tag> - Map of tags.
 
----@alias VaultMap.tags table<string, VaultTag> - Map of tags.
----@alias VaultArray.tags table<integer, VaultTag> - Map of tags.
+--- @alias VaultMap.tags.sources table<string, table> - Map of tags sources.
 
----@alias VaultMap.tags.sources table<string, table> - Map of tags sources.
+--- @alias VaultTagsGroup vault.Tags - Tags that have children.
 
----@alias VaultTagsGroup VaultTags - Tags that have children.
-
----@class VaultTags: VaultObject - Retrieve tags from vault.
----@field map VaultMap.tags - Map of tags.
----@field nested VaultTagsGroup -- Tags that have children.
----@field sources fun(self: VaultTags): VaultMap.tags.sources - Get all sources from tags.
----@field list fun(self: VaultTags): VaultArray.tags - Return `VaultTags` as a `VaultArray`.
+--- VaultTags class represents a collection of tags loaded from vault.
+--- @class vault.Tags: vault.Object - Retrieve tags from vault.
+--- @field map vault.Tags.map - Map of tags.
+--- @field nested VaultTagsGroup -- Tags that have children.
+--- @field sources fun(self: vault.Tags): VaultMap.tags.sources - Get all sources from tags.
+--- @field list fun(self: vault.Tags): vault.Tags.list - Return `VaultTags` as a `VaultArray`.
 local Tags = Object("VaultTags")
 
---- Retrieve all tags names from your vault.
+--- Initializes the VaultTags object by fetching all tags from the vault.
+--- Sets the tags map and registers the tags globally.
+--- @return nil
 function Tags:init()
     self.map = fetcher.tags()
     state.set_global_key("tags", self)
 end
 
---- Filter tags with `VaultFilter.options.tags`
+--- Returns the number of tags in the tags map.
+--- @return integer Number of tags
+function Tags:count()
+    return #vim.tbl_keys(self.map)
+end
+
+--- Filters the tags based on the provided filter options.
 ---
----@param opts VaultFilter.option.tags|VaultFilter.option.tags[]
----@return VaultTagsGroup
+--- Removes any tags that don't match the include rules or match the exclude rules.
+---
+--- @param opts vault.Filter.option.tags|vault.Filter.option.tags[] Filter options
+--- @return vault.Tags Updated VaultTags object with filtered tags
 function Tags:filter(opts)
     if not opts then
         error("invalid argument: must be a table: " .. vim.inspect(opts))
     end
-    if not opts.class then
-        opts = Filter(opts, "tags")
-    end
-    opts = opts.opts
-    for _, opt in ipairs(opts) do
-        for tag_name, _ in pairs(self.map) do
-            for _, query in ipairs(opt.include) do
-                if utils.match(tag_name, query, opt.match_opt, opt.case_sensitive) == false then
-                    if self.map[tag_name] then
-                        self.map[tag_name] = nil
-                    end
-                end
-            end
 
-            for _, query in ipairs(opt.exclude) do
-                if utils.match(tag_name, query, opt.match_opt, opt.case_sensitive) == true then
-                    if self.map[tag_name] then
-                        self.map[tag_name] = nil
-                    end
+    if not opts.class then
+        -- opts = Filter(opts, "tags").opts
+        opts = Filter(opts, "tags").opts
+    end
+
+    -- opts = opts.opts
+
+    --- Applies include filters to tags.
+    --- Removes tags that don't match any include rules.
+    --- @param tag_name string Tag name
+    --- @param queries vault.List List of query strings
+    --- @param match_result boolean
+    --- @param match_opt vault.enums.match_opts Match option
+    --- @param case_sensitive boolean Case sensitive
+    local function apply_filter(tag_name, queries, match_result, match_opt, case_sensitive)
+        if not queries then
+            return
+        end
+        for _, query in ipairs(queries) do
+            if utils.match(tag_name, query, match_opt, case_sensitive) == match_result then
+                if self.map[tag_name] then
+                    self.map[tag_name] = nil
                 end
             end
         end
     end
+
+    -- { {
+    --     case_sensitive = false,
+    --     exclude = {},
+    --     include = { "software/obsidian", "software", "software/bettertouchtool", "software/keyboard-maestro", "software/photoshop/layer/blending-mode", "software/bettertouprogramming/language/c
+    -- htool", "software/obsidian/vault", "software/obsidian/leaflet", "software/zbrush", "software-development", "software/fusion360", "software/neovim", "software/obsidian/commands", "software/b
+    -- lender", "software/neovim/plugin/telescope", "software/alacritty", "software/photoshop", "software/wezterm", "software/neovim/plugin/luasnip", "software/raycast", "software/keyboard-maestro
+    -- /macro", "software/obsidian/templater", "software/obsidian/template", "software/obsidian/tags", "software/xbar", "software/cli/crontab", "software/hammerspoon", "software/neovim/plugin", "s
+    -- oftware/photoshop-brushes", "software/photoshop/layer", "software/eagle" },
+    --     match_opt = "exact",
+    --     mode = "any",
+    --     search_term = "tags"
+    --   } } - FIXME: This filter is returnning an empty table.
+    for _, opt in pairs(opts) do
+        for tag_name, _ in pairs(self.map) do
+            apply_filter(tag_name, opt.include, false, opt.match_opt, opt.case_sensitive)
+            apply_filter(tag_name, opt.exclude, true, opt.match_opt, opt.case_sensitive)
+        end
+    end
+
     return self
 end
 
---- Return a list of key values from tags.
+--- Return a list of values for a key from tags.
 ---
----@param key string - The key to get values for.
----@return string[] - The values for the key.
----@see VaultTag
+--- @param key string Key to get values for
+--- @return any[] Values for the key
+--- @see VaultTag
 function Tags:get_values_by_key(key)
     local values = {}
     for _, tag in pairs(self.map) do
@@ -76,26 +110,26 @@ function Tags:get_values_by_key(key)
 end
 
 --- Return `VaultTags` as a `VaultArray`.
----string
----@return VaultArray.tags
+--- string
+--- @return vault.Tags.list
 function Tags:list()
-    ---@type VaultArray.tags
+    --- @type vault.Tags.list
     return vim.tbl_values(self.map)
 end
 
----@return VaultTag
+--- @return vault.Tag
 function Tags:get_random_tag()
     local tags = self:list()
     local random_tag = tags[math.random(#tags)]
     return random_tag
 end
 
----@param key string - The key to filter by.
----| "'name'" # Filter by tag name.
----| "'notes_paths'" # Filter by notes paths.
----@param value string? - The value to filter by.
----@param match_opt? string - The match option to use.
----@return VaultMap.tags
+--- @param key string - The key to filter by.
+--- | "'name'" # Filter by tag name.
+--- | "'notes_paths'" # Filter by notes paths.
+--- @param value? string - The value to filter by.
+--- @param match_opt? string - The match option to use.
+--- @return vault.Tags.map
 function Tags:by(key, value, match_opt)
     assert(key, "missing `key` argument: string")
     local tags = self:list()
@@ -114,10 +148,10 @@ end
 
 --- Return a map of all sources from tags.
 ---
----@return VaultMap.tags.sources
+--- @return VaultMap.tags.sources
 function Tags:sources()
     local tags = self:list()
-    ---@type VaultMap.tags.sources
+    --- @type VaultMap.tags.sources
     local sources_map = {}
 
     for _, tag in pairs(tags) do
@@ -134,9 +168,14 @@ function Tags:sources()
     return sources_map
 end
 
----@alias VaultTags.constructor fun(filter_opts?: table): VaultTags
----@type VaultTags.constructor|VaultTags
+function Tags:reset()
+    state.clear_all()
+    self:init()
+end
+
+--- @alias VaultTags.constructor fun(filter_opts?: table): vault.Tags
+--- @type VaultTags.constructor|vault.Tags
 local VaultTags = Tags
 
-state.set_global_key("_class.VaultTags", VaultTags)
+state.set_global_key("class.vault.Tags", VaultTags)
 return VaultTags

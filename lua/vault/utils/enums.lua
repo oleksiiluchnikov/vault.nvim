@@ -1,14 +1,21 @@
 local enums = {}
+--- @alias vault.FilterOpts.search_term string
+--- | '"tag"' # Filter on tags.
+--- | '"slug"' # Filter on slugs.
+--- | '"title"' # Filter on title.
+--- | '"body"' # Filter on body.
+--- | '"status"' # Filter on status.
+--- | '"type"' # Filter on type.
 
----@alias VaultMatchOptsKey
----|"'exact'" -  Matches exact value. E.g., "foo" matches "foo" but not "foobar".
----|"'contains'" -  Matches value if it contains the query. E.g., "foo" matches "foo" and "foobar".
----|"'startswith'" -  Matches value if it starts with the query. E.g., "foo" matches "foo" and "foobar".
----|"'endswith'" -  Matches value if it ends with the query. E.g., "foo" matches "foo" and "barfoo".
----|"'regex'" -  Matches value if it matches the query as a regex. E.g., "foo" matches "foo" and "barfoo".
----|"'fuzzy'" -  Matches value if it matches the query fuzzily. E.g., "foo" matches "foo" and "barfoo".
+--- @alias vault.enums.match_opts
+--- |"'exact'" -  Matches exact value. E.g., "foo" matches "foo" but not "foobar".
+--- |"'contains'" -  Matches value if it contains the query. E.g., "foo" matches "foo" and "foobar".
+--- |"'startswith'" -  Matches value if it starts with the query. E.g., "foo" matches "foo" and "foobar".
+--- |"'endswith'" -  Matches value if it ends with the query. E.g., "foo" matches "foo" and "barfoo".
+--- |"'regex'" -  Matches value if it matches the query as a regex. E.g., "foo" matches "foo" and "barfoo".
+--- |"'fuzzy'" -  Matches value if it matches the query fuzzily. E.g., "foo" matches "foo" and "barfoo".
 
----@enum VaultMatchOptsKeys
+--- @enum vault.MatchOptsKeys
 enums.match_opts = {
     exact = 1,
     contains = 2,
@@ -18,7 +25,11 @@ enums.match_opts = {
     fuzzy = 6,
 }
 
----@enum VaultFilterOptsModeKeys
+--- @alias vault.FilterOpts.mode
+--- |"'all'"  # Matches all names.
+--- |"'any'" # Matches any value.
+
+--- @enum vault.FilterOpts.mode
 enums.filter_mode = {
     all = 1,
     any = 2,

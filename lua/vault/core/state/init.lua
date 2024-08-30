@@ -1,35 +1,51 @@
----@class VaultStateManager
-local state = {}
+--- @class vault.StateManager
+--- The state manager is responsible for managing the state of the plugin.
+local state = { global = {} }
 
----@class VaultGlobalState
----@field global table<string, any>
-VaultGlobalState = VaultGlobalState or {}
-VaultGlobalState.global = VaultGlobalState.global or {}
+--- @class vault.GlobalState
+--- @field global table<string, any>
+VaultState = VaultState or { global = {} }
+VaultState.global = VaultState.global or {}
 
----@alias VaultStateKey string
+--- @alias vault.StateManager.key string
 
 --- Get a global state key.
 ---
----@param key VaultStateKey
----@return any
+--- ```lua
+--- local state = require("vault.core.state")
+---
+--- state.get_global_key("foo")
+--- ```
+--- @param key vault.StateManager.key
+--- @return any
 function state.get_global_key(key)
-    return VaultGlobalState.global[key]
+    return VaultState.global[key]
 end
 
 --- Set a global state key to a value.
 ---
----@param key VaultStateKey
----@param value any
----@return nil
+--- ```lua
+--- local state = require("vault.core.state")
+---
+--- state.set_global_key("foo", "bar")
+--- ```
+--- @param key vault.StateManager.key
+--- @param value any
+--- @return nil
 function state.set_global_key(key, value)
-    VaultGlobalState.global[key] = value
+    VaultState.global[key] = value
 end
 
 --- Clears all global state.
 ---
----@return nil
+--- ```lua
+--- local state = require("vault.core.state")
+---
+--- state.clear_all()
+--- ```
+--- @return nil
 function state.clear_all()
-    VaultGlobalState.global = {}
+    VaultState.global = {}
 end
 
 return state

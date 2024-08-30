@@ -1,14 +1,14 @@
 local error_formatter = require("vault.errors.formatter")
 local TagDocumentation = require("vault.tags.tag.documentation")
 
----@class VaultTagChild.data: VaultTag.data
----@field parent VaultTag.data.name
----@field siblings VaultTag.data.name[]
+--- @class vault.Tag.Child.data: vault.Tag.data
+--- @field parent vault.Tag.data.name
+--- @field siblings vault.Tag.data.name[]
 local TagChildData = {}
 
----@param parent VaultTag.data|VaultTagChild.data
----@param this table
----@return VaultTagChild.data
+--- @param parent vault.Tag.data|vault.Tag.Child.data
+--- @param this table
+--- @return vault.Tag.Child.data
 function TagChildData:new(parent, this)
     if not parent then
         error(error_formatter.missing_parameter("parent"), 2)

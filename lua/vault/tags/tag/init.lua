@@ -1,15 +1,17 @@
 local Object = require("vault.core.object")
-local error_formatter = require("vault.utils.error_formatter")
+local error_formatter = require("vault.utils.fmt.error")
+local utils = require("vault.utils")
+local state = require("vault.core.state")
 
 -- local config = require("vault.config")
 local data = require("vault.tags.tag.data")
 
----@class VaultTag.data: VaultObject
+--- @class vault.Tag.data: vault.Object
 local TagData = Object("VaultTagData")
 
----@alias VaultTagDataPartial table - The partial data of the tag.
+--- @alias vault.Tag.Data.partial table - The partial data of the tag.
 
----@param this VaultTag.data.name|VaultTagDataPartial
+--- @param this vault.Tag.data.name|vault.Tag.Data.partial
 function TagData:init(this)
     if not this then
         error(error_formatter.missing_parameter("this"), 2)
@@ -38,10 +40,10 @@ end
 
 --- Fetch the data if it is not already cached.
 ---
----@param key string -- `VaultTag.data` key
----@return any
+--- @param key string -- `VaultTag.data` key
+--- @return any
 function TagData:__index(key)
-    ---@type fun(self: VaultTag.data): any
+    --- @type fun(self: vault.Tag.data): any
     local func = data[key]
     if func then
         local value = func(self)
@@ -50,23 +52,22 @@ function TagData:__index(key)
     if self[key] == nil then
         error(
             "Invalid key: "
-                .. vim.inspect(key)
-                .. ". Valid keys: "
-                .. vim.inspect(vim.tbl_keys(data))
+            .. vim.inspect(key)
+            .. ". Valid keys: "
+            .. vim.inspect(vim.tbl_keys(data))
         )
     end
     return self[key]
 end
 
----@class VaultTag: VaultObject
----@field data VaultTag.data - The data of the tag.
----@field init fun(self: VaultTag, this: VaultTag.data.name|VaultTagDataPartial): VaultTag
----@field add_slug fun(self: VaultTag, slug: string): VaultTag - Add a slug to the `self.data.sources` table.
+--- @class vault.Tag: vault.Object
+--- @field data vault.Tag.data - The data of the tag.
+--- @field init fun(self: vault.Tag, this: vault.Tag.data.name|vault.Tag.Data.partial): vault.Tag
+--- @field add_slug fun(self: vault.Tag, slug: string): vault.Tag - Add a slug to the `self.data.sources` table.
 local Tag = Object("VaultTag")
 
---- Create a new `VaultTag` instance.
----
----@param this VaultTag.data.name|VaultTagDataPartial
+--- Create a new |vault.Tag| instance.
+--- @param this vault.Tag.data.name|vault.Tag.Data.partial
 function Tag:init(this)
     if not this then
         error(error_formatter.missing_parameter("this"), 2)
@@ -82,10 +83,68 @@ function Tag:init(this)
     self.data = TagData(this)
 end
 
---- Add a slug to the `self.data.sources` `VaultMap`.
+--- Rename the tag. and update all occurences of the tag in the notes.
+--- @param name? vault.Tag.data.name
+--- @param verbose? boolean
+--- @return vault.Tag
+function Tag:rename(name, verbose)
+    if name == self.data.name then
+        return self
+    end
+    verbose = verbose or true
+    local Note = state.get_global_key("class.vault.Note") or require("vault.notes.note")
+
+    --- @type vault.map.paths
+    local paths_to_update = {}
+    for slug, _ in pairs(self.data.sources) do
+        local path = utils.slug_to_path(slug)
+        paths_to_update[path] = true
+    end
+
+    local old_name = "#" .. self.data.name
+    local new_name = "#" .. name
+    local message = ""
+    if verbose == true then
+        message = self.data.name .. " -> " .. name
+    end
+
+    -- Update connected notes
+    for path, _ in pairs(paths_to_update) do
+        --- @type vault.Note
+        local note = Note(path)
+        note:update_content(old_name, new_name)
+        if verbose == true then
+            message = message
+                .. "\n"
+                .. self.data.name
+                .. " -> "
+                .. name
+                .. " in "
+                .. note.data.slug
+        end
+    end
+    self.data.name = name
+    if verbose == false then
+        return self
+    end
+
+    vim.notify("", "info", {
+        title = "Vault",
+        on_open = function(win)
+            local buf = vim.api.nvim_win_get_buf(win)
+            vim.api.nvim_buf_set_option(buf, "filetype", "markdown")
+            vim.api.nvim_buf_set_lines(buf, 0, -1, false, { message })
+        end,
+        timeout = 1000,
+    })
+    -- require("vault.tags").reset()
+    return self
+end
+
+--- Add a slug to the |vault.Tag.Data.sources|
 ---
----@param slug string
----@return VaultTag
+--- @param slug string
+--- @return vault.Tag
 function Tag:add_slug(slug)
     if not self.data.sources[slug] then
         self.data.sources[slug] = true
@@ -93,8 +152,8 @@ function Tag:add_slug(slug)
     return self
 end
 
----@alias VaultTag.constructor fun(this: VaultTag|table|string): VaultTag
----@type VaultTag.constructor|VaultTag
+--- @alias vault.Tag.constructor fun(this: vault.Tag|table|string): vault.Tag
+--- @type vault.Tag.constructor|vault.Tag
 local VaultTag = Tag
 
 return VaultTag

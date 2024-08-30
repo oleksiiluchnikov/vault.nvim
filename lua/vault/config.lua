@@ -1,20 +1,24 @@
----@class VaultConfig
----@field options VaultConfig.options
----@field setup fun(options: VaultConfig.options?): nil
-local Config = {}
+--- The configuration for the vault plugin.
+--- @class vault.Config
+--- @field options vault.Config.options
+--- @field setup fun(options: vault.Config.options): nil
+local Config = {
+    --- @diagnostic disable-next-line: missing-fields
+    options = {},
+}
 
 --- Get the root directory for the demo vault
 ---
 --- Finds the runtime path of the current plugin, then checks for the
 --- existence of the demo vault folder under it.
----@return VaultConfig.options.root|nil - The root directory of the demo vault.
+--- @return vault.Config.options.root|nil - The root directory of the demo vault.
 local function get_demo_vault_root()
     --- Get the runtime path for this plugin
-    ---@type string[]
+    --- @type string[]
     local init_lua = vim.api.nvim_get_runtime_file("", true)
 
     --- The detected root path of the plugin
-    ---@type string|nil
+    --- @type string|nil
     local plugin_root = nil
 
     --- Check each returned path to find the plugin root
@@ -36,24 +40,26 @@ local function get_demo_vault_root()
     return demo_vault_root
 end
 
----@type VaultConfig.options.root|nil
-local demo_vault_root = get_demo_vault_root()
-if demo_vault_root == nil then
-    error("Unable to find demo vault root")
-end
+-- --- @type VaultConfig.options.root|nil
+-- local demo_vault_root = get_demo_vault_root()
+-- if demo_vault_root == nil then
+--     error("Unable to find demo vault root")
+-- end
 
----@class VaultConfig.options
----@field root string - The root directory of the vault.
----@field dirs table? - The directories for various elements in the note.
----@field ignore string[] - List of ignore patterns in glob format (e.g., ".obdidian/*, .git/*").
----@field ext string - The extension of the note files. Default: ".md"
----@field tags table - The tag configuration.
----@field search_pattern table - The search pattern for various elements in the note.
----@field search_tool string - The search tool to use. Default: "rg"
----@field popups table - The popup configuration.
----@field notify table - The notification configuration.
-local default_options = {
-    root = demo_vault_root,
+--- @class vault.Config.options
+--- @field root string - The root directory of the vault.
+--- @field dirs? table - The directories for various elements in the note.
+--- @field ignore string[] - List of ignore patterns in glob format (e.g., ".obdidian/*, .git/*").
+--- @field ext string - The extension of the note files. Default: ".md"
+--- @field tags table - The tag configuration.
+--- @field search_pattern table - The search pattern for various elements in the note.
+--- @field search_tool string - The search tool to use. Default: "rg"
+--- @field popups table - The popup configuration.
+--- @field notify table - The notification configuration.
+--- @field commands boolean - Whether to setup the commands. Default: true
+--- @field cmp boolean - Whether to setup the cmp completion. Default: true
+Config.defaults = {
+    root = "~/knowledge",
     dirs = {
         inbox = "inbox",
         docs = "_docs",
@@ -90,13 +96,14 @@ local default_options = {
     notify = {
         on_write = true,
     },
+    check_duplicate_basename = true,
     popups = {
         fleeting_note = {
             title = {
                 text = "Fleeting Note",
                 preview = "border", -- "border" | "prompt" | "none"
             },
-            editor = { -- @see :h nui.popup
+            editor = {              -- @see :h nui.popup
                 position = {
                     row = math.floor(vim.o.lines / 2) - 9,
                     col = math.floor(vim.o.columns / 2) - 40,
@@ -146,12 +153,14 @@ local default_options = {
             },
         },
     },
+    cmp = true,
+    commands = true,
 }
 
 --- Expand the root directory path.
 ---
----@param root VaultConfig.options.root - The root directory.
----@return VaultConfig.options.root - The expanded root directory.
+--- @param root vault.Config.options.root - The root directory.
+--- @return vault.Config.options.root - The expanded root directory.
 local function expand_root(root)
     -- Expand the root directory. If the root directory is relative, then expand
     if root:sub(1, 1) == "~" then
@@ -159,8 +168,8 @@ local function expand_root(root)
         if type(expanded_root) ~= "string" or expanded_root == "" then
             error(
                 "Invalid root directory: "
-                    .. vim.inspect(root)
-                    .. ". Please set a path to the root directory at the `root` option."
+                .. vim.inspect(root)
+                .. ". Please set a path to the root directory at the `root` option."
             )
         end
         root = expanded_root
@@ -171,8 +180,8 @@ end
 
 --- Expand the directories in the config recursively.
 ---
----@param dirs table? - The directories to expand.
----@return table? - The expanded directories.
+--- @param dirs? table - The directories to expand.
+--- @return table? - The expanded directories.
 local function expand_dirs(root, dirs)
     if dirs == nil then
         error("Implement default dirs")
@@ -193,17 +202,31 @@ local function expand_dirs(root, dirs)
     return dirs
 end
 
-Config.options = default_options or {}
+--- Check each dir for existence and replace with root if not found.
+function Config.check_dirs()
+    local root = Config.options.root
+    local dirs = Config.options.dirs
+    for key, dir in pairs(dirs) do
+        if type(dir) == "string" then
+            if vim.fn.isdirectory(dir) == 0 then
+                dirs[key] = root .. "/" .. dir
+            end
+        elseif type(dir) == "table" then
+            dirs[key] = expand_dirs(root, dir)
+        end
+    end
+    Config.options.dirs = dirs
+end
 
 --- Setup the vault plugin configuration.
 ---
----@param options VaultConfig.options?
+--- @param options? vault.Config.options
 function Config.setup(options)
-    options = vim.tbl_deep_extend("force", default_options, options or {})
+    options = vim.tbl_deep_extend("force", Config.options, options)
     if not options then
         error("Failed to load `vault.nvim` configuration.")
     end
-    ---@type VaultConfig.options.root
+    --- @type vault.Config.options.root
     options.root = expand_root(options.root)
     options.dirs = expand_dirs(options.root, options.dirs)
 
@@ -220,11 +243,11 @@ function Config.setup(options)
         popups = { options.popups, "table" },
     })
 
-    ---@cast options VaultConfig.options
+    --- @cast options vault.Config.options
     Config.options = options
 end
 
-Config.setup()
+Config.setup(Config.defaults)
 
----@type VaultConfig.options
+--- @type vault.Config.options
 return Config
