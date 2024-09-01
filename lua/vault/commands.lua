@@ -13,9 +13,11 @@
 --- @field reg? string
 --- @field smods vim.api.keyset.parse_cmd.mods
 
---- @class vault.commands.completions
+--- @class vault.commands.complete
 local complete = {}
 
+--- Returns the list of notes slugs
+--- @return vault.slug[]
 function complete.note_slugs()
     --- @type vault.slug[]
     local notes_slugs = require("vault.core.state").get_global_key("cache.notes.slugs")
@@ -23,16 +25,8 @@ function complete.note_slugs()
     return vim.tbl_keys(notes_slugs)
 end
 
-function complete.note_methods(arg_lead, _, _)
-    local note_methods = vim.tbl_keys(require("vault.notes.note").__meta)
-    for _, method in ipairs(note_methods) do
-        if string.sub(method, 1, string.len(arg_lead)) == arg_lead then
-            table.insert(complete, method)
-        end
-    end
-    return note_methods
-end
-
+--- Returns the list of note available data keys
+--- @return string[]
 function complete.note_data_keys()
     return vim.tbl_keys(require("vault.notes.note.data"))
 end
@@ -65,28 +59,33 @@ function complete.tags()
     return tag_names
 end
 
+--- Returns the list of values for the given key
 --- @param arg string
 --- @return table<string,any>
 function complete.values_map_by_key(arg)
     return require("vault.notes")():values_map_by_key(arg)
 end
 
+--- Returns the list of match options
 --- @return vault.enum.MatchOpts.key[]
 function complete.match_opts()
-    return require("vault.utils.enums").match_opts
+    return vim.tbl_keys(require("vault.utils.enums").match_opts)
 end
 
+--- Returns the list of match types
 --- @return vault.enum.MatchOpts.mode[]
 function complete.match_types()
-    return require("vault.utils.enums").filter_mode
+    return vim.tbl_keys(require("vault.utils.enums").filter_mode)
 end
 
+--- Returns the list of notes filters
 --- @param cmd_line string
+--- @return string[]
 function complete.notes_filter(_, cmd_line, _)
     local args = vim.split(cmd_line, " ")
     table.remove(args, 1)
     if #args == 1 then
-        return complete.vault_notes_presets
+        return complete.vault_notes_presets()
     elseif #args == 2 then
         return complete.note_data_keys()
     elseif #args == 3 then
@@ -98,8 +97,12 @@ function complete.notes_filter(_, cmd_line, _)
     elseif #args == 6 then
         return complete.match_types()
     end
+    return {}
 end
 
+--- Returns the list of tags for the current note
+--- @param cmd_line string
+--- @return string[]|nil
 function complete.note_tags(_, cmd_line, _)
     local config = require("vault.config")
     local fargs = vim.split(cmd_line, " ")
@@ -122,10 +125,14 @@ function complete.note_tags(_, cmd_line, _)
     return tags
 end
 
+--- Returns the list of vault notes presets
+--- @return string[]
 function complete.vault_notes_presets()
     return { "linked", "orphans", "leaves", "by" }
 end
 
+--- Returns the list of dates
+--- @return string[]
 function complete.dates()
     local from = tostring(os.date("%Y-%m-%d"))
     local to = tostring(os.time() - 60 * 60 * 24 * 365)
@@ -137,6 +144,8 @@ function complete.dates()
     return date_values
 end
 
+--- Returns the list of available statuses
+--- @return string[]|nil
 function complete.statuses()
     --TODO: Moved statuse to the frontmatter. Need to update this
     vim.notify("Implement")
@@ -152,26 +161,23 @@ function complete.statuses()
 end
 
 --- @param cmd_line string
-function complete.note(arg_lead, cmd_line, _)
+function complete.note(_, cmd_line, _)
     local fargs = vim.split(cmd_line, " ")
     --- @type vault.slug[]
-    local slugs = vim.tbl_keys(
-        require("vault.core.state").get_global_key("cache.notes.slugs")
-        or require("vault.fetcher").slugs()
-    )
     if #fargs == 1 then
         return
     elseif #fargs == 2 then
-        return complete.note_methods(arg_lead)
+        return require("vault.notes.note"):methods()
     elseif #fargs == 3 then
         -- TODO: Decide what to return
         -- return args for the method?
-        return slugs
+        return complete.note_slugs()
     elseif #fargs > 3 then
         -- TODO: Decide what to return
     end
 end
 
+--- @class vault.commands.callback
 local callbacks = {}
 
 --- ```vim
@@ -258,7 +264,7 @@ function callbacks.open_tags_picker(args)
         mode = "all",
     }
 
-    require("vault.pickers").notes(nil, require("vault.notes")():filter(filter_opts))
+    require("vault.pickers").notes({ notes = require("vault.notes")():filter(filter_opts) })
 end
 
 --- Vault Dates
@@ -274,7 +280,8 @@ function callbacks.open_dates_picker(args)
     --TODO: Add configuration to set the date format
     local today = os.date("%Y-%m-%d")
     local year_ago = os.date("%Y-%m-%d", os.time() - 60 * 60 * 24 * 365)
-    require("vault.pickers").dates(tostring(today), tostring(year_ago))
+    -- require("vault.pickers").dates(tostring(today), tostring(year_ago))
+    require("vault.pickers").dates({ start_date = tostring(today), end_date = tostring(year_ago) })
 end
 
 --- vault.Today
@@ -306,7 +313,7 @@ function callbacks.open_properties_picker(args)
     for _, value in ipairs(fargs) do
         table.insert(values, value)
     end
-    require("vault.pickers").properties({}, values)
+    require("vault.pickers").properties({ values = values })
 end
 
 --- @command :VaultYesterday {dates} [[
@@ -334,11 +341,9 @@ function callbacks.open_notes_status_picker(args)
             end
         end
     end
-    -- pickers.notes({}, { "tags", { statuses }, {}, "startswith", "all" })
-    require("vault.pickers").notes(
-        nil,
-        require("vault.notes")():filter({ "tags", { statuses }, {}, "startswith", "all" })
-    )
+    local notes = require("vault.notes")():filter({ "tags", { statuses }, {}, "startswith", "all" })
+
+    require("vault.pickers").notes({ notes = notes })
 end
 
 --- vault.FleetingNote
@@ -359,14 +364,14 @@ end
 --- Opens a picker with orphans
 --- @return nil
 function callbacks.open_orphans_picker()
-    require("vault.pickers").notes(nil, require("vault.notes")():orphans())
+    require("vault.pickers").notes({ notes = require("vault.notes")():orphans() })
 end
 
 --- vault.Linked
 --- Opens a picker with linked notes
 --- @return nil
 function callbacks.open_linked_picker()
-    require("vault.pickers").notes(nil, require("vault.notes")():linked())
+    require("vault.pickers").notes({ notes = require("vault.notes")():linked() })
 end
 
 --- Opens a live grep picker with fuzzy search
@@ -376,11 +381,11 @@ function callbacks.open_live_grep_picker(args)
     --TODO: Implement
     error("Not implemented")
     if args.range == 0 then
-        require("vault.pickers").live_grep({}, "")
+        require("vault.pickers").live_grep({ query = "" })
         return
     end
     local query = table.concat(args.fargs, " ")
-    require("vault.pickers").live_grep({}, query)
+    require("vault.pickers").live_grep({ query = query })
 end
 
 --- vault.Yesterday
@@ -441,7 +446,7 @@ function callbacks.note_inlinks_picker()
         return
     end
     local notes = require("vault.notes")():with_slugs(vim.tbl_keys(inlinks))
-    require("vault.pickers").notes(nil, notes)
+    require("vault.pickers").notes({ notes = notes })
 end
 
 --- vault.NoteOutlinks
@@ -451,23 +456,10 @@ end
 --- ```
 ---
 --- ```lua
---- pickers.notes(nil, require('vault.notes')():with_slugs(vim.tbl_keys(outlinks)))
+--- pickers.notes({ notes = require('vault.notes')():with_slugs(vim.tbl_keys(outlinks)) })
 --- ```
 --- @return nil
 function callbacks.note_outlinks_picker()
-    -- -- Sort notes by chars count
-    -- --- @param a vault.Note
-    -- --- @param b vault.Note
-    -- table.sort(notes_list, function(a, b)
-    --     -- get time of last modification
-    --     -- compare it
-    --     local a_time = vim.fn.getftime(a.data.path)
-    --     local b_time = vim.fn.getftime(b.data.path)
-    --     return a_time > b_time
-    --
-    --     -- return #a.data.content < #b.data.content
-    -- end)
-    --- Steps for the gradient of hl groups
     local note = require("vault.notes.note")(vim.fn.expand("%:p"))
     local outlinks = note.data.outlinks or {}
     if next(outlinks) == nil then
@@ -480,7 +472,7 @@ function callbacks.note_outlinks_picker()
         table.insert(slugs, outlink.data.slug)
     end
 
-    require("vault.pickers").notes(nil, require("vault.notes")():with_slugs(slugs))
+    require("vault.pickers").notes({ notes = require("vault.notes")():with_slugs(slugs) })
 end
 
 --- vault.NoteTags
@@ -524,7 +516,7 @@ function callbacks.note_tags_picker(args)
     -- if args.range == 2 then
     --     error("Not implemented")
     -- end
-    require("vault.pickers").notes(nil, require("vault.notes")():with_slugs(slugs))
+    require("vault.pickers").notes({ notes = require("vault.notes")():with_slugs(slugs) })
 end
 
 --- Create a new note from the selected text, and replace the selected text with a link to the new note
@@ -591,7 +583,7 @@ function callbacks.open_note_properties_picker(args)
     for _, value in ipairs(fargs) do
         table.insert(values, value)
     end
-    require("vault.pickers").properties({}, values)
+    require("vault.pickers").properties({ values = values })
 end
 
 --- VaultNoteByDir
@@ -601,14 +593,13 @@ function callbacks.open_note_by_dir_picker(args)
     local fargs = args.fargs
     if next(fargs) == nil then
         -- return notes in the root directory
-        require("vault.pickers").notes(
-            nil,
-            require("vault.notes")():with_relpath("", "exact", false)
-        )
+        require("vault.pickers").notes({
+            notes = require("vault.notes")():with_relpath("", "exact", false),
+        })
         return
     end
     local notes = require("vault.notes")():with_relpath(fargs[1], "startswith", false)
-    require("vault.pickers").notes(nil, notes)
+    require("vault.pickers").notes({ notes = notes })
 end
 
 --- @param args vault.completions.args
@@ -675,7 +666,7 @@ local function construct_notes_picker_args(input)
         require("vault.pickers").notes()
     elseif #args == 1 then
         if args[1] ~= "by" then
-            require("vault.pickers").notes(nil, require("vault.notes")()[args[1]])
+            require("vault.pickers").notes({ notes = require("vault.notes")()[args[1]] })
         elseif args[1] == "by" then
             vim.notify("Need further arguments")
         end
@@ -685,10 +676,9 @@ local function construct_notes_picker_args(input)
         if type(args[3]) ~= "table" then
             args[3] = { args[3] }
         end
-        require("vault.pickers").notes(
-            nil,
-            require("vault.notes")({ args[2], args[3], {}, "startswith", "all" })
-        )
+        require("vault.pickers").notes({
+            notes = require("vault.notes")({ args[2], args[3], {}, "startswith", "all" }),
+        })
     elseif #args == 4 then
         if type(args[3]) ~= "table" then
             args[3] = { args[3] }
@@ -696,10 +686,9 @@ local function construct_notes_picker_args(input)
         if type(args[4]) ~= "table" then
             args[4] = { args[4] }
         end
-        require("vault.pickers").notes(
-            nil,
-            require("vault.notes")({ args[2], args[3], args[4], "startswith", "all" })
-        )
+        require("vault.pickers").notes({
+            notes = require("vault.notes")({ args[2], args[3], args[4], "startswith", "all" }),
+        })
     elseif #args == 5 then
         if type(args[3]) ~= "table" then
             args[3] = { args[3] }
@@ -707,10 +696,9 @@ local function construct_notes_picker_args(input)
         if type(args[4]) ~= "table" then
             args[4] = { args[4] }
         end
-        require("vault.pickers").notes(
-            nil,
-            require("vault.notes")({ args[2], args[3], args[4], args[5], "all" })
-        )
+        require("vault.pickers").notes({
+            notes = require("vault.notes")({ args[2], args[3], args[4], args[5], "all" }),
+        })
     elseif #args == 6 then
         if type(args[3]) ~= "table" then
             args[3] = { args[3] }
@@ -718,10 +706,9 @@ local function construct_notes_picker_args(input)
         if type(args[4]) ~= "table" then
             args[4] = { args[4] }
         end
-        require("vault.pickers").notes(
-            nil,
-            require("vault.notes")({ args[2], args[3], args[4], args[5], args[6] })
-        )
+        require("vault.pickers").notes({
+            notes = require("vault.notes")({ args[2], args[3], args[4], args[5], args[6] }),
+        })
     end
 end
 
@@ -852,7 +839,7 @@ local M = {
     ["VaultInternals"] = {
         --- @command :VaultInternals [[
         callback = function()
-            require("vault.pickers").notes(nil, require("vault.notes")():internals())
+            require("vault.pickers").notes({ notes = require("vault.notes")():internals() })
         end,
         opts = {
             desc = "Open a picker with the internals",
@@ -862,7 +849,7 @@ local M = {
     },
     ["VaultLeaves"] = {
         callback = function()
-            require("vault.pickers").notes(nil, require("vault.notes")():leaves())
+            require("vault.pickers").notes({ notes = require("vault.notes")():leaves() })
         end,
         opts = {
             desc = "Open a picker with the leaves",
@@ -872,7 +859,9 @@ local M = {
     },
     ["VaultDanglingLinks"] = {
         callback = function()
-            require("vault.pickers").notes(nil, require("vault.notes")():with_outlinks_unresolved())
+            require("vault.pickers").notes({
+                notes = require("vault.notes")():with_outlinks_unresolved(),
+            })
         end,
         opts = {
             desc = "Open a picker with the dangling links",
@@ -882,7 +871,9 @@ local M = {
     },
     ["VaultOutlinksUnresolved"] = {
         callback = function()
-            require("vault.pickers").notes(nil, require("vault.notes")():with_outlinks_unresolved())
+            require("vault.pickers").notes({
+                notes = require("vault.notes")():with_outlinks_unresolved(),
+            })
         end,
         opts = {
             desc = "Open a picker with the outlinks unresolved",
@@ -892,10 +883,9 @@ local M = {
     },
     ["VaultOutlinksResolvedOnly"] = {
         callback = function()
-            require("vault.pickers").notes(
-                nil,
-                require("vault.notes")():with_outlinks_resolved_only()
-            )
+            require("vault.pickers").notes({
+                notes = require("vault.notes")():with_outlinks_resolved_only(),
+            })
         end,
         opts = {
             desc = "Open a picker with the outlinks resolved only",
@@ -943,7 +933,7 @@ local M = {
                 return
             end
             local cluster = notes:to_cluster(note, 0)
-            require("vault.pickers").notes(nil, cluster)
+            require("vault.pickers").notes({ notes = cluster })
         end,
         opts = {
             desc = "Open a picker with the notes that are in the same cluster",
@@ -1081,7 +1071,7 @@ local M = {
             for _, value in ipairs(fargs) do
                 table.insert(values, value)
             end
-            require("vault.pickers").properties({}, values)
+            require("vault.pickers").properties({ values = values })
         end,
         opts = {
             nargs = "*",
@@ -1174,11 +1164,10 @@ local M = {
     },
 }
 
-for key, value in pairs(M) do
-    local assign, err = pcall(vim.api.nvim_create_user_command, key, value.callback, value.opts)
+for command, opts in pairs(M) do
+    local assign, err = pcall(vim.api.nvim_create_user_command, command, opts.callback, opts.opts)
     if not assign then
-        -- print(key .. " failed to create, error: " .. err)
-        error(string.format("`:%s` failed to create, error: %s", key, err))
+        error(string.format("`:%s` failed to create, error: %s", command, err))
     end
 end
 

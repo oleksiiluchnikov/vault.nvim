@@ -28,40 +28,37 @@ local fetcher = require("vault.fetcher")
 local utils = require("vault.utils")
 local error_msg = require("vault.utils.fmt.error")
 
-local vault_actions = require("vault.pickers.actions")
 local vault_previewers = require("vault.pickers.previewers")
 local vault_mappings = require("vault.pickers.mappings")
 local vault_layouts = require("vault.pickers.layouts")
 
-local Tags = require("vault.tags")
 local Note = require("vault.notes.note")
 
 --- @alias Gradient string[]
 
---- @alias TelescopeFindResults fun(self: TelescopeFindResults): TelescopeFindResults
---- @alias TelescopeDisplayerConfig {separator: string, items: {width: number, remaining: boolean}[]}
+--- @alias vault.TelescopeFindResults fun(self: vault.TelescopeFindResults): vault.TelescopeFindResults
+--- @alias vault.TelescopeDisplayerConfig {separator: string, items: {width: number, remaining: boolean}[]}
 
---- @alias Picker.map fun(mode: string, keymap: string, callback: fun(bufnr: integer))
---- @alias TelescopeLayoutStrategy string|fun(self: Picker, window: TelescopeWindow): TelescopeLayout
---- @alias TelescopeWindowOptions table
---- @alias TelescopeFinder table
---- @alias TelescopeSorter table
---- @alias TelescopePreviewer table
---- @alias TelescopeEntryManager table
---- @alias TelescopeEntry {value: any, valid?: boolean, ordinal: string, display: string | TelescopeEntryMaker, filename: string?, bufnr: integer?, lnum: number?, col:? number}
---- @alias TelescopeMultiSelect table
---- @alias TelescopeScrollStrategy string|fun(self: Picker, window: TelescopeWindow, direction: string, reset: boolean)
---- @alias TelescopeSortingStrategy string|fun(self: Picker, entries: TelescopeEntry[])
---- @alias TelescopeTiebreakStrategy string|fun(self: Picker, entries: TelescopeEntry[])
---- @alias TelescopeSelectionStrategy string|fun(self: Picker, entries: TelescopeEntry[], prompt: string)
---- @alias TelescopeBorder string|table
---- @alias TelescopeBorderChars table
---- @alias TelescopeCachePickerOptions table
---- @alias TelescopeEntryMaker fun(entry: TelescopeEntry): TelescopeEntry
+--- @alias vault.Picker.map fun(mode: string, keymap: string, callback: fun(bufnr: integer))
+--- @alias vault.TelescopeLayoutStrategy string|fun(self: Picker, window: TelescopeWindow): TelescopeLayout
+--- @alias vault.TelescopeWindowOptions table
+--- @alias vault.TelescopeFinder table
+--- @alias vault.TelescopeSorter table
+--- @alias vault.TelescopePreviewer table
+--- @alias vault.TelescopeEntryManager table
+--- @alias vault.TelescopeEntry {value: any, valid?: boolean, ordinal: string, display: string | vault.TelescopeEntryMaker, filename: string?, bufnr: integer?, lnum: number?, col: number}
+--- @alias vault.TelescopeMultiSelect table
+--- @alias vault.TelescopeScrollStrategy string|fun(self: Picker, window: TelescopeWindow, direction: string, reset: boolean)
+--- @alias vault.TelescopeTiebreakStrategy string|fun(self: Picker, entries: vault.TelescopeEntry[])
+--- @alias vault.TelescopeSelectionStrategy string|fun(self: Picker, entries: vault.TelescopeEntry[], prompt: string)
+--- @alias vault.TelescopeBorder string|table
+--- @alias vault.TelescopeBorderChars table
+--- @alias vault.TelescopeCachePickerOptions table
+--- @alias vault.TelescopeEntryMaker fun(entry: vault.TelescopeEntry): vault.TelescopeEntry
 
 --- @class TelescopePickerOptions
---- @field layout_strategy? TelescopeLayoutStrategy
---- @field get_window_options? fun(): TelescopeWindowOptions
+--- @field layout_strategy? vault.TelescopeLayoutStrategy
+--- @field get_window_options? fun(): vault.TelescopeWindowOptions
 --- @field prompt_title? string
 --- @field results_title? string
 --- @field preview_title? string
@@ -75,30 +72,30 @@ local Note = require("vault.notes.note")
 --- @field default_text? string
 --- @field get_status_text? fun(): string
 --- @field on_input_filter_cb? fun()
---- @field finder TelescopeFinder
+--- @field finder vault.TelescopeFinder
 --- @field sorter? Sorter
---- @field previewer? TelescopePreviewer|TelescopePreviewer[]
+--- @field previewer? vault.TelescopePreviewer|vault.TelescopePreviewer[]
 --- @field current_previewer_index? number
 --- @field default_selection_index? number
 --- @field get_selection_window? fun(): TelescopeWindow
 --- @field cwd? string
 --- @field _completion_callbacks? table
---- @field manager? TelescopeEntryManager
---- @field _multi? TelescopeMultiSelect
+--- @field manager? vault.TelescopeEntryManager
+--- @field _multi? vault.TelescopeMultiSelect
 --- @field track? boolean
 --- @field attach_mappings? boolean
 --- @field file_ignore_patterns? string[]
---- @field scroll_strategy? TelescopeScrollStrategy
---- @field sorting_strategy? TelesopeSortingStrategy
---- @field tiebreak? TelescopeTiebreakStrategy
---- @field selection_strategy? TelescopeSelectionStrategy
+--- @field scroll_strategy? vault.TelescopeScrollStrategy
+--- @field sorting_strategy? table
+--- @field tiebreak? vault.TelescopeTiebreakStrategy
+--- @field selection_strategy? vault.TelescopeSelectionStrategy
 --- @field push_cursor_on_edit? boolean
 --- @field push_tagstack_on_edit? boolean
 --- @field layout_config? table
 --- @field cycle_layout_list? boolean
---- @field border? TelescopeBorder
---- @field borderchars? TelescopeBorderChars
---- @field cache_picker? TelescopeCachePickerOptions
+--- @field border? vault.TelescopeBorder
+--- @field borderchars? vault.TelescopeBorderChars
+--- @field cache_picker? vault.TelescopeCachePickerOptions
 --- @field temp__scrolling_limit? number
 --- @field __locations_input? boolean
 --- @field create_layout? fun(self: Picker, window: TelescopeWindow): TelescopeLayout
@@ -107,22 +104,24 @@ local Note = require("vault.notes.note")
 --- @field resumed_picker? boolean
 --- @field fix_preview_title? boolean
 
+--- @class telescope_popup_options.vault.Notes: telescope_popup_options
+--- @field notes? vault.Notes
+
 --- Search for notes in vault
---- @param opts? telescope_popup_options
---- @param notes? vault.Notes Notes instance to use
+--- @param opts? telescope_popup_options.vault.Notes
 --- @return nil
-function vault_pickers.notes(opts, notes)
+function vault_pickers.notes(opts)
     opts = opts or {}
-    notes = notes or require("vault.notes")()
+    opts.notes = opts.notes or require("vault.notes")()
 
     --- @type vault.Note[]
-    local results = notes:list()
+    local results = opts.notes:list()
     if next(results) == nil then
         Log.info("No notes found in vault")
         return
     end
 
-    local average_content_count = notes:average_chars()
+    local average_content_count = opts.notes:average_chars()
     local prompt_title = string.format("average chars: %d", average_content_count)
 
     local steps = 64
@@ -181,7 +180,7 @@ function vault_pickers.notes(opts, notes)
         local col_3_hl_name = col_1_hl_name
 
         --- -
-        --- @type TelescopeDisplayerConfig
+        --- @type vault.TelescopeDisplayerConfig
         --- @see entry_display.create
         local displayer_config = {
             separator = " ",
@@ -206,7 +205,7 @@ function vault_pickers.notes(opts, notes)
     end
 
     --- @param note vault.Note
-    --- @return TelescopeEntry
+    --- @return vault.TelescopeEntry
     local entry_maker = function(note)
         return {
             value = note,
@@ -243,16 +242,17 @@ function vault_pickers.notes(opts, notes)
     return picker
 end
 
+--- @class telescope_popup_options.vault.Tags: telescope_popup_options
+
 --- Search for tags
 --- @param opts? table - Telescope options
---- @param tags? vault.Tags - Tags instance to use
-function vault_pickers.tags(opts, tags)
+function vault_pickers.tags(opts)
     opts = opts or {}
-    tags = tags or require("vault.tags")()
+    opts.tags = opts.tags or require("vault.tags")()
 
     --- @type vault.Tags.list
-    local tags_list = tags:list()
-    if next(tags) == nil then
+    local tags_list = opts.tags:list()
+    if next(opts.tags) == nil then
         Log.info("No tags found in vault")
         return
     end
@@ -266,16 +266,18 @@ function vault_pickers.tags(opts, tags)
     --- @type Gradient|nil
     local colors = Gradient.from_stops(steps, "#444444", "#a9a9a9", "String")
     if type(colors) ~= "table" then
-        error(
-            error_msg.COMMAND_EXECUTION_ERROR("Gradient.from_stops", "table", vim.inspect(colors))
-        )
+        -- error(
+        --     error_msg.COMMAND_EXECUTION_ERROR("Gradient.from_stops", "table", vim.inspect(colors))
+        -- )
+        -- error("Gradient.from_stops", "table", vim.inspect(colors))
+        error("Gradient.from_stops")
     end
     local hl_name = "VaultTag"
     for i, color in ipairs(colors) do
         vim.api.nvim_set_hl(0, hl_name .. tostring(i), { fg = color })
     end
 
-    --- @param entry TelescopeEntry
+    --- @param entry vault.TelescopeEntry
     local make_display = function(entry)
         --- @type vault.Tag
         local tag = entry.value
@@ -313,7 +315,7 @@ function vault_pickers.tags(opts, tags)
     end
 
     --- @param tag vault.Tag
-    --- @return TelescopeEntry
+    --- @return vault.TelescopeEntry
     local entry_maker = function(tag)
         return {
             value = tag,
@@ -340,171 +342,101 @@ function vault_pickers.tags(opts, tags)
     return picker
 end
 
---- I want to browse tag until it has no more nesting,
---- and then return to full tag name like: status/TODO/later
---- and then pick with tags { status/TODO/later} for example
---- For example we have tag: software/Blender/extensions
-function vault_pickers.notes_by(tag_prefix) -- software or software/Blender(if we selected software)
-    if tag_prefix == nil then
-        return
-    end
-    local root_dir = config.options.root
-    local tags = require("vault"):tags(tag_prefix) -- get all tags with prefix
-    if #tags == 0 then
-        -- if we selected software/Blender and there is no tags with prefix software/Blender
-        -- then we have no more nesting and we need to return to full tag name
-        -- our pick._cache.parent_tag will be software/Blender/software/Blender/extensions
-        local parent_tag = vault_pickers._cache.parent_tag
-        if parent_tag == "" then
-            return
-        end
-        local tag_name = parent_tag:gsub(tag_prefix .. "/", "") -- now we have software/Blender/extensions
-        vim.notify(tag_name)
-        vault_pickers._cache.parent_tag = ""                    -- reset parent_tag
-        vault_pickers.notes_filter_by_tags({ tag_name })        -- now we have { software/Blender/extensions }
-        return
-    end
+--
+-- --- Picker for browsing tags from root tag.
+-- --- For example we have tag: status/TODO/later
+-- --- We want to browse it like this:
+-- --- status
+-- --- status/TODO
+-- --- status/TODO/later
+-- --- And then pick we open notes picker filtered by tag: status/TODO/later
+-- --- @param root_tag_name? string - Root tag to start browsing from
+-- function vault_pickers.root_tags(root_tag_name)
+--     local root_dir = config.options.root
+--     local tags = {}
+--     if root_tag_name ~= nil then
+--         tags = Tags():by(root_tag_name)
+--     else
+--         tags = Tags()
+--     end
+--
+--     if next(tags) == nil then
+--         Log.info("No root tags found in vault: " .. root_dir)
+--         return
+--     end
+--
+--     local root_tags = {}
+--     local seen_root_tags = {}
+--     for _, tag in ipairs(tags) do
+--         local _root_tag_name = tag.name:match("([^/]+)")
+--         if not seen_root_tags[_root_tag_name] then
+--             seen_root_tags[_root_tag_name] = true
+--             table.insert(root_tags, _root_tag_name)
+--         end
+--     end
+--
+--     local make_display = function(entry)
+--         local entry_width = 29
+--         local displayer = entry_display.create({
+--             separator = " ",
+--             items = {
+--                 { width = entry_width },
+--                 { remaining = true },
+--             },
+--         })
+--         local tag_name = entry.name
+--         return displayer({
+--             { tag_name, "TelescopeResultsNormal" },
+--         })
+--     end
+--
+--     local entry_maker = function(tag)
+--         return {
+--             value = tag,
+--             ordinal = tag,
+--             display = make_display,
+--         }
+--     end
+--
+--     local function enter(bufnr)
+--         local selection = actions_state.get_selected_entry()
+--         local root_tag = selection.value
+--         vault_pickers.root_tags(root_tag)
+--         vault_actions.close(bufnr)
+--     end
+--
+--     local picker = pickers
+--         .new(vault_layouts.mini(), {
+--             prompt_title = "Status",
+--             finder = finders.new_table({
+--                 results = root_tags,
+--                 entry_maker = entry_maker,
+--             }),
+--             sorter = sorters.get_generic_fuzzy_sorter(),
+--             attach_mappings = function(_, _)
+--                 actions.select_default:replace(enter)
+--                 return true
+--             end,
+--         })
+--         :find()
+--     vault_state.set_global_key("picker", picker)
+--     return picker
+-- end
 
-    local entries = {}
-    for _, tag in ipairs(tags) do
-        local entry = tag.name -- now we have software/Blender/extensions if we selected software
-        -- if we selected software/Blender we need to remove software/Blender from entry
-        if tag_prefix ~= "" then
-            entry = entry:gsub(tag_prefix .. "/", "") -- now we have extensions
-        end
-        if entry ~= "" then
-            table.insert(entries, entry)
-        end
-    end
-
-    if #entries == 0 then
-        Log.error("No notes found in vault: " .. root_dir)
-        return
-    end
-
-    local function enter(bufnr)
-        local selection = actions_state.get_selected_entry()
-        local tag = selection[1]
-        vault_actions.close(bufnr)
-
-        --- if we selected software/Blender we need to save it to cache and remove software/Blender from tag value to left only extensions
-        --- our pick._cache.parent_tag should be updated and conain software/Blender/extensions
-        --- and then we can pick with tags { software/Blender/extensions }
-        if vault_pickers._cache.parent_tag ~= tag_prefix .. "/" .. tag then
-            vault_pickers._cache.parent_tag = tag_prefix .. "/" .. tag
-            vault_pickers.notes_by(tag_prefix .. "/" .. tag)
-            return
-        end
-    end
-
-    local picker = pickers
-        .new(vault_layouts.mini(), {
-            prompt_title = "Status",
-            finder = finders.new_table(entries),
-            sorter = sorters.get_generic_fuzzy_sorter(),
-            attach_mappings = function(_, _)
-                actions.select_default:replace(enter)
-                return true
-            end,
-        })
-        :find()
-    vault_state.set_global_key("picker", picker)
-    return picker
-end
-
---- Picker for browsing tags from root tag.
---- For example we have tag: status/TODO/later
---- We want to browse it like this:
---- status
---- status/TODO
---- status/TODO/later
---- And then pick we open notes picker filtered by tag: status/TODO/later
---- @param root_tag_name? string - Root tag to start browsing from
-function vault_pickers.root_tags(root_tag_name)
-    local root_dir = config.options.root
-    local tags = {}
-    if root_tag_name ~= nil then
-        tags = Tags():by(root_tag_name)
-    else
-        tags = Tags()
-    end
-
-    if next(tags) == nil then
-        Log.info("No root tags found in vault: " .. root_dir)
-        return
-    end
-
-    local root_tags = {}
-    local seen_root_tags = {}
-    for _, tag in ipairs(tags) do
-        local _root_tag_name = tag.name:match("([^/]+)")
-        if not seen_root_tags[_root_tag_name] then
-            seen_root_tags[_root_tag_name] = true
-            table.insert(root_tags, _root_tag_name)
-        end
-    end
-
-    local make_display = function(entry)
-        local entry_width = 29
-        local displayer = entry_display.create({
-            separator = " ",
-            items = {
-                { width = entry_width },
-                { remaining = true },
-            },
-        })
-        local tag_name = entry.name
-        return displayer({
-            { tag_name, "TelescopeResultsNormal" },
-        })
-    end
-
-    local entry_maker = function(tag)
-        return {
-            value = tag,
-            ordinal = tag,
-            display = make_display,
-        }
-    end
-
-    local function enter(bufnr)
-        local selection = actions_state.get_selected_entry()
-        local root_tag = selection.value
-        vault_pickers.root_tags(root_tag)
-        vault_actions.close(bufnr)
-    end
-
-    local picker = pickers
-        .new(vault_layouts.mini(), {
-            prompt_title = "Status",
-            finder = finders.new_table({
-                results = root_tags,
-                entry_maker = entry_maker,
-            }),
-            sorter = sorters.get_generic_fuzzy_sorter(),
-            attach_mappings = function(_, _)
-                actions.select_default:replace(enter)
-                return true
-            end,
-        })
-        :find()
-    vault_state.set_global_key("picker", picker)
-    return picker
-end
-
+--- @class telescope_popup_options.vault.Dates: telescope_popup_options
+--- @field start_date? string Specifies the start date of the date range. Defaults: 7 days ago
+--- @field end_date? string Specifies the end date of the date range. Defaults: today
 --- Search for date and corresponding note
 --- TODO: Add option to create note if it doesn't exist
 --- TODO: Add option to configure date format
---- @param start_date? string Specifies the start date of the date range. Defaults: 7 days ago
---- @param end_date? string Specifies the end date of the date range. Defaults: today
-function vault_pickers.dates(start_date, end_date)
+function vault_pickers.dates(opts)
     --- @type string
-    end_date = end_date or tostring(os.date("%Y-%m-%d"))
+    opts.end_date = opts.end_date or tostring(os.date("%Y-%m-%d"))
     --- @type string
-    start_date = start_date or tostring(os.date("%Y-%m-%d", os.time() - 7 * 24 * 60 * 60))
+    opts.start_date = opts.start_date or tostring(os.date("%Y-%m-%d", os.time() - 7 * 24 * 60 * 60))
 
     local Dates = require("dates")
-    local date_values = Dates.from_to(start_date, end_date)
+    local date_values = Dates.from_to(opts.start_date, opts.end_date)
     local daily_dir = config.options.dirs.journal.daily
 
     local daily_notes = {}
@@ -556,7 +488,7 @@ function vault_pickers.dates(start_date, end_date)
     local preview_width = bufwidth - results_width - 3
     local entry_width = 29
 
-    --- @param entry TelescopeEntry
+    --- @param entry vault.TelescopeEntry
     local make_display = function(entry)
         local display_value = {}
 
@@ -614,7 +546,8 @@ function vault_pickers.dates(start_date, end_date)
                         error("bufnr is not a number")
                     end
                     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-                    vim.api.nvim_buf_set_option(bufnr, "filetype", "markdown")
+                    -- vim.api.nvim_buf_set_option(bufnr, "filetype", "markdown")
+                    vim.api.nvim_set_option_value("filetype", "markdown", { buf = bufnr })
                     return bufnr
                 end,
             }),
@@ -702,19 +635,25 @@ end
 --- With mode "all" or "any"
 
 --- Search for notes in Inbox directory
-function vault_pickers.inbox()
+--- @param opts? telescope_popup_options.vault.Notes
+function vault_pickers.inbox(opts)
     local inbox_dir = config.options.dirs.inbox
 
-    local notes = {}
+    opts = opts or {}
+    opts.notes = opts.notes or require("vault.notes")()
     for _, note_path in ipairs(vim.fn.globpath(inbox_dir, "**/*" .. config.options.ext, true, true)) do
         local note = Note(note_path)
-        table.insert(notes, note)
+        table.insert(opts.notes, note)
     end
 
-    vault_pickers.notes(nil, notes)
+    vault_pickers.notes(opts)
 end
 
-function vault_pickers.tasks()
+--- @class telescope_popup_options.vault.Tasks: telescope_popup_options
+--- @field tasks? table<string, table>
+function vault_pickers.tasks(opts)
+    opts = opts or {}
+    opts.tasks = opts.tasks or require("vault.fetcher").tasks()
     local tasks = fetcher.tasks()
     local results = {}
     for slug, map in pairs(tasks) do
@@ -773,7 +712,7 @@ function vault_pickers.tasks()
         -- verbose_status = verbose_status
         --     .. string.rep(" ", status_width - string.len(verbose_status))
 
-        local full_width = vim.api.nvim_get_option("columns")
+        local full_width = vim.o.columns
         local stem = entry.value.slug:match("([^/]+)$")
         local stem_width = string.len(stem)
         local status_width = string.len(entry.value.status)
@@ -837,8 +776,8 @@ function vault_pickers.tasks()
             sorter = sorters.get_generic_fuzzy_sorter(),
             sorting_strategy = "ascending",
             layout_config = {
-                height = vim.api.nvim_get_option("lines") - 4,
-                width = vim.api.nvim_get_option("columns"),
+                height = vim.o.lines - 4,
+                width = vim.o.columns,
             },
             attach_mappings = function(_, _)
                 actions.select_default:replace(enter)
@@ -850,12 +789,15 @@ function vault_pickers.tasks()
     return picker
 end
 
---- @param opts table
---- @param note vault.Note|nil
-function vault_pickers.move_note_to(opts, note)
-    opts = opts or {}
+--- @class telescope_popup_options.vault.move_note_to: telescope_popup_options
+--- @field note? vault.Note
 
-    if note == nil then
+--- @param opts table
+function vault_pickers.move_note_to(opts)
+    opts = opts or {}
+    opts.note = opts.note
+
+    if opts.note == nil then
         -- get current buffer path
         local bufnr = vim.api.nvim_get_current_buf()
         local path = vim.api.nvim_buf_get_name(bufnr)
@@ -863,9 +805,7 @@ function vault_pickers.move_note_to(opts, note)
             Log.error("Current buffer is not in vault")
             return
         end
-        note = Note({
-            path = path,
-        })
+        opts.note = Note(path)
     end
 
     local root_dir = config.options.root
@@ -875,22 +815,22 @@ function vault_pickers.move_note_to(opts, note)
         local selection = actions_state.get_selected_entry()
         --- @type vault.path
         local path = selection.value
-        local basename = vim.fn.fnamemodify(note.data.path, ":t")
+        local basename = vim.fn.fnamemodify(opts.note.data.path, ":t")
         local new_path = string.format("%s%s", path, basename)
         actions.close(bufnr)
         -- vim.fn.rename(note.data.path, new_path)
-        note:rename(new_path)
+        opts.note:rename(new_path)
         -- Update current buffer.
         -- How does vim manage this?
         -- If we rename current buffer, it will be closed and new buffer will be opened
-        local bufnr_of_note = vim.fn.bufnr(note.data.path)
+        local bufnr_of_note = vim.fn.bufnr(opts.note.data.path)
         -- vim.cmd("write") -- write changes to disk
         -- we couldnd write becaust the picker is still open
         vim.api.nvim_buf_delete(bufnr_of_note, { force = true })
         vim.cmd("edit " .. new_path)
     end
 
-    --- @param entry TelescopeEntry
+    --- @param entry vault.TelescopeEntry
     local make_display = function(entry)
         local entry_width = entry.value:len()
         local displayer = entry_display.create({
@@ -918,7 +858,7 @@ function vault_pickers.move_note_to(opts, note)
         }
     end
 
-    local attach_mappings = function(_, map)
+    local attach_mappings = function()
         actions.select_default:replace(enter)
         return true
     end
@@ -943,27 +883,33 @@ function vault_pickers.move_note_to(opts, note)
     return picker
 end
 
+--- @class telescope_popup_options.vault.cluster: telescope_popup_options
+--- @field path? string Path to note to open build cluster from
+--- @field notes? vault.Notes Notes instance to use
+--- @field depth? number Depth of cluster to build
+
 --- Open picker for |vault.Notes.Cluster| from provided `vault.Note`. Default is current buffer.
 --- @param opts table
---- @param path string
-function vault_pickers.open_cluster(opts, path, notes, depth)
-    notes = notes or require("vault.notes")()
-    path = path or vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
-    depth = depth or 0
-    local note = Note({
-        path = path,
-    })
-    local notes_cluster = require("vault.notes.cluster")(notes, note, depth)
+function vault_pickers.open_cluster(opts)
+    opts = opts or {}
+    opts.notes = opts.notes or require("vault.notes")()
+    opts.path = opts.path or vim.api.nvim_buf_get_name(vim.api.nvim_get_current_buf())
+    opts.depth = opts.depth or 0
+    -- local note = Note({
+    --     path = path,
+    -- })
+    local note = Note(opts.path)
+    local notes_cluster = require("vault.notes.cluster")(opts.notes, note, opts.depth)
     if next(notes_cluster.map) == nil then
         error("No notes found in cluster")
         return
     end
-    vault_pickers.notes(opts, notes_cluster)
+    vault_pickers.notes(opts)
 end
 
 -- Live Grep across all notes
 --- @param opts table
-function vault_pickers.live_grep(opts, query)
+function vault_pickers.live_grep(opts)
     local root_dir = config.options.root
     local screen_width = vim.api.nvim_list_uis()[1].width
     local screen_height = vim.api.nvim_list_uis()[1].height
@@ -978,7 +924,7 @@ function vault_pickers.live_grep(opts, query)
         },
         cwd = root_dir,
         glob_pattern = "**/*.md",
-        search = query,
+        search = opts.query,
     }
 
     -- merge opts with default opts
@@ -1000,7 +946,7 @@ end
 -- --- ```
 -- --- @param opts table
 -- --- @param query? string[] - List of property names to show. If not provided, all properties will be shown.
--- function vault_pickers.properties(opts, query)
+-- function vault_pickers.properties(opts)
 --     --- @type vault.Notes
 --     local notes = require("vault.notes")()
 --     --- @type table<string, table>
@@ -1051,7 +997,7 @@ end
 --                 local note = Note(path)
 --                 notes:add_note(note)
 --             end
---             vault_pickers.notes(opts, notes)
+--             vault_pickers.notes(opts)
 --         end
 --
 --         local attach_mappings = function(_, map)
@@ -1097,13 +1043,13 @@ end
 local function pick_property(opts, properties, callback)
     local results = vim.tbl_keys(properties.map)
 
-    local function enter(bufnr)
+    local function enter()
         local selection = actions_state.get_selected_entry()
         local property_name = selection[1]
         callback(property_name)
     end
 
-    local attach_mappings = function(_, map)
+    local attach_mappings = function()
         actions.select_default:replace(enter)
         return true
     end
@@ -1139,13 +1085,13 @@ end
 local function pick_value(opts, property_name, values, callback)
     local results = vim.tbl_keys(values)
 
-    local function enter(bufnr)
+    local function enter()
         local selection = actions_state.get_selected_entry()
         local value_name = selection[1]
         callback(value_name)
     end
 
-    local attach_mappings = function(_, map)
+    local attach_mappings = function()
         actions.select_default:replace(enter)
         return true
     end
@@ -1192,20 +1138,22 @@ local function pick_value(opts, property_name, values, callback)
     return picker
 end
 
+--- @class telescope_popup_options.vault.properties: telescope_popup_options
+--- @field query? string[] List of property names to show. If not provided, all properties will be shown.
+
 --- @param opts? table
---- @param query? string[] - List of property names to show. If not provided, all properties will be shown.
-function vault_pickers.properties(opts, query)
+function vault_pickers.properties(opts)
     opts = opts or {}
-    query = query or {}
+    opts.query = opts.query or {}
     local notes = require("vault.notes")()
     -- local properties = require("vault.fetcher").properties()
     --- @type vault.Properties
     local properties = require("vault.properties")()
 
     -- Filter properties by query
-    if next(query) ~= nil then
+    if next(opts.query) ~= nil then
         local filtered_properties = {}
-        for _, property in ipairs(query) do
+        for _, property in ipairs(opts.query) do
             if properties.map[property] ~= nil then
                 filtered_properties[property] = properties.map[property]
             end
@@ -1230,7 +1178,7 @@ function vault_pickers.properties(opts, query)
                 local note = Note(path)
                 notes:add_note(note)
             end
-            vault_pickers.notes(opts, notes)
+            vault_pickers.notes(opts)
         end
 
         pick_value(opts, property_name, values, on_value_selected)
@@ -1244,16 +1192,18 @@ function vault_pickers.properties(opts, query)
     end
 end
 
+--- @class telescope_popup_options.vault.dirs: telescope_popup_options
+--- @field query? string[] List of property names to show. If not provided, all properties will be shown.
+
 --- @param opts? table
---- @param query? string[] - List of property names to show. If not provided, all properties will be shown.
-function vault_pickers.dirs(opts, query)
+function vault_pickers.dirs(opts)
     opts = opts or vault_layouts.mini()
-    query = query or require("vault.fetcher").dirs()
+    opts.query = opts.query or require("vault.fetcher").dirs()
     local action_state = require("telescope.actions.state")
     local picker = require("telescope.pickers").new({
         prompt_title = "Directories",
         finder = require("telescope.finders").new_table({
-            results = vim.tbl_keys(query),
+            results = vim.tbl_keys(opts.query),
         }),
         sorter = require("telescope.sorters").get_fzy_sorter(),
         attach_mappings = function(prompt_bufnr, _)

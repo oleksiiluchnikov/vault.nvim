@@ -29,7 +29,8 @@ end
 --- Register the cmp.Source for the `vault_date` source.
 --- @see cmp.Source
 local function register_date_source()
-    --- @class cmp.Source
+    --- @type cmp.Source
+    --- @diagnostic disable-next-line: missing-fields
     local source = {
         is_available = is_available,
     }
@@ -83,16 +84,10 @@ local function register_date_source()
                 month = month,
                 day = day,
             })
-            local weekday = os.date("%A", time)
+            local weekday = tostring(os.date("%A", time))
             local new_text = weekday
             if #typed_date == 10 then
                 new_text = " " .. weekday
-            end
-
-            if type(new_text) ~= "string" then
-                return
-            elseif type(weekday) ~= "string" then
-                return
             end
 
             --- @type lsp.CompletionItem
