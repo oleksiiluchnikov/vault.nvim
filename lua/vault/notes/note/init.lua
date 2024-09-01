@@ -487,6 +487,16 @@ function Note:update_content(search_string, replace_string)
     f:close()
 end
 
+--- Get list of available metohods
+--- @return string[]
+function Note:methods()
+    local methods = {}
+    for k, _ in pairs(self.__meta) do
+        table.insert(methods, k)
+    end
+    return methods
+end
+
 --- @alias vault.Note.constructor fun(this: vault.Note|string): vault.Note
 --- @type vault.Note|vault.Note.constructor
 local VaultNote = Note

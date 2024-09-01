@@ -2,7 +2,7 @@ local actions = require("telescope.actions")
 local vault_actions = require("vault.pickers.actions")
 local M = {}
 
---- @param map Picker.map
+--- @param map vault.Picker.map
 M.notes = function(_, map)
     map("i", "<C-c>", vault_actions.close)
     map("n", "<C-c>", vault_actions.close)
@@ -19,7 +19,7 @@ M.notes = function(_, map)
     return true
 end
 
---- @param map Picker.map
+--- @param map vault.Picker.map
 M.tags = function(_, map)
     map("i", "<C-c>", vault_actions.close)
     map("n", "<C-c>", vault_actions.close)

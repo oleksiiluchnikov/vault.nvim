@@ -56,8 +56,7 @@ end
 --- @field search_tool string - The search tool to use. Default: "rg"
 --- @field popups table - The popup configuration.
 --- @field notify table - The notification configuration.
---- @field commands boolean - Whether to setup the commands. Default: true
---- @field cmp boolean - Whether to setup the cmp completion. Default: true
+--- @field features { cmp: boolean, commands: boolean } - The features to enable.
 Config.defaults = {
     root = "~/knowledge",
     dirs = {
@@ -153,8 +152,10 @@ Config.defaults = {
             },
         },
     },
-    cmp = true,
-    commands = true,
+    features = {
+        cmp = true,
+        commands = true,
+    },
 }
 
 --- Expand the root directory path.
