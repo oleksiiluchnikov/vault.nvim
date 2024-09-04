@@ -45,7 +45,7 @@ end
 function vault_actions.close(bufnr)
     actions.close(bufnr)
     highlights.detach()
-    vault_actions.refresh()
+    vault_actions.refresh(bufnr)
 end
 
 vault_actions.note = {}
@@ -77,6 +77,14 @@ local function rename_notes(selections, lines)
         --- @type vault.Note
         local note = selections[i].value
         note:rename(slug)
+    end
+end
+
+local function rename_properties(selections, lines)
+    for i, name in ipairs(lines) do
+        --- @type vault.Property
+        local property = selections[i].value
+        property:rename(name)
     end
 end
 
@@ -164,6 +172,8 @@ local batch_rename = function(_, selections)
             rename_notes(selections, lines)
         elseif class_name == "VaultTag" then
             rename_tags(selections, lines)
+        elseif class_name == "VaultProperty" then
+            rename_properties(selections, lines)
         end
     end
 
@@ -283,6 +293,48 @@ function vault_actions.tag.enter(bufnr)
     --- @type vault.Tag
     local tag = selection.value
     require("vault.api").open_picker_notes_with_tag(tag.data.name)
+end
+
+vault_actions.property = {}
+
+function vault_actions.property.enter(bufnr)
+    local _, selection, _ = get_picker_selection(bufnr)
+    vault_actions.close(bufnr)
+    --- @type vault.Property
+    local property = selection.value
+    require("vault.api").open_picker_property_values(property.data.name)
+end
+
+function vault_actions.property.rename(bufnr)
+    local _, _, selections = get_picker_selection(bufnr)
+    batch_rename(bufnr, selections)
+end
+
+vault_actions.property_value = {}
+
+function vault_actions.property_value.enter(bufnr)
+    local picker, selection, _ = get_picker_selection(bufnr)
+    vault_actions.close(bufnr)
+    --- @type vault.Property.Value
+    local value = selection.value
+    local prompt_title = picker.prompt_title
+    require("vault.api").open_picker_notes_with_property_value(prompt_title, value.data.name)
+end
+
+vault_actions.directory = {}
+
+function vault_actions.directory.enter(bufnr)
+    local _, selection, _ = get_picker_selection(bufnr)
+    vault_actions.close(bufnr)
+    --- @type vault.Directory
+    local directory = selection.value
+    require("vault.api").open_picker_notes_in_directory(directory)
+end
+
+vault_actions.directory.rename = function(bufnr)
+    local _, _, selections = get_picker_selection(bufnr)
+    -- batch_rename(bufnr, selections)
+    vim.notify("vault_actions.directory.rename is not implemented yet")
 end
 
 --[[

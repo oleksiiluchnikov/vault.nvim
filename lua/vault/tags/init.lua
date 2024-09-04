@@ -8,7 +8,7 @@ local fetcher = require("vault.fetcher")
 --- @alias vault.Tags.map table<string, vault.Tag> - Map of tags.
 --- @alias vault.Tags.list table<integer, vault.Tag> - Map of tags.
 
---- @alias VaultMap.tags.sources table<string, table> - Map of tags sources.
+--- @alias VaultMap.tags.sources vault.Sources.map - Map of sources.
 
 --- @alias VaultTagsGroup vault.Tags - Tags that have children.
 

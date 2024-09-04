@@ -10,8 +10,14 @@
 --- @alias vault.list.paths table<integer, vault.path>
 --- @alias vault.list.relpaths table<integer, vault.relpath>
 
---- @alias vault.source table<string, vault.source.match[]>
+--- @alias vault.source.lnums table<integer, vault.source.occurence>
 
 --- @alias vault.source.match {line: string, lnum_start: integer, ["end"]: number}
 
---- @alias vault.Sources.map table<vault.slug, vault.source>
+--- @alias vault.Sources.map table<vault.slug, vault.source.lnums>
+
+--- @class vault.source.occurence
+--- @field lnum integer
+--- @field end_lnum? integer
+--- @field col integer
+--- @field end_col? integer

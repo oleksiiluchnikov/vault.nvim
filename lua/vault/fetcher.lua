@@ -725,7 +725,8 @@ function Fetcher.properties()
         end
 
         local current_key = ""
-        for _, line in ipairs(frontmatter_lines) do
+        local occurences = {}
+        for i, line in ipairs(frontmatter_lines) do
             if line:match("^%s+") then
                 if current_key ~= "" then
                     frontmatter[current_key] = (frontmatter[current_key] or "") .. "\n" .. line:gsub("^%s+%-%s*", "")
@@ -735,6 +736,12 @@ function Fetcher.properties()
                 if key and value then
                     frontmatter[key] = value
                     current_key = key
+                    occurences[key] = {
+                        lnum = i,
+                        end_lnum = i,
+                        col = 1,
+                        end_col = key:len(),
+                    }
                 end
             end
         end
@@ -744,20 +751,29 @@ function Fetcher.properties()
             --- @type vault.Property.Data.name
             local property_name = k
 
+            local slug = utils.path_to_slug(path)
+            --- @type vault.source.occurence
+            local occurence = occurences[k]
             if not properties_map[property_name] then
                 -- Create the property
                 --- @type vault.Property.data
                 local property_data = {}
                 property_data.name = property_name
                 property_data.sources = {}
-                property_data.sources[path] = true
+                property_data.sources[slug] = {}
+                property_data.count = 1
+
+                table.insert(property_data.sources[slug], occurence.lnum, occurence)
+                -- property_data.sources[path][
                 --- @type vault.Property.Data.values
                 property_data.values = {}
 
                 local property = Property(property_data)
                 properties_map[property_name] = property
             else
-                properties_map[property_name].data.sources[path] = true
+                properties_map[property_name].data.sources[slug] = {}
+                table.insert(properties_map[property_name].data.sources[slug], occurence.lnum, occurence)
+                properties_map[property_name].data.count = properties_map[property_name].data.count + 1
             end
 
             local values_raw = vim.split(v, "\n")
@@ -782,8 +798,17 @@ function Fetcher.properties()
                     if not value_data.sources then
                         value_data.sources = {}
                     end
-                    if not value_data.sources[path] then
-                        value_data.sources[path] = true
+                    if not value_data.sources[slug] then
+                        value_data.sources[slug] = {}
+                        -- TODO: Add the occurence
+                    end
+                    if not value_data.properties then
+                        value_data.properties = {
+                            [property_name] = properties_map[property_name],
+                        }
+                    end
+                    if not value_data.count then
+                        value_data.count = 1
                     end
                     -- if not properties_data.values[value].sources[path][line_number] then
                     --     properties_data.values[value].sources[path][line_number] = {}
@@ -794,7 +819,14 @@ function Fetcher.properties()
                     properties_map[property_name].data.values[value_data.name] = value
                 else
                     -- properties_map[property_name]:add_value(value)
-                    properties_map[property_name].data.values[value_name].data.sources[path] = true
+                    properties_map[property_name].data.values[value_name].data.sources[slug] = {}
+                    properties_map[property_name].data.values[value_name].data.count = properties_map[property_name]
+                        .data.values[value_name].data.count + 1
+                    if not properties_map[property_name].data.values[value_name].data.properties[property_name] then
+                        properties_map[property_name].data.values[value_name].data.properties[property_name] =
+                            properties_map[property_name]
+                    end
+                    -- TODO: Add the occurence
                 end
             end
         end

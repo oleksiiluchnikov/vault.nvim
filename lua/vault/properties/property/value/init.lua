@@ -38,6 +38,7 @@ function PropertyValueData:init(this)
         error(error_formatter.missing_parameter("this"), 2)
     end
     self.name = this.name
+    self.properties = this.properties or nil
     self.type = this.type or get_type(this.name or "")
     self.sources = this.sources or nil
     self.count = this.count or 1
