@@ -218,14 +218,11 @@ end
 
 --- @param args vault.completions.args
 function callbacks.pick_dirs(args)
-    -- require("vault.pickers").dirs()
-    -- if next(args.fargs) ~= nil then
-    --     vim.api.nvim_buf_set_lines(0, 0, -1, false, args.fargs)
-    --     vim.defer_fn(function()
-    --         vim.fn.feedkeys("\r", "i")
-    --     end, 100)
-    -- end
     local fargs = args.fargs
+    if next(fargs) == nil then
+        require("vault.pickers").dirs()
+        return
+    end
     local notes = require("vault.notes")():with_relpath(fargs[1], "startswith", false)
     require("vault.pickers").notes({ notes = notes })
 end

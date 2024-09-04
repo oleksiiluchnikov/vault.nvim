@@ -98,11 +98,11 @@ function Tag:rename(name, verbose)
     --- @type vault.Note.constructor
     local Note = state.get_global_key("class.vault.Note") or require("vault.notes.note")
 
-    --- @type table<string, vault.Source> - A table of paths to update.
+    --- @type table<string, vault.source.lnums> - A table of paths to update.
     local paths_to_update = {}
-    for slug, source in pairs(self.data.sources) do
+    for slug, lnums in pairs(self.data.sources) do
         local path = utils.slug_to_path(slug)
-        paths_to_update[path] = source
+        paths_to_update[path] = lnums
     end
 
     local old_name = "#" .. self.data.name
@@ -114,10 +114,10 @@ function Tag:rename(name, verbose)
     end
 
     -- Update connected notes
-    for path, _ in pairs(paths_to_update) do
+    for path, lnums in pairs(paths_to_update) do
         --- @type vault.Note
         local note = Note(path)
-        note:update_content(old_name, new_name)
+        note:update_content(old_name, new_name, lnums)
 
         if verbose == true then
             message = message

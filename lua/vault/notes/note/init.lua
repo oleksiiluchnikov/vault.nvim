@@ -418,7 +418,8 @@ end
 --- Update content of the note
 --- @param search_string string
 --- @param replace_string string
-function Note:update_content(search_string, replace_string)
+--- @param lnums? vault.source.lnums
+function Note:update_content(search_string, replace_string, lnums)
     if type(search_string) ~= "string" then
         return
     end
@@ -437,10 +438,30 @@ function Note:update_content(search_string, replace_string)
         return
     end
 
-    for i, line in pairs(lines) do
-        if utils.match(line, search_string, "contains", false) == true then
-            local escaped_search_string = vim.pesc(search_string)
-            lines[i] = line:gsub(escaped_search_string, replace_string)
+    -- TODO: handle multiple matches in whole file
+    -- sources = {
+    --   ["Meta/finace-freedom"] = {
+    --     [10] = {
+    --       ["end"] = 13,
+    --       line = "#finance-freedom #finance #freedom",
+    --       start = 1
+    --     }
+    --   }
+    -- },
+    if lnums then
+        for _, occurence in pairs(lnums) do
+            local line = lines[occurence.lnum_start]
+            if line and utils.match(line, search_string, "contains", false) == true then
+                local escaped_search_string = vim.pesc(search_string)
+                lines[occurence.lnum_start] = line:gsub(escaped_search_string, replace_string)
+            end
+        end
+    else
+        for i, line in pairs(lines) do
+            if utils.match(line, search_string, "contains", false) == true then
+                local escaped_search_string = vim.pesc(search_string)
+                lines[i] = line:gsub(escaped_search_string, replace_string)
+            end
         end
     end
 

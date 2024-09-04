@@ -3,6 +3,7 @@ local error_formatter = require("vault.utils.fmt.error")
 
 local state = require("vault.core.state")
 local data = require("vault.properties.property.data")
+local utils = require("vault.utils")
 
 --- @class vault.Property.data: vault.Object
 local PropertyData = Object("VaultPropertyData")
@@ -18,7 +19,7 @@ function PropertyData:init(this)
     self.name = this.name
     self.values = this.values or {}
     self.sources = this.sources or nil
-    self.count = this.count or 1
+    self.count = this.count or #self.sources or 1
 end
 
 --- Fetch the data if it is not already cached.
@@ -68,6 +69,65 @@ function Property:init(this)
     end
 
     self.data = PropertyData(this)
+end
+
+--- Rename the |'vault.Property'|. and update all occurences of the |'vault.Property'| in the notes.
+--- @param name vault.Property.Data.name
+--- @param verbose? boolean
+--- @return vault.Property
+function Property:rename(name, verbose)
+    if name == nil or name == "" then
+        error("Invalid name: " .. vim.inspect(name))
+    end
+    if name == self.data.name then
+        return self
+    end
+    verbose = verbose or true
+    --- @type vault.Note.constructor
+    local Note = state.get_global_key("class.vault.Note") or require("vault.notes.note")
+
+    --- @type table<string, vault.source.lnums> - A table of paths to update.
+    local paths_to_update = {}
+    for slug, lnums in pairs(self.data.sources) do
+        local path = utils.slug_to_path(slug)
+        paths_to_update[path] = lnums
+    end
+
+    local old_name = self.data.name
+    local new_name = name
+
+    local message = ""
+    if verbose == true then
+        message = self.data.name .. " -> " .. name
+    end
+
+    -- Update connected notes
+    for path, lnums in pairs(paths_to_update) do
+        --- @type vault.Note
+        local note = Note(path)
+        note:update_content(old_name, new_name, lnums)
+
+        if verbose == true then
+            message = message
+                .. "\n"
+                .. self.data.name
+                .. " -> "
+                .. name
+                .. " in "
+                .. note.data.slug
+        end
+    end
+    self.data.name = name
+    if verbose == false then
+        return self
+    end
+
+    vim.notify(message, vim.log.levels.INFO, {
+        title = "Vault Rename",
+        timeout = 200,
+    })
+    -- require("vault.tags").reset()
+    return self
 end
 
 --- Add a slug to the `self.data.sources` `VaultMap`.

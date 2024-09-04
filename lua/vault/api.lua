@@ -71,4 +71,41 @@ function M.move_note(from_note_slug, to_note_slug)
     note:move(to_note_slug)
 end
 
+function M.open_picker_property_values(property_name)
+    local properties = require("vault.properties")()
+    local values = properties.map[property_name].data.values
+    -- pick_value(opts, property_name, values, on_value_selected)
+    require("vault.pickers").property_values({
+        prompt_title = property_name,
+        values = values,
+    })
+end
+
+function M.open_picker_notes_with_property_value(property_name, value_name)
+    local properties = require("vault.properties")()
+    local values = properties.map[property_name].data.values
+    local value = values[value_name]
+    local sources = value.data.sources
+    local slugs = vim.tbl_keys(sources)
+
+    local notes = require("vault.notes")()
+
+    notes.map = {}
+    for _, slug in ipairs(slugs) do
+        local path = require("vault.utils").slug_to_path(slug)
+        local note = require("vault.notes.note")(path)
+        notes:add_note(note)
+    end
+    -- vault_pickers.notes(opts)
+    require("vault.pickers").notes({
+        notes = notes,
+    })
+end
+
+function M.open_picker_notes_in_directory(directory)
+    require("vault.pickers").notes({
+        notes = require("vault.notes")():with_relpath(directory, "startswith", false),
+    })
+end
+
 return M
