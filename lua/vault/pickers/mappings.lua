@@ -10,6 +10,9 @@ M.notes = function(_, map)
     map("i", "<C-r>", vault_actions.note.rename)
     map("n", "<C-r>", vault_actions.note.rename)
 
+
+    map("i", "<C-s>", vault_actions.resort)
+    map("n", "<C-s>", vault_actions.resort)
     map("i", "<C-h>", vault_actions.invert)
     map("n", "<C-h>", vault_actions.invert)
 
@@ -27,6 +30,8 @@ M.tags = function(_, map)
     map("i", "<CR>", vault_actions.tag.enter)
     map("n", "<CR>", vault_actions.tag.enter)
 
+    map("i", "<C-s>", vault_actions.resort)
+    map("n", "<C-s>", vault_actions.resort)
     map("i", "<C-h>", vault_actions.invert)
     map("n", "<C-h>", vault_actions.invert)
 

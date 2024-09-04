@@ -36,6 +36,11 @@ function vault_actions.refresh()
     current_picker:refresh()
 end
 
+function vault_actions.resort()
+    local current_picker = vault_state.get_global_key("picker")
+    P(current_picker)
+end
+
 --- Close the picker
 --- @param bufnr integer
 function vault_actions.close(bufnr)
@@ -72,10 +77,7 @@ local function rename_notes(selections, lines)
     for i, slug in ipairs(lines) do
         --- @type vault.Note
         local note = selections[i].value
-        if note.data.slug ~= slug then
-            vim.notify(utils.slug_to_path(slug))
-            -- note:move(utils.slug_to_path(slug))
-        end
+        note:rename(slug)
     end
 end
 
@@ -86,9 +88,7 @@ local function rename_tags(selections, lines)
     for i, name in ipairs(lines) do
         --- @type vault.Tag
         local tag = selections[i].value
-        if tag.data.name ~= name then
-            tag:rename(name)
-        end
+        tag:rename(name)
     end
 end
 
@@ -119,8 +119,8 @@ local batch_rename = function(_, selections)
         table.insert(strings_to_rename, line)
     end
 
-    local height = math.min(vim.o.lines - 2, math.max(1, #strings_to_rename))
-    local position = math.floor((vim.o.lines - height) / 2)
+    local height = math.min(vim.api.nvim_list_uis()[1].height - 2, math.max(1, #strings_to_rename))
+    local position = math.floor((vim.api.nvim_list_uis()[1].height - height) / 2)
 
     --- @type nui_popup_options
     local win_config = {
@@ -273,9 +273,7 @@ function vault_actions.tag.edit_documentation(bufnr)
     local _, selection, _ = get_picker_selection(bufnr)
     vault_actions.close(bufnr)
     local tag = selection.value
-    if tag.data.documentation then
-        tag.data.documentation:open()
-    end
+    require("vault.api").edit_tag_documentation(tag.data.name)
 end
 
 --- Open Telescope picker for notes with a specific tag
@@ -285,16 +283,7 @@ function vault_actions.tag.enter(bufnr)
     vault_actions.close(bufnr)
     --- @type vault.Tag
     local tag = selection.value
-    require("vault.pickers").notes({
-        notes = require("vault.notes")():filter({
-            search_term = "tags",
-            include = { tag.data.name },
-            exclude = {},
-            match_opt = "exact",
-            mode = "all",
-            case_sensitive = false,
-        }),
-    })
+    require("vault.api").open_picker_notes_with_tag(tag.data.name)
 end
 
 --[[

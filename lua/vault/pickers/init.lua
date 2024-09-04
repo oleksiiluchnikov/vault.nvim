@@ -106,6 +106,7 @@ local Note = require("vault.notes.note")
 
 --- @class telescope_popup_options.vault.Notes: telescope_popup_options
 --- @field notes? vault.Notes
+--- @field sort_by? string
 
 --- Search for notes in vault
 --- @param opts? telescope_popup_options.vault.Notes
@@ -113,6 +114,7 @@ local Note = require("vault.notes.note")
 function vault_pickers.notes(opts)
     opts = opts or {}
     opts.notes = opts.notes or require("vault.notes")()
+    opts.sort_by = opts.sort_by or "mtime"
 
     --- @type vault.Note[]
     local results = opts.notes:list()
@@ -122,7 +124,8 @@ function vault_pickers.notes(opts)
     end
 
     local average_content_count = opts.notes:average_chars()
-    local prompt_title = string.format("average chars: %d", average_content_count)
+    -- local prompt_title = string.format("average chars: %d", average_content_count)
+    local prompt_title = opts.sort_by
 
     local steps = 64
     --- @type Gradient|nil
@@ -215,18 +218,82 @@ function vault_pickers.notes(opts)
         }
     end
 
-    --- Sort by name desc
-    --- @param a vault.Note
-    --- @param b vault.Note
-    table.sort(results, function(a, b)
-        return vim.fn.strcharpart(a.data.path, -1, #a.data.path)
-            < vim.fn.strcharpart(b.data.path, -1, #b.data.path)
-    end)
+    if opts.sort_by == "title" then
+        table.sort(results, function(a, b)
+            return a.data.title < b.data.title
+        end)
+    elseif opts.sort_by == "ctime" then
+        table.sort(results, function(a, b)
+            -- FIXME: Need to be implemented
+            local a_ctime = vim.fn.getftime(a.data.path)
+            local b_ctime = vim.fn.getftime(b.data.path)
+            return a_ctime < b_ctime
+        end)
+    elseif opts.sort_by == "mtime" then
+        table.sort(results, function(a, b)
+            local a_mtime = vim.fn.getftime(a.data.path)
+            local b_mtime = vim.fn.getftime(b.data.path)
+            return a_mtime < b_mtime
+        end)
+    elseif opts.sort_by == "name" then
+        table.sort(results, function(a, b)
+            return a.data.basename < b.data.basename
+        end)
+    elseif opts.sort_by == "path" then
+        table.sort(results, function(a, b)
+            return a.data.path < b.data.path
+        end)
+    end
 
     local finder = finders.new_table({
         results = results,
         entry_maker = entry_maker,
     })
+
+    local on_input_filter_cb = function(prompt)
+        local picker = vault_state.get_global_key("picker")
+        -- Check if the input is a regex pattern
+        -- Extract the regex pattern from the input string
+        local new_prompt = prompt
+
+        if prompt:sub(-1) ~= "/" then -- if
+            local new_finder = finders.new_table({
+                results = results,
+                entry_maker = entry_maker,
+            })
+            picker.finder:close() -- TODO: Find a way to close picker without closing previewer
+            picker.finder = new_finder
+
+            vault_state.set_global_key("prompt", new_prompt)
+            return {
+                prompt = new_prompt or "",
+            }
+        end
+
+        local pattern = new_prompt:gmatch("/(.+)/")()
+        local new_results = {}
+
+        for _, entry in ipairs(picker.finder.results) do
+            local slug = entry.value.data.slug:match("([^/]+)$")
+            -- if string.match(slug, pattern) then
+            -- FIXME: Fails when "\/" is in pattern or "\\"
+            if vim.fn.match(slug, pattern) ~= -1 then
+                table.insert(new_results, entry.value)
+            end
+        end
+        local new_finder = finders.new_table({
+            results = new_results,
+            entry_maker = entry_maker,
+        })
+        picker.finder:close()
+        picker.finder = new_finder
+
+        vault_state.set_global_key("prompt", new_prompt)
+
+        return {
+            prompt = "",
+        }
+    end
 
     local picker_opts = {
         prompt_title = prompt_title,
@@ -234,6 +301,7 @@ function vault_pickers.notes(opts)
         sorter = sorters.get_fzy_sorter(),
         previewer = vault_previewers.notes,
         attach_mappings = vault_mappings.notes,
+        on_input_filter_cb = on_input_filter_cb,
     }
     local picker = pickers.new(vault_layouts.notes(), picker_opts)
 
@@ -712,7 +780,7 @@ function vault_pickers.tasks(opts)
         -- verbose_status = verbose_status
         --     .. string.rep(" ", status_width - string.len(verbose_status))
 
-        local full_width = vim.o.columns
+        local full_width = vim.api.nvim_list_uis()[1].width
         local stem = entry.value.slug:match("([^/]+)$")
         local stem_width = string.len(stem)
         local status_width = string.len(entry.value.status)
@@ -776,8 +844,8 @@ function vault_pickers.tasks(opts)
             sorter = sorters.get_generic_fuzzy_sorter(),
             sorting_strategy = "ascending",
             layout_config = {
-                height = vim.o.lines - 4,
-                width = vim.o.columns,
+                height = vim.api.nvim_list_uis()[1].height - 4,
+                width = vim.api.nvim_list_uis()[1].width,
             },
             attach_mappings = function(_, _)
                 actions.select_default:replace(enter)

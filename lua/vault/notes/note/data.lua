@@ -131,10 +131,7 @@ end
 --- @return string
 Data.content = function(note_data)
     local path = note_data.path
-    local f, err = io.open(path, "r")
-    if err then
-        error(err)
-    end
+    local f = io.open(path, "r")
 
     local content
     if f ~= nil then
@@ -167,9 +164,8 @@ Data.body = function(note_data)
     return body
 end
 
---- @param note_data vault.Note.Data
 --- @return vault.Note.data.headings
-Data.headings = function(note_data)
+Data.headings = function()
     -- local body = note_data.body
     local body = [[
     # Heading 1

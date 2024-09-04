@@ -131,19 +131,23 @@ end
 --- @param match_opt? string - The match option to use.
 --- @return vault.Tags.map
 function Tags:by(key, value, match_opt)
-    assert(key, "missing `key` argument: string")
+    if not key then
+        error("missing `key` argument: string")
+    end
+    match_opt = match_opt or "exact"
     local tags = self:list()
     local tags_by = {}
     for _, tag in pairs(tags) do
-        if tag[key] and not value then
-            table.insert(tags_by, tag)
-        elseif tag[key] and value then
-            if utils.match(tag[key], value, match_opt) then
-                table.insert(tags_by, tag)
+        if tag.data[key] and not value then
+            tags_by[tag.data.name] = tag
+        elseif tag.data[key] and value then
+            if utils.match(tag.data[key], value, match_opt) then
+                tags_by[tag.data.name] = tag
             end
         end
     end
-    return tags_by
+    self.map = tags_by
+    return self
 end
 
 --- Return a map of all sources from tags.

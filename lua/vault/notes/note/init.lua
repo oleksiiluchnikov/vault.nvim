@@ -330,6 +330,7 @@ end
 --- @param verbose? boolean - Whether to print a notification when the connected notes are updated.
 function Note:move(new_path, force, verbose)
     if self.data.path == new_path then
+        vim.notify("Same path: " .. vim.inspect(new_path))
         return
     end
     force = force or false
@@ -339,30 +340,21 @@ function Note:move(new_path, force, verbose)
         error("Invalid path: " .. vim.inspect(new_path))
     end
 
-    local new_slug = handle_existing_note_stem(new_path)
-
-    if self.data.slug == new_slug then
-        return
-    end
-
-    -- -- Check if new path is already taken
-    if vim.fn.filereadable(new_path) == 1 then
-        if vim.fn.fnamemodify(self.data.path, ":p") ~= vim.fn.fnamemodify(new_path, ":p") then
-            vim.notify("File already exists: " .. vim.inspect(new_path))
-            return
-        end
-    end
-
     create_parent_directories(new_path)
 
     --- @type vault.slug[]
     local inlinks = vim.tbl_keys(self.data.inlinks)
-    local has_inlinks = next(inlinks) ~= nil
+    -- local has_inlinks = next(inlinks) ~= nil
+    --
 
-    if has_inlinks then
-        local paths_to_update = vim.tbl_map(function(path)
-            return utils.slug_to_path(path)
-        end, inlinks)
+    local paths_to_update = {}
+    if next(inlinks) ~= nil then
+        -- local paths_to_update = vim.tbl_map(function()
+        --     return utils.slug_to_path(path)
+        -- end, inlinks)
+        for slug, _ in pairs(inlinks) do
+            paths_to_update[utils.slug_to_path(slug)] = true
+        end
 
         local prev_wikilink = self.data.slug
         local new_wikilink = utils.path_to_slug(new_path)
@@ -372,9 +364,7 @@ function Note:move(new_path, force, verbose)
         end
         -- Update connected notes
         for path, _ in pairs(paths_to_update) do
-            local note = Note({
-                path = path,
-            })
+            local note = Note(path)
             note:update_content(prev_wikilink, new_wikilink)
             if verbose then
                 message = message
@@ -391,20 +381,16 @@ function Note:move(new_path, force, verbose)
                 title = "Vault",
                 on_open = function(win)
                     local buf = vim.api.nvim_win_get_buf(win)
-                    vim.api.nvim_buf_set_option(buf, "filetype", "markdown")
+                    vim.api.nvim_set_option_value("filetype", "markdown", { buf = buf })
                     vim.api.nvim_buf_set_lines(buf, 0, -1, false, { message })
                 end,
-                timeout = 1000,
+                timeout = 100,
             })
         end
     end
 
     vim.fn.rename(self.data.path, new_path)
-    local is_file_readable = vim.fn.filereadable(new_path)
-    if is_file_readable == 0 then
-        error("Failed to rename file: " .. vim.inspect(new_path))
-        return
-    end
+
     -- Update note data
     self.data.path = new_path
     self.data.slug = utils.path_to_slug(new_path)
@@ -424,15 +410,7 @@ function Note:rename(slug)
         error("Invalid new name: " .. vim.inspect(slug))
     end
 
-    local is_slug = slug:find("/") == nil
-    local new_path = ""
-    if is_slug then
-        new_path = utils.slug_to_path(slug)
-    else
-        --  replace last path component without extension
-        local new_slug = self.data.slug:gsub(vim.fn.fnamemodify(self.data.path, ":t:r"), slug)
-        new_path = utils.slug_to_path(new_slug)
-    end
+    local new_path = utils.slug_to_path(slug)
 
     self:move(new_path)
 end
@@ -444,14 +422,12 @@ function Note:update_content(search_string, replace_string)
     if type(search_string) ~= "string" then
         return
     end
-
     if type(replace_string) ~= "string" then
         return
     end
     local root_dir = config.options.root
     local f, err = io.open(self.data.path, "r")
     if not f then
-        error(err)
         return
     end
     local content = f:read("*all")
@@ -461,20 +437,11 @@ function Note:update_content(search_string, replace_string)
         return
     end
 
-    local line_numbers = {}
-    for i, line in ipairs(lines) do
-        if utils.match(line, search_string, "contains", true) == true then
-            line_numbers[i] = line
+    for i, line in pairs(lines) do
+        if utils.match(line, search_string, "contains", false) == true then
+            local escaped_search_string = vim.pesc(search_string)
+            lines[i] = line:gsub(escaped_search_string, replace_string)
         end
-    end
-
-    if next(line_numbers) == nil then
-        return
-    end
-
-    for i, line in pairs(line_numbers) do
-        local new_line = line:gsub(search_string, replace_string)
-        lines[i] = new_line
     end
 
     -- write the new content to the file
