@@ -252,11 +252,9 @@ function vault_pickers.notes(opts)
 
     local on_input_filter_cb = function(prompt)
         local picker = vault_state.get_global_key("picker")
-        -- Check if the input is a regex pattern
-        -- Extract the regex pattern from the input string
-        local new_prompt = prompt
+        local is_negative = false
 
-        if prompt:sub(-1) ~= "/" then -- if
+        local function default_finder()
             local new_finder = finders.new_table({
                 results = results,
                 entry_maker = entry_maker,
@@ -264,23 +262,57 @@ function vault_pickers.notes(opts)
             picker.finder:close() -- TODO: Find a way to close picker without closing previewer
             picker.finder = new_finder
 
-            vault_state.set_global_key("prompt", new_prompt)
+            vault_state.set_global_key("prompt", prompt)
             return {
-                prompt = new_prompt or "",
+                prompt = prompt or "",
             }
         end
 
-        local pattern = new_prompt:gmatch("/(.+)/")()
+        if prompt:sub(-1) ~= "/" then
+            return default_finder()
+        end
+
+        if prompt:sub(1, 1) == "-" then
+            is_negative = true
+        end
+
+        local pattern = prompt:sub(1, -2)
+        pattern = pattern:sub(2)
+        if is_negative == true then
+            pattern = pattern:sub(2)
+        end
         local new_results = {}
+        local results_without_excluded = {}
 
         for _, entry in ipairs(picker.finder.results) do
-            local slug = entry.value.data.slug:match("([^/]+)$")
-            -- if string.match(slug, pattern) then
-            -- FIXME: Fails when "\/" is in pattern or "\\"
+            local note = entry.value
+            local slug = note.data.slug
+            if slug == nil then
+                goto continue
+            end
+            local is_valid_regex = pcall(vim.fn.match, slug, pattern)
+            if is_valid_regex == false then
+                goto continue
+            end
             if vim.fn.match(slug, pattern) ~= -1 then
-                table.insert(new_results, entry.value)
+                table.insert(new_results, note)
+                if is_negative == true then
+                    table.insert(results_without_excluded, note)
+                end
+            end
+            ::continue::
+        end
+        if next(new_results) == nil then
+            return default_finder()
+        elseif is_negative == true then
+            new_results = {}
+            for _, entry in ipairs(picker.finder.results) do -- TODO: Use results_without_excluded
+                if not vim.tbl_contains(results_without_excluded, entry.value) then
+                    table.insert(new_results, entry.value)
+                end
             end
         end
+
         local new_finder = finders.new_table({
             results = new_results,
             entry_maker = entry_maker,
@@ -288,7 +320,7 @@ function vault_pickers.notes(opts)
         picker.finder:close()
         picker.finder = new_finder
 
-        vault_state.set_global_key("prompt", new_prompt)
+        vault_state.set_global_key("prompt", prompt)
 
         return {
             prompt = "",
@@ -301,7 +333,7 @@ function vault_pickers.notes(opts)
         sorter = sorters.get_fzy_sorter(),
         previewer = vault_previewers.notes,
         attach_mappings = vault_mappings.notes,
-        on_input_filter_cb = on_input_filter_cb,
+        on_input_filter_cb = on_input_filter_cb, -- TODO: Move to separate module?
     }
     local picker = pickers.new(vault_layouts.notes(), picker_opts)
 
@@ -399,35 +431,68 @@ function vault_pickers.tags(opts)
 
     local on_input_filter_cb = function(prompt)
         local picker = vault_state.get_global_key("picker")
-        -- Check if the input is a regex pattern
-        -- Extract the regex pattern from the input string
-        local new_prompt = prompt
+        local is_negative = false
 
-        if prompt:sub(-1) ~= "/" then -- if
+        local function default_finder()
             local new_finder = finders.new_table({
                 results = tags_list,
                 entry_maker = entry_maker,
             })
+
             picker.finder:close() -- TODO: Find a way to close picker without closing previewer
             picker.finder = new_finder
 
-            vault_state.set_global_key("prompt", new_prompt)
+            vault_state.set_global_key("prompt", prompt)
             return {
-                prompt = new_prompt or "",
+                prompt = prompt or "",
             }
         end
 
-        local pattern = new_prompt:gmatch("/(.+)/")()
+        if prompt:sub(-1) ~= "/" then
+            return default_finder()
+        end
+
+        if prompt:sub(1, 1) == "-" then
+            is_negative = true
+        end
+
+        local pattern = prompt:sub(1, -2)
+        pattern = pattern:sub(2)
+        if is_negative == true then
+            pattern = pattern:sub(2)
+        end
         local new_results = {}
+        local results_without_excluded = {}
 
         for _, entry in ipairs(picker.finder.results) do
-            local name = entry.value.data.name
-            -- if string.match(slug, pattern) then
-            -- FIXME: Fails when "\/" is in pattern or "\\"
-            if vim.fn.match(name, pattern) ~= -1 then
-                table.insert(new_results, entry.value)
+            local tag = entry.value
+            local slug = tag.data.name
+            if slug == nil then
+                goto continue
+            end
+            local is_valid_regex = pcall(vim.fn.match, slug, pattern)
+            if is_valid_regex == false then
+                goto continue
+            end
+            if vim.fn.match(slug, pattern) ~= -1 then
+                table.insert(new_results, tag)
+                if is_negative == true then
+                    table.insert(results_without_excluded, tag)
+                end
+            end
+            ::continue::
+        end
+        if next(new_results) == nil then
+            return default_finder()
+        elseif is_negative == true then
+            new_results = {}
+            for _, entry in ipairs(picker.finder.results) do -- TODO: Use results_without_excluded
+                if not vim.tbl_contains(results_without_excluded, entry.value) then
+                    table.insert(new_results, entry.value)
+                end
             end
         end
+
         local new_finder = finders.new_table({
             results = new_results,
             entry_maker = entry_maker,
@@ -435,7 +500,7 @@ function vault_pickers.tags(opts)
         picker.finder:close()
         picker.finder = new_finder
 
-        vault_state.set_global_key("prompt", new_prompt)
+        vault_state.set_global_key("prompt", prompt)
 
         return {
             prompt = "",
