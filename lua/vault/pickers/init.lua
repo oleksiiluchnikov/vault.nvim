@@ -1217,7 +1217,7 @@ end
 --
 
 --- @class telescope_popup_options.vault.properties: telescope_popup_options
---- @field values? vault.Values - The values to display in the picker.
+--- @field values? vault.Property.Value[] - The values to display in the picker.
 --- @field query? string[] List of property names to show. If not provided, all properties will be shown.
 
 --- Pick a value from the selected property.
@@ -1252,20 +1252,24 @@ function vault_pickers.property_values(opts)
         --- @type vault.Property
         local property = entry.value
         local sources_count = property.data.count
+        -----
+        local col_1 = property.data.type
+        local col_1_width = 12
+        local col_1_hl_name = "TelescopeResultsNormal"
 
         --- --
-        local col_1 = property.data.name
-        local col_1_width = 29
+        local col_2 = property.data.name
+        local col_2_width = 29
         local i = math.min(math.floor(sources_count / 2), steps)
         if i == 0 then
             i = 1
         end
-        local col_1_hl_name = hl_name .. tostring(i)
+        local col_2_hl_name = hl_name .. tostring(i)
         --- --
 
-        local col_2 = tostring(sources_count)
-        local col_2_width = col_2:len()
-        local col_2_hl_name = "TelescopeResultsNumber"
+        local col_3 = tostring(sources_count)
+        local col_3_width = col_3:len()
+        local col_3_hl_name = "TelescopeResultsNumber"
         --- --
 
         local displayer = entry_display.create({
@@ -1275,21 +1279,32 @@ function vault_pickers.property_values(opts)
                 { remaining = true },
                 { width = col_2_width },
                 { remaining = true },
+                { width = col_3_width },
+                { remaining = true },
             },
         })
 
         return displayer({
             { col_1, col_1_hl_name },
             { col_2, col_2_hl_name },
+            { col_3, col_3_hl_name },
         })
     end
 
-    --- @param property vault.Property
+    --- @param property vault.Property.Value
     --- @return vault.TelescopeEntry
     local entry_maker = function(property)
         return {
             value = property,
-            ordinal = property.data.name .. " " .. tostring(property.data.count),
+            -- ordinal = property.data.type .. " " .. property.data.name .. " " .. tostring(
+            --     property.data.count
+            -- ),
+            ordinal = string.format(
+                "%s %s %s",
+                property.data.name,
+                property.data.type,
+                tostring(property.data.count)
+            ),
             display = make_display,
         }
     end
@@ -1322,19 +1337,20 @@ function vault_pickers.property_values(opts)
             }
         end
 
+        if prompt:sub(1, 1) == "/" or prompt:sub(1, 2) == "-/" then
+            prompt = prompt:sub(2) -- Remove the leading '/' or '-/'
+        end
+
         if prompt:sub(-1) ~= "/" then
             return default_finder()
         end
 
         if prompt:sub(1, 1) == "-" then
             is_negative = true
+            -- prompt = prompt:sub(2) -- Remove the leading '-'
         end
 
         local pattern = prompt:sub(1, -2)
-        pattern = pattern:sub(2)
-        if is_negative == true then
-            pattern = pattern:sub(2)
-        end
         local new_results = {}
         local results_without_excluded = {}
 

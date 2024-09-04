@@ -14,6 +14,12 @@ M.notes = function(_, map)
 
     map("i", "<CR>", vault_actions.note.edit)
     map("n", "<CR>", vault_actions.note.edit)
+    -- select all entries in the picker
+    map("i", "<C-a>", require("telescope.actions").select_all)
+    map("n", "<C-a>", require("telescope.actions").select_all)
+
+    map("i", "<C-d>", require("telescope.actions").drop_all)
+    map("n", "<C-d>", require("telescope.actions").drop_all)
 
     return true
 end
@@ -38,6 +44,13 @@ M.tags = function(_, map)
     map("i", "<C-e>", vault_actions.tag.edit_documentation)
     map("n", "<C-e>", vault_actions.tag.edit_documentation)
 
+    -- select all entries in the picker
+    map("i", "<C-a>", require("telescope.actions").select_all)
+    map("n", "<C-a>", require("telescope.actions").select_all)
+
+    map("i", "<C-d>", require("telescope.actions").drop_all)
+    map("n", "<C-d>", require("telescope.actions").drop_all)
+
     return true
 end
 
@@ -54,6 +67,12 @@ M.properties = function(_, map)
     map("i", "<C-r>", vault_actions.property.rename)
     map("n", "<C-r>", vault_actions.property.rename)
 
+    -- select all entries in the picker
+    map("i", "<C-a>", require("telescope.actions").select_all)
+    map("n", "<C-a>", require("telescope.actions").select_all)
+
+    map("i", "<C-d>", require("telescope.actions").drop_all)
+    map("n", "<C-d>", require("telescope.actions").drop_all)
     return true
 end
 
@@ -70,6 +89,12 @@ M.property_values = function(_, map)
     map("i", "<C-r>", vault_actions.property_value.rename)
     map("n", "<C-r>", vault_actions.property_value.rename)
 
+    -- select all entries in the picker
+    map("i", "<C-a>", require("telescope.actions").select_all)
+    map("n", "<C-a>", require("telescope.actions").select_all)
+
+    map("i", "<C-d>", require("telescope.actions").drop_all)
+    map("n", "<C-d>", require("telescope.actions").drop_all)
     return true
 end
 
@@ -85,6 +110,12 @@ M.directories = function(_, map)
 
     map("i", "<C-r>", vault_actions.directory.rename)
     map("n", "<C-r>", vault_actions.directory.rename)
+    -- select all entries in the picker
+    map("i", "<C-a>", require("telescope.actions").select_all)
+    map("n", "<C-a>", require("telescope.actions").select_all)
+
+    map("i", "<C-d>", require("telescope.actions").drop_all)
+    map("n", "<C-d>", require("telescope.actions").drop_all)
 
     return true
 end
