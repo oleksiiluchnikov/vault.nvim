@@ -397,12 +397,58 @@ function vault_pickers.tags(opts)
         entry_maker = entry_maker,
     })
 
+    local on_input_filter_cb = function(prompt)
+        local picker = vault_state.get_global_key("picker")
+        -- Check if the input is a regex pattern
+        -- Extract the regex pattern from the input string
+        local new_prompt = prompt
+
+        if prompt:sub(-1) ~= "/" then -- if
+            local new_finder = finders.new_table({
+                results = tags_list,
+                entry_maker = entry_maker,
+            })
+            picker.finder:close() -- TODO: Find a way to close picker without closing previewer
+            picker.finder = new_finder
+
+            vault_state.set_global_key("prompt", new_prompt)
+            return {
+                prompt = new_prompt or "",
+            }
+        end
+
+        local pattern = new_prompt:gmatch("/(.+)/")()
+        local new_results = {}
+
+        for _, entry in ipairs(picker.finder.results) do
+            local name = entry.value.data.name
+            -- if string.match(slug, pattern) then
+            -- FIXME: Fails when "\/" is in pattern or "\\"
+            if vim.fn.match(name, pattern) ~= -1 then
+                table.insert(new_results, entry.value)
+            end
+        end
+        local new_finder = finders.new_table({
+            results = new_results,
+            entry_maker = entry_maker,
+        })
+        picker.finder:close()
+        picker.finder = new_finder
+
+        vault_state.set_global_key("prompt", new_prompt)
+
+        return {
+            prompt = "",
+        }
+    end
+
     local picker_opts = {
         prompt_title = "tags",
         finder = finder,
         sorter = sorters.get_fzy_sorter(),
         previewer = vault_previewers.tags,
         attach_mappings = vault_mappings.tags,
+        on_input_filter_cb = on_input_filter_cb,
     }
     local picker = pickers.new(vault_layouts.tags(), picker_opts)
     picker:find()
