@@ -192,7 +192,7 @@ end
 --- Rename notes
 --- @param bufnr integer
 function vault_actions.note.rename(bufnr)
-    local _, _, selections = get_picker_selection(bufnr)
+    local picker, _, selections = get_picker_selection(bufnr)
     batch_rename(bufnr, selections)
 end
 
