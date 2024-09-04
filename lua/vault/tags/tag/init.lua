@@ -84,35 +84,43 @@ function Tag:init(this)
 end
 
 --- Rename the tag. and update all occurences of the tag in the notes.
---- @param name? vault.Tag.data.name
+--- @param name vault.Tag.data.name
 --- @param verbose? boolean
 --- @return vault.Tag
 function Tag:rename(name, verbose)
+    if name == nil or name == "" then
+        error("Invalid name: " .. vim.inspect(name))
+    end
     if name == self.data.name then
         return self
     end
     verbose = verbose or true
+    --- @type vault.Note.constructor
     local Note = state.get_global_key("class.vault.Note") or require("vault.notes.note")
 
-    --- @type vault.map.paths
+    --- @type table<vault.Path, vault.Source>
     local paths_to_update = {}
-    for slug, _ in pairs(self.data.sources) do
+    for slug, source in pairs(self.data.sources) do
         local path = utils.slug_to_path(slug)
-        paths_to_update[path] = true
+        paths_to_update[path] = source
     end
 
     local old_name = "#" .. self.data.name
     local new_name = "#" .. name
+
     local message = ""
     if verbose == true then
         message = self.data.name .. " -> " .. name
     end
 
+    local async = require("plenary.async")
+
     -- Update connected notes
-    for path, _ in pairs(paths_to_update) do
+    for path, source in pairs(paths_to_update) do
         --- @type vault.Note
         local note = Note(path)
         note:update_content(old_name, new_name)
+
         if verbose == true then
             message = message
                 .. "\n"
@@ -128,14 +136,9 @@ function Tag:rename(name, verbose)
         return self
     end
 
-    vim.notify("", "info", {
-        title = "Vault",
-        on_open = function(win)
-            local buf = vim.api.nvim_win_get_buf(win)
-            vim.api.nvim_buf_set_option(buf, "filetype", "markdown")
-            vim.api.nvim_buf_set_lines(buf, 0, -1, false, { message })
-        end,
-        timeout = 1000,
+    vim.notify(message, vim.log.levels.INFO, {
+        title = "Vault Rename",
+        timeout = 200,
     })
     -- require("vault.tags").reset()
     return self

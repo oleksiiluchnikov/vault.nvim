@@ -204,9 +204,9 @@ function callbacks.create_new_note(args)
         require("vault.popups.fleeting_note")()
     end
 
-    local new_slug = fargs[1]
+    local new_slug = table.concat(fargs, " ")
     local notes = require("vault.notes")():with_slug(new_slug, "exact", false)
-    if notes:count() ~= 0 then
+    if next(notes.map) then
         notes.map[new_slug]:edit()
         return
     end
@@ -218,13 +218,16 @@ end
 
 --- @param args vault.completions.args
 function callbacks.pick_dirs(args)
-    require("vault.pickers").dirs()
-    if next(args.fargs) ~= nil then
-        vim.api.nvim_buf_set_lines(0, 0, -1, false, args.fargs)
-        vim.defer_fn(function()
-            vim.fn.feedkeys("\r", "i")
-        end, 1)
-    end
+    -- require("vault.pickers").dirs()
+    -- if next(args.fargs) ~= nil then
+    --     vim.api.nvim_buf_set_lines(0, 0, -1, false, args.fargs)
+    --     vim.defer_fn(function()
+    --         vim.fn.feedkeys("\r", "i")
+    --     end, 100)
+    -- end
+    local fargs = args.fargs
+    local notes = require("vault.notes")():with_relpath(fargs[1], "startswith", false)
+    require("vault.pickers").notes({ notes = notes })
 end
 
 ---Edits a random note from the vault.
@@ -1130,28 +1133,8 @@ local M = {
         callback = callbacks.create_new_note,
         opts = {
             nargs = "*",
-            complete = function(_, cmd_line, _)
-                local arguments = vim.split(cmd_line, " ")
-                if arguments[2] == nil then
-                    return
-                end
-                local paths = vim.tbl_keys(require("vault.fetcher").dirs())
-                local suggest = false
-                for _, path in pairs(paths) do
-                    if
-                        require("vault.utils").match(path, arguments[2], "startswith", false)
-                        == false
-                    then
-                        suggest = false
-                    else
-                        suggest = true
-                    end
-                end
-                if suggest == true then
-                    return paths
-                end
-            end,
-            desc = "Open a picker with notes by directory",
+            complete = complete.dirs,
+            desc = "Create a new note",
         },
     },
     ["VaultDirs"] = {

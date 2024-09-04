@@ -104,8 +104,8 @@ Config.defaults = {
             },
             editor = {              -- @see :h nui.popup
                 position = {
-                    row = math.floor(vim.o.lines / 2) - 9,
-                    col = math.floor(vim.o.columns / 2) - 40,
+                    row = math.floor(vim.api.nvim_list_uis()[1].height / 2) - 9,
+                    col = math.floor(vim.api.nvim_list_uis()[1].width / 2) - 40,
                 },
                 size = {
                     height = 6,

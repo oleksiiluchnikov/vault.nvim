@@ -14,8 +14,8 @@ function Layouts.mini()
 end
 
 function Layouts.notes()
-    local bufheight = vim.o.lines - 4
-    local bufwidth = vim.o.columns - 4
+    local bufheight = vim.api.nvim_list_uis()[1].height - 4
+    local bufwidth = vim.api.nvim_list_uis()[1].width - 4
 
     return {
         sorting_strategy = "ascending",
@@ -28,8 +28,8 @@ function Layouts.notes()
 end
 
 function Layouts.tags()
-    local bufheight = vim.o.lines - 4
-    local bufwidth = vim.o.columns - 4
+    local bufheight = vim.api.nvim_list_uis()[1].height - 4
+    local bufwidth = vim.api.nvim_list_uis()[1].width - 4
     local preview_width = 0.7
 
     return {
