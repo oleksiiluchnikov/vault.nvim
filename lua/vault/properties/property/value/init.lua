@@ -15,9 +15,9 @@ local function get_type(v)
     -- local text_pattern = [[^('|").*('|")$]]
     local list_pattern = "^%s*%-%s+.-%s*(%s*%-%s+.-%s*)*$"
     local number_pattern = "^%d+$"
-    local checkbox_pattern = "^(true|false)$"
+    local checkbox_pattern = "(true|false)"
     local date_pattern = "^%d%d%d%d%-%d%d%-%d%d$"
-    local datetime_pattern = "^%d%d%d%d%-%d%d%-%d%d%s%d%d%:%d%d$"
+    local datetime_pattern = "^%d%d%d%d%-%d%d%-%d%dT%d%d%:%d%d%:%d%d%+%d%d%:%d%d$"
 
     if v:match(list_pattern) then
         return "list"
@@ -29,8 +29,9 @@ local function get_type(v)
         return "datetime"
     elseif v:match(date_pattern) then
         return "date"
+    else
+        return "text"
     end
-    return "text"
 end
 --- @param this VaultPropertyValue.data.name|vault.Property.Value.Data.Partial
 function PropertyValueData:init(this)
