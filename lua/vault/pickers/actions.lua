@@ -2,7 +2,6 @@ local actions_state = require("telescope.actions.state")
 local actions = require("telescope.actions")
 local vault_state = require("vault.core.state")
 local highlights = require("vault.highlights")
-local utils = require("vault.utils")
 
 local Popup = require("nui.popup")
 local event = require("nui.utils.autocmd").event

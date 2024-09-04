@@ -43,7 +43,7 @@ end
 --- @param key string -- `VaultTag.data` key
 --- @return any
 function TagData:__index(key)
-    --- @type fun(self: vault.Tag.data): any
+    --- @type fun(self: vault.Tag.data): any -- A function that fetches the data for the given key.
     local func = data[key]
     if func then
         local value = func(self)
@@ -98,7 +98,7 @@ function Tag:rename(name, verbose)
     --- @type vault.Note.constructor
     local Note = state.get_global_key("class.vault.Note") or require("vault.notes.note")
 
-    --- @type table<vault.Path, vault.Source>
+    --- @type table<string, vault.Source> - A table of paths to update.
     local paths_to_update = {}
     for slug, source in pairs(self.data.sources) do
         local path = utils.slug_to_path(slug)
@@ -113,10 +113,8 @@ function Tag:rename(name, verbose)
         message = self.data.name .. " -> " .. name
     end
 
-    local async = require("plenary.async")
-
     -- Update connected notes
-    for path, source in pairs(paths_to_update) do
+    for path, _ in pairs(paths_to_update) do
         --- @type vault.Note
         local note = Note(path)
         note:update_content(old_name, new_name)
@@ -146,10 +144,11 @@ end
 
 --- Add a slug to the |vault.Tag.Data.sources|
 ---
---- @param slug string
+--- @param slug vault.slug
 --- @return vault.Tag
 function Tag:add_slug(slug)
     if not self.data.sources[slug] then
+        -- FIXME: Should add the |vault.Source| to the |vault.Tag.data.sources| table, not the |boolean| value.
         self.data.sources[slug] = true
     end
     return self
@@ -159,4 +158,5 @@ end
 --- @type vault.Tag.constructor|vault.Tag
 local VaultTag = Tag
 
+state.set_global_key("class.vault.Tag", VaultTag)
 return VaultTag
