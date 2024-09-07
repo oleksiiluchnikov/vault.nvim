@@ -153,7 +153,9 @@ local batch_rename = function(_, selections)
     }
     local popup = Popup(win_config)
     popup:mount()
-    local filename = "vault://rename"
+    local filename = "Batch rename "
+        .. string.lower(selections[1].value.class.name:gsub("^Vault", ""))
+        .. "s across Vault"
     vim.api.nvim_buf_set_name(popup.bufnr, filename)
     vim.api.nvim_buf_set_lines(popup.bufnr, 0, 1, false, strings_to_rename)
 

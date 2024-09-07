@@ -123,7 +123,7 @@ function vault_pickers.notes(opts)
         return
     end
 
-    local average_content_count = opts.notes:average_chars()
+    opts.notes:average_content_chars()
     -- local prompt_title = string.format("average chars: %d", average_content_count)
     local prompt_title = opts.sort_by
 
@@ -1249,7 +1249,7 @@ function vault_pickers.property_values(opts)
 
     --- @param entry vault.TelescopeEntry
     local make_display = function(entry)
-        --- @type vault.Property
+        --- @type vault.Property.Value
         local property = entry.value
         local sources_count = property.data.count
         -----
@@ -1259,7 +1259,7 @@ function vault_pickers.property_values(opts)
 
         --- --
         local col_2 = property.data.name
-        local col_2_width = 29
+        local col_2_width = 40
         local i = math.min(math.floor(sources_count / 2), steps)
         if i == 0 then
             i = 1
@@ -1318,6 +1318,7 @@ function vault_pickers.property_values(opts)
         return a.data.count > b.data.count
     end)
 
+    -- FIXME: Negative filter doesn't work
     local on_input_filter_cb = function(prompt)
         local picker = vault_state.get_global_key("picker")
         local is_negative = false
@@ -1337,20 +1338,20 @@ function vault_pickers.property_values(opts)
             }
         end
 
-        if prompt:sub(1, 1) == "/" or prompt:sub(1, 2) == "-/" then
-            prompt = prompt:sub(2) -- Remove the leading '/' or '-/'
-        end
-
         if prompt:sub(-1) ~= "/" then
             return default_finder()
         end
 
         if prompt:sub(1, 1) == "-" then
             is_negative = true
-            -- prompt = prompt:sub(2) -- Remove the leading '-'
         end
 
         local pattern = prompt:sub(1, -2)
+        pattern = pattern:sub(2)
+        if is_negative == true then
+            pattern = pattern:sub(2)
+        end
+
         local new_results = {}
         local results_without_excluded = {}
 

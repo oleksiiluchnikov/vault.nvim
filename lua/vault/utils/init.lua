@@ -62,6 +62,16 @@ function utils.path_to_stem(path)
     return vim.fn.fnamemodify(path, ":t:r")
 end
 
+--- Format an absolute path to a basename.
+--- @param path vault.path
+--- @return string
+function utils.path_to_basename(path)
+    if type(path) ~= "string" then
+        error("path must be a string, got " .. type(path))
+    end
+    return vim.fn.fnamemodify(path, ":t")
+end
+
 -- relpath
 --- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
@@ -106,7 +116,7 @@ end
 --- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
 --- Check if the given tag name is a valid tag
---- @param tag_name vault.Tag.data.name - The tag name to check
+--- @param tag_name vault.Tag.Data.name - The tag name to check
 --- @return boolean true if valid tag, false otherwise
 function utils.is_tag(tag_name)
     local raw_tag = "#" .. tag_name
@@ -252,7 +262,7 @@ function utils.match(a, b, match_opt, case_sensitive)
             return true
         end
     elseif v == 4 then -- endswith
-        if string.sub(a, - #b) == b then
+        if string.sub(a, -#b) == b then
             return true
         end
     elseif v == 5 then -- regex

@@ -95,7 +95,7 @@ function Wikilinks:resolved()
     return self
 end
 
---- @return vault.Notes.data.slugs
+--- @return vault.Notes.Data.slugs
 function Wikilinks:targets()
     local targets = {}
     for _, wikilink in pairs(self.map) do
@@ -160,7 +160,7 @@ function Wikilinks:by_target(slug, match_opt, case_sensitive)
     return wikilinks
 end
 
---- @return vault.Notes.data.slugs
+--- @return vault.Notes.Data.slugs
 function Wikilinks:sources()
     --- @type vault.Notes.data.slugs
     local sources = {}

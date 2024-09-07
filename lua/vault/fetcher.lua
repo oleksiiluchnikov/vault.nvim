@@ -6,20 +6,15 @@ local utils = require("vault.utils")
 --- @type Job
 local Job = require("plenary.job")
 
---- @type vault.Config.options.root
-local root_dir = config.options.root
 --- @type string
-local ext = config.options.ext or ".md"
---- @type string
-local filetype = ext:sub(2)
+local filetype = config.options.ext:sub(2)
 
 --- @type string
 local COMMAND = config.options.search_tool or "rg" -- TODO: Make this configurable.
 
---- @alias vault.fetcher.ripgrep.entry {type: string, data: vault.fetcher.ripgrep.entry.data}
---- @alias vault.fetcher.ripgrep.entry.data {absolute_offset: number, line_number: number, lines: {text: string}, path: {text: string}, submatches: vault.fetcher.ripgrep.entry.data.submatch[]}
---- @alias vault.fetcher.ripgrep.entry.data.submatch {match: {text: string}, start: number, end: number}
-
+--- @alias vault.fetcher.ripgrep.entry {type: string, data: vault.fetcher.ripgrep.entry.Data}
+--- @alias vault.fetcher.ripgrep.entry.Data {absolute_offset: number, line_number: number, lines: {text: string}, path: {text: string}, submatches: vault.fetcher.ripgrep.entry.Data.submatch[]}
+--- @alias vault.fetcher.ripgrep.entry.Data.submatch {match: {text: string}, start: number, end: number}
 
 --- @class vault.fetcher
 --- @field notes fun(): vault.Notes.map - Fetches all paths from the vault with ripgrep.
@@ -27,9 +22,9 @@ local COMMAND = config.options.search_tool or "rg" -- TODO: Make this configurab
 --- @field tags fun(): vault.Tags.map - Fetches all tags from the vault with ripgrep.
 --- @field tasks fun(): vault.Tasks.map - Fetches all todos from the vault with ripgrep.
 --- @field links fun(): vault.Links.map - Fetches all external links from the vault with ripgrep.
---- @field fields fun(): vault.Fields.map - Fetch all the key value pairs from the frontmatter and inline dataview
+--- @field fields fun(): vault.Fields.map - Fetch all the key value pairs from the frontmatter and inline Dataview
 --- @field dirs fun(): vault.Dirs.map - Fetch all dirs from the vault with rg.
---- @field slugs fun(): vault.Notes.data.slugs
+--- @field slugs fun(): vault.Notes.Data.slugs
 --- @field paths fun(): vault.Notes.map - Fetches all paths from the vault with ripgrep.
 local Fetcher = {}
 
@@ -48,47 +43,75 @@ local function rg(args)
         end,
     }):sync()
 
-    assert(stdout, "Failed to fetch data from the vault.")
+    if not stdout then
+        error("Failed to fetch data from the vault.")
+    end
 
     return stdout
 end
 
---- Fetches all paths from the vault with ripgrep.
+--- @alias vault.fetcher.ripgrep.line string
+
+--- Converts a JSON line to a match entry.
 ---
+--- This function decodes the JSON line and verifies if it is a match entry.
+--- It returns the entry if it is a match and contains submatches, otherwise nil.
+---
+--- Example:
+--- ```lua
+--- local line = '{"type":"match","data":{"path":{"text":"path/to/file.md"},"lines":{"text":"line content"},"submatches":[{"match":{"text":"match content"},"start":0,"end":0}]}}'
+--- assert(line_to_match_entry(line) ~= nil)
+--- ```
+--- @param line string: A JSON-encoded string representing a ripgrep line.
+--- @return vault.fetcher.ripgrep.entry|nil: The match entry if the line is a match and contains submatches, otherwise nil.
+local function line_to_match_entry(line)
+    --- @type vault.fetcher.ripgrep.entry
+    local entry = vim.fn.json_decode(line)
+    if not entry.type == "match" then
+        return nil
+    elseif not entry.data then
+        return nil
+    elseif not entry.data.submatches or next(entry.data.submatches) == nil then
+        return nil
+    end
+    return entry
+end
+
+--- Fetches all paths from the vault with ripgrep.
 --- TODO: Add support for ignore files. that is in the config.options.ignore option.
---- @return table<vault.slug, {path: vault.path, slug: vault.slug, relpath: string, basename: vault.Note.Data.basename}>
+--- @return table<vault.slug, {path: vault.path, slug: vault.slug, relpath: string, basename: string}>
 function Fetcher.paths()
     local args = {
         "-t" .. filetype,
         "--files",
-        root_dir,
+        config.options.root,
     }
 
     --- @type string[]
-    local stdout = rg(args)
+    local paths = rg(args)
 
+    --- @type table<vault.slug, {path: vault.path, slug: vault.slug, relpath: string, basename: string}>
     local map = {}
-    for _, path in ipairs(stdout) do
-        --- @type vault.slug
+    for _, path in ipairs(paths) do
         local slug = utils.path_to_slug(path)
         if map[slug] then
             goto continue
         end
-
         map[slug] = {
             path = path,
             slug = slug,
             relpath = utils.path_to_relpath(path),
-            basename = vim.fn.fnamemodify(path, ":t"),
+            basename = utils.path_to_basename(path),
         }
         ::continue::
     end
 
+    state.set_global_key("cache.notes.paths", map)
     return map
 end
 
 --- Fetches all slugs from the vault with ripgrep.
---- @return vault.Notes.data.slugs
+--- @return vault.Notes.Data.slugs
 function Fetcher.slugs()
     local paths = Fetcher.paths()
     --- @type vault.Notes.data.slugs
@@ -107,7 +130,8 @@ end
 function Fetcher.wikilinks()
     --- https://regex101.com/r/T1me3d/2 - Wikilink regex pattern
     local wikilink_pattern =
-    "^\\[\\[(?<link>[^\\]\\|]+)?(\\#(?<anchor>[^\\]\\|]+))?(\\|(?<title>[^\\]\\|]+))?(\\|(?<tooltip>[^\\]\\|]+))?\\]\\]"
+    [=[^\[\[(?<link>[^\]\|]+)?(\#(?<anchor>[^\]\|]+))?(\|(?<title>[^\]\|]+))?(\|(?<tooltip>[^\]\|]+))?\]\]]=]
+
     local args = {
         "--json",
         "-t" .. filetype,
@@ -115,7 +139,7 @@ function Fetcher.wikilinks()
         "--only-matching",
         "--pcre2",
         wikilink_pattern,
-        root_dir,
+        config.options.root,
     }
     local stdout = rg(args)
 
@@ -123,20 +147,13 @@ function Fetcher.wikilinks()
     local Wikilink = state.get_global_key("class.vault.Wikilink")
         or require("vault.wikilinks.wikilink")
 
+    --- @type vault.Wikilinks.map
     local wikilinks_map = {}
-    for _, line in ipairs(stdout) do
-        --- @type vault.fetcher.ripgrep.entry
-        local entry = vim.fn.json_decode(line)
-        if not entry.type == "match" then
-            goto continue
-        elseif not entry.data then
-            goto continue
-        elseif not entry.data.submatches or next(entry.data.submatches) == nil then
+    for _, entry in ipairs(stdout) do
+        local match = line_to_match_entry(entry)
+        if not match then
             goto continue
         end
-
-        --- @type vault.fetcher.ripgrep.entry
-        local match = entry
         for _, submatch in ipairs(match.data.submatches) do
             --- @type vault.Wikilink
             local wikilink = Wikilink(submatch.match.text)
@@ -153,9 +170,9 @@ function Fetcher.wikilinks()
             --- @type vault.path
             local path = match.data.path.text
             --- @type vault.slug
-            local note_slug = utils.path_to_slug(path)
-            --- @type number
-            local line_number = match.data.line_number
+            local slug = utils.path_to_slug(path)
+            --- @type integer
+            local lnum = match.data.line_number
 
             if submatch.match.text:find("^!") then
                 data.embedded = true
@@ -169,143 +186,21 @@ function Fetcher.wikilinks()
                 data.sources = {}
             end
 
-            if not data.sources[note_slug] then
-                data.sources[note_slug] = {}
+            if not data.sources[slug] then
+                data.sources[slug] = {}
             end
 
-            data.sources[note_slug][line_number] = {}
-            data.sources[note_slug][line_number].line = match.data.lines.text
-            data.sources[note_slug][line_number].col = {}
-            data.sources[note_slug][line_number].col.start = submatch.start
-            data.sources[note_slug][line_number].col["end"] = submatch["end"]
+            data.sources[slug][lnum] = {
+                lnum = lnum,
+                line = match.data.lines.text,
+                end_lnum = lnum,
+                col = submatch.start,
+                end_col = submatch["end"],
+            }
         end
-
         ::continue::
     end
     return wikilinks_map
-end
-
---- Fetches all tags from the vault with ripgrep.
----
---- @return vault.Tags.map
-function Fetcher.tags()
-    -- TODO: Add support to fetch tags from the frontmatter, and the body.
-    local tag_pattern = [[(?:\s|^|[\.,; >])#([A-Za-z0-9_][A-Za-z0-9-_/]*)]] -- TODO: Make this configurable.
-    -- How to exclude caste when [ some data #not-tag] is matched?
-    local args = {
-        "--json",
-        "-t" .. filetype,
-        "--no-heading",
-        "--only-matching",
-        -- TODO: Add support for ignore files. that is in the config.options.ignore option.
-        -- "--ignore-file",
-
-        tag_pattern,
-        root_dir,
-    }
-
-    local stdout = rg(args)
-
-
-    --- @type vault.Tag.constructor|vault.Tag
-    local Tag = state.get_global_key("class.vault.Tag") or require("vault.tags.tag")
-
-    local matches_map = {}
-    --- @type vault.Tags.map
-    local tags_map = {}
-    for _, entry in ipairs(stdout) do
-        --- @type vault.fetcher.ripgrep.entry
-        local match = vim.fn.json_decode(entry)
-
-        if not match.type == "match" then
-            goto continue
-        elseif not match.data then
-            goto continue
-        elseif not match.data.submatches or next(match.data.submatches) == nil then
-            goto continue
-        end
-
-        local line = match.data.lines.text
-
-        -- Check if the tag is inside the link like [some data #not-tag](https://example.com)
-        -- so it is not a tag.
-        -- TODO: Make it more accurate. Now it could be a tag inside a brackets, and it will be skipped.
-        if line:find("%[.-#.-%]") then
-            local is_tag = false
-            local inside_brackets = false
-            for char in line:gmatch(".") do
-                if char == "[" then
-                    inside_brackets = true
-                elseif char == "]" then
-                    inside_brackets = false
-                elseif char == "#" and inside_brackets == false then
-                    is_tag = true
-                    break
-                end
-            end
-
-            if is_tag == false then
-                goto continue
-            end
-        end
-
-        --- @type vault.path
-        local path = match.data.path.text
-        --- @type vault.slug
-        local slug = utils.path_to_slug(path)
-
-        for _, submatch in ipairs(match.data.submatches) do
-            --- @type vault.Tag.data.name
-            -- Remove the # from the beginning
-            local tag_name = submatch.match.text:match("#(%S+)%s*$")
-
-            if not matches_map[tag_name] then
-                matches_map[tag_name] = {}
-            end
-
-            --- @type vault.Tag.data
-            local tag_data = matches_map[tag_name]
-            tag_data.name = tag_name
-
-            -- nested
-            if tag_data.name:find("/") then
-                tag_data.is_nested = true
-            end
-
-            if tag_data.is_nested then
-                tag_data.root = tag_data.name:match("^[^/]+")
-            else
-                tag_data.root = tag_data.name
-            end
-
-            -- sources
-            if not tag_data.sources then
-                tag_data.sources = {}
-            end
-            if not tag_data.sources[slug] then
-                tag_data.sources[slug] = {}
-                local line_number = match.data.line_number
-                if not tag_data.sources[slug][line_number] then
-                    tag_data.sources[slug][line_number] = {}
-                end
-
-                tag_data.sources[slug][line_number].line = line
-                tag_data.sources[slug][line_number].start = submatch.start
-                tag_data.sources[slug][line_number]["end"] = submatch["end"]
-            end
-
-            if not tag_data.count then
-                tag_data.count = 1
-            else
-                tag_data.count = tag_data.count + 1
-            end
-
-            local tag = Tag(tag_data)
-            tags_map[tag_name] = tag
-        end
-        ::continue::
-    end
-    return tags_map
 end
 
 --- @class vault.Task
@@ -347,27 +242,22 @@ end
 --- ```
 --- @return vault.Tasks.map
 function Fetcher.tasks()
-    local todo_pattern = [[^\s*-\s+\[(.)\]\s+]]
+    local todo_pattern = config.options.search_pattern.task.pcre2
     local args = {
         "--json",
         "-t" .. filetype,
         "--no-heading",
         "--only-matching",
         todo_pattern,
-        root_dir,
+        config.options.root,
     }
 
     local stdout = rg(args)
 
     local tasks_map = {}
     for _, entry in ipairs(stdout) do
-        --- @type vault.fetcher.ripgrep.entry
-        local match = vim.fn.json_decode(entry)
-        if not match.type == "match" then
-            goto continue
-        elseif not match.data then
-            goto continue
-        elseif not match.data.submatches or next(match.data.submatches) == nil then
+        local match = line_to_match_entry(entry)
+        if not match then
             goto continue
         end
 
@@ -375,14 +265,14 @@ function Fetcher.tasks()
 
         for _, submatch in ipairs(match.data.submatches) do
             --- @type vault.Task
-            local todo = {
+            local task = {
                 line = line,
                 status = submatch.match.text:match("%[.%]"),
                 text = line:match("^%s*-%s+%[.%]%s+(.*)%s$"),
                 wikilinks = {},
             }
             for wikilink in line:gmatch("%[%[.-]]") do
-                todo.wikilinks[wikilink] = true
+                task.wikilinks[wikilink] = true
             end
 
             local path = match.data.path.text
@@ -394,7 +284,7 @@ function Fetcher.tasks()
             end
 
             if not tasks_map[slug][line_number] then
-                tasks_map[slug][line_number] = todo
+                tasks_map[slug][line_number] = task
             end
         end
         ::continue::
@@ -416,28 +306,21 @@ function Fetcher.links()
         "--no-heading",
         "--only-matching",
         link_pattern,
-        root_dir,
+        config.options.root,
     }
 
     local stdout = rg(args)
 
     local links_map = {}
     for _, entry in ipairs(stdout) do
-        --- @type vault.fetcher.ripgrep.entry
-        local match = vim.fn.json_decode(entry)
-        if not match.type == "match" then
-            goto continue
-        elseif not match.data then
-            goto continue
-        elseif not match.data.submatches or next(match.data.submatches) == nil then
+        local match = line_to_match_entry(entry)
+        if not match then
             goto continue
         end
 
-        local line = match.data.lines.text
-
         for _, submatch in ipairs(match.data.submatches) do
             local link = {
-                line = line,
+                line = match.data.lines.text,
                 text = submatch.match.text:match("%[(.*)%]%(.*%)"),
                 url = submatch.match.text:match("%((.*)%)"),
             }
@@ -474,20 +357,15 @@ function Fetcher.fields()
         "--no-heading",
         "--only-matching",
         inline_pattern,
-        root_dir,
+        config.options.root,
     }
 
     local stdout = rg(args)
 
     local fields_map = {}
     for _, entry in ipairs(stdout) do
-        --- @type vault.fetcher.ripgrep.entry
-        local match = vim.fn.json_decode(entry)
-        if not match.type == "match" then
-            goto continue
-        elseif not match.data then
-            goto continue
-        elseif not match.data.submatches or next(match.data.submatches) == nil then
+        local match = line_to_match_entry(entry)
+        if not match then
             goto continue
         end
 
@@ -595,7 +473,7 @@ function Fetcher.dirs()
         "--files",  -- Only print file paths
         "--glob",   -- Use glob pattern matching
         "![.]*",    -- Exclude all files and directories starting with a dot
-        root_dir,   -- Root directory to search
+        config.options.root,   -- Root directory to search
     }
 
     local stdout = rg(args) -- Execute ripgrep with the provided arguments
@@ -669,7 +547,6 @@ local function is_valid_key(key)
     return key:match("^[%w_%-]+$") ~= nil
 end
 
-
 --- Fetch all obsidian properties from the vault.
 ---
 --- TODO: Since we look for the properties in the frontmatter, we should workaround to look at the fronmatter of the note only.
@@ -684,7 +561,7 @@ function Fetcher.properties()
         "-U",
         "--pcre2",
         frontmatter_pattern,
-        root_dir,
+        config.options.root,
     }
     local stdout = rg(args)
 
@@ -695,16 +572,10 @@ function Fetcher.properties()
         require("vault.properties.property.value")
 
 
-
     -- Try use yq instead of rg
     for _, entry in ipairs(stdout) do
-        --- @type vault.fetcher.ripgrep.entry
-        local match = vim.fn.json_decode(entry)
-        if not match.type == "match" then
-            goto continue
-        elseif not match.data then
-            goto continue
-        elseif not match.data.submatches or next(match.data.submatches) == nil then
+        local match = line_to_match_entry(entry)
+        if not match then
             goto continue
         end
 
@@ -736,16 +607,17 @@ function Fetcher.properties()
                 if key and value then
                     frontmatter[key] = value
                     current_key = key
+                    --- @type vault.source.occurence
                     occurences[key] = {
                         lnum = i,
                         end_lnum = i,
+                        line = line,
                         col = 1,
                         end_col = key:len(),
                     }
                 end
             end
         end
-
 
         for k, v in pairs(frontmatter) do
             --- @type vault.Property.Data.name
@@ -776,56 +648,80 @@ function Fetcher.properties()
                 properties_map[property_name].data.count = properties_map[property_name].data.count + 1
             end
 
+            -- local indent = submatch.match.text:match("^%s+")
+            local indent = 0
+
             local values_raw = vim.split(v, "\n")
+            local values = {}
             if #values_raw > 1 then
                 if values_raw[1] == "" then
                     table.remove(values_raw, 1)
                 end
                 -- delete the "- " from the beginning
-                values_raw = vim.tbl_map(function(value)
-                    return value:gsub("^%s*-%s+", "")
+                values = vim.tbl_map(function(value)
+                    if value:match("^%s+") then
+                        indent = indent + value:match("^%s+"):len()
+                    end
+                    value = value:gsub("^%s*-%s+", "")
+                    if k == "tags" then
+                        return value:gsub("^%s*[\"'](.-)[\"']%s*$", "%1")
+                    end
+                    return value
+
+                end, values_raw)
+            else
+                values = vim.tbl_map(function(value)
+                    return value
                 end, values_raw)
             end
 
-            for _, value_name in ipairs(values_raw) do
-                if not properties_map[property_name].data.values[value_name] then
+            for i, value_name in ipairs(values) do
+                local value_occurence = {
+                    lnum = occurence.lnum + i, -- If value is a list, then it is next
+                    end_lnum = occurence.end_lnum + i,
+                    line = values_raw[i],
+                    col = occurence.col + indent,
+                    end_col = occurence.end_col,
+                }
+                --- @type vault.Property.Value|nil
+                local value = properties_map[property_name].data.values[value_name]
+                if not value then
+                    local value_type = "text"
+                    if vim.tbl_count(values_raw) > 1 then
+                        value_type = "list"
+                    end
                     --- @type vault.Property.Value.data
-                    local value_data = {}
-                    value_data.name = value_name
-                    if #values_raw > 1 then
-                        value_data.type = "list"
-                    end
-                    if not value_data.sources then
-                        value_data.sources = {}
-                    end
-                    if not value_data.sources[slug] then
-                        value_data.sources[slug] = {}
-                        -- TODO: Add the occurence
-                    end
-                    if not value_data.properties then
-                        value_data.properties = {
+                    --- @diagnostic disable-next-line: missing-fields
+                    local value_data = {
+                        name = value_name,
+                        sources = {
+                            [slug] = {
+                                [value_occurence.lnum] = value_occurence,
+                            },
+                        },
+                        properties = {
                             [property_name] = properties_map[property_name],
-                        }
-                    end
-                    if not value_data.count then
-                        value_data.count = 1
-                    end
-                    -- if not properties_data.values[value].sources[path][line_number] then
-                    --     properties_data.values[value].sources[path][line_number] = {}
-                    -- end
+                        },
+                        count = 1,
+                        type = value_type,
+                    }
 
-                    local value = PropertyValue(value_data)
+                    value = PropertyValue(value_data)
                     -- properties_map[property_name]:add_value(value)
                     properties_map[property_name].data.values[value_data.name] = value
                 else
                     -- properties_map[property_name]:add_value(value)
-                    properties_map[property_name].data.values[value_name].data.sources[slug] = {}
-                    properties_map[property_name].data.values[value_name].data.count = properties_map[property_name]
-                        .data.values[value_name].data.count + 1
-                    if not properties_map[property_name].data.values[value_name].data.properties[property_name] then
-                        properties_map[property_name].data.values[value_name].data.properties[property_name] =
-                            properties_map[property_name]
+                    if not value.data.sources[slug] then
+                        value.data.sources[slug] = {}
                     end
+                    if not value.data.sources[slug][value_occurence.lnum] then
+                        value.data.sources[slug][value_occurence.lnum] = value_occurence
+                    end
+                    value.data.count = value.data.count + 1
+                    -- if not value.data.properties[property_name] then
+                    --     value.data.properties[property_name] =
+                    --         properties_map[property_name]
+                    -- end
                     -- TODO: Add the occurence
                 end
             end
@@ -834,6 +730,148 @@ function Fetcher.properties()
     end
 
     return properties_map
+end
+
+local function fetch_tags_from_frontmatter()
+    local tags_from_frontmatter_map = {}
+    local tags_from_properties = Fetcher.properties()[config.options.frontmatter.keys.tags].data.values
+    for _, tag_from_frontmatter in pairs(tags_from_properties) do
+        if tag_from_frontmatter.data.name == "" then
+            goto continue
+        end
+        -- unqoute the name if it is quoted
+        tag_from_frontmatter.data.name = tag_from_frontmatter.data.name:gsub("^['\"](.-)['\"]$", "%1")
+        local tag_data = {
+            name = tag_from_frontmatter.data.name,
+            sources = tag_from_frontmatter.data.sources,
+            -- where = tag.data.where, -- "frontmatter" | "body"
+        }
+        tags_from_frontmatter_map[tag_from_frontmatter.data.name] = tag_data
+        ::continue::
+    end
+    return tags_from_frontmatter_map
+end
+
+--- Fetches all tags from the vault with ripgrep.
+---
+--- @return vault.Tags.map
+function Fetcher.tags()
+    local tag_pattern = [=[(?:\s|^|[\.,; >])#([A-Za-z0-9_][A-Za-z0-9-_/]*)]=]
+    local args = {
+        "--json",
+        "-t" .. filetype,
+        "--no-heading",
+        "--only-matching",
+        -- TODO: Add support for ignore files. that is in the config.options.ignore option.
+        -- "--ignore-file",
+
+        tag_pattern,
+        config.options.root,
+    }
+
+    local stdout = rg(args)
+
+
+    --- @type vault.Tags.map
+    local tags_map = {}
+    local tags_from_frontmatter_map = fetch_tags_from_frontmatter()
+    --- @type vault.Tag.constructor|vault.Tag
+    local Tag = state.get_global_key("class.vault.Tag") or require("vault.tags.tag")
+
+    local matches_map = {}
+    for _, entry in ipairs(stdout) do
+        local match = line_to_match_entry(entry)
+        if not match then
+            goto continue
+        end
+
+        local line = match.data.lines.text
+
+        -- Check if the tag is inside the link like [some data #not-tag](https://example.com)
+        -- so it is not a tag.
+        -- TODO: Make it more accurate. Now it could be a tag inside a brackets, and it will be skipped.
+        if line:find("%[.-#.-%]") then
+            local is_tag = false
+            local inside_brackets = false
+            for char in line:gmatch(".") do
+                if char == "[" then
+                    inside_brackets = true
+                elseif char == "]" then
+                    inside_brackets = false
+                elseif char == "#" and inside_brackets == false then
+                    is_tag = true
+                    break
+                end
+            end
+
+            if is_tag == false then
+                goto continue
+            end
+        end
+
+        --- @type vault.path
+        local path = match.data.path.text
+        --- @type vault.slug
+        local slug = utils.path_to_slug(path)
+
+        for _, submatch in ipairs(match.data.submatches) do
+            --- @type vault.Tag.data.name
+            -- Remove the # from the beginning
+            local tag_name = submatch.match.text:match("#(%S+)%s*$")
+
+            if not matches_map[tag_name] then
+                matches_map[tag_name] = {}
+            end
+
+            --- @type vault.Tag.data
+            local tag_data = matches_map[tag_name]
+            tag_data.name = tag_name
+
+            -- nested
+            if tag_data.name:find("/") then
+                tag_data.is_nested = true
+            end
+
+            if tag_data.is_nested then
+                tag_data.root = tag_data.name:match("^[^/]+")
+            else
+                tag_data.root = tag_data.name
+            end
+
+            -- sources
+            if not tag_data.sources then
+                tag_data.sources = {}
+            end
+            if not tag_data.sources[slug] then
+                tag_data.sources[slug] = {}
+            end
+            local lnum = match.data.line_number
+            if not tag_data.sources[slug][lnum] then
+                tag_data.sources[slug][lnum] = {
+                    lnum = lnum,
+                    line = line,
+                    col = submatch.start,
+                    end_lnum = lnum,
+                    end_col = submatch["end"],
+                }
+            end
+            --
+            -- if not tag_data.count then
+            --     tag_data.count = 1
+            -- else
+            --     tag_data.count = tag_data.count + 1
+            -- end
+
+            if tags_from_frontmatter_map[tag_name] then
+                -- tag_data.count = tag_data.count + tags_from_frontmatter_map[tag_name].count
+                tag_data.sources = vim.tbl_deep_extend("force", tag_data.sources, tags_from_frontmatter_map[tag_name].sources)
+            end
+
+            tags_map[tag_name] = Tag(tag_data)
+        end
+        ::continue::
+    end
+    return tags_map
 end
 
 return Fetcher

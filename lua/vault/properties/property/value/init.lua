@@ -4,10 +4,10 @@ local error_formatter = require("vault.utils.fmt.error")
 local state = require("vault.core.state")
 local data = require("vault.properties.property.data")
 
---- @class vault.Property.Value.data: vault.Object
+--- @class vault.Property.Value.Data: vault.Object
 local PropertyValueData = Object("VaultPropertyValueData")
 
---- @alias vault.Property.Value.Data.Partial table - The partial data of the property.
+--- @alias vault.Property.Value.Data.Partial table - The partial Data of the property.
 
 --- Parse the type of the value. According to the Obsidian dcumentation.
 --- @param v string
@@ -33,7 +33,7 @@ local function get_type(v)
         return "text"
     end
 end
---- @param this VaultPropertyValue.data.name|vault.Property.Value.Data.Partial
+--- @param this VaultPropertyValue.Data.name|vault.Property.Value.Data.Partial
 function PropertyValueData:init(this)
     if not this then
         error(error_formatter.missing_parameter("this"), 2)
@@ -47,7 +47,7 @@ end
 
 --- Fetch the data if it is not already cached.
 ---
---- @param key string -- `VaultPropertyValue.data` key
+--- @param key string -- `VaultPropertyValue.Data` key
 --- @return any
 function PropertyValueData:__index(key)
     --- @type fun(self: vault.Property.Value.data): any
@@ -68,14 +68,14 @@ function PropertyValueData:__index(key)
 end
 
 --- @class vault.Property.Value: vault.Object
---- @field data vault.Property.Value.data - The data of the property.
---- @field init fun(self: vault.Property.Value, this: VaultPropertyValue.data.name|vault.Property.Value.Data.Partial): vault.Property.Value
---- @field add_slug fun(self: vault.Property.Value, slug: string): vault.Property.Value - Add a slug to the `self.data.sources` table.
+--- @field data vault.Property.Value.Data - The Data of the property.
+--- @field init fun(self: vault.Property.Value, this: VaultPropertyValue.Data.name|vault.Property.Value.Data.Partial): vault.Property.Value
+--- @field add_slug fun(self: vault.Property.Value, slug: string): vault.Property.Value - Add a slug to the `self.Data.sources` table.
 local PropertyValue = Object("VaultPropertyValue")
 
 --- Create a new `VaultPropertyValue` instance.
 ---
---- @param this VaultPropertyValue.data.name|vault.Property.Value.Data.Partial
+--- @param this VaultPropertyValue.Data.name|vault.Property.Value.Data.Partial
 function PropertyValue:init(this)
     if not this then
         error(error_formatter.missing_parameter("this"), 2)

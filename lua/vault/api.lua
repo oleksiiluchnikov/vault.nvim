@@ -1,7 +1,7 @@
 local M = {}
 
 --- Open the picker with the given tag name
---- @param tag_name vault.Tag.data.name
+--- @param tag_name vault.Tag.Data.name
 --- @return nil
 function M.open_picker_notes_with_tag(tag_name)
     if not tag_name then
@@ -20,7 +20,7 @@ function M.open_picker_notes_with_tag(tag_name)
 end
 
 --- Open the tag documentation with the given tag name
---- @param tag_name vault.Tag.data.name
+--- @param tag_name vault.Tag.Data.name
 --- @return nil
 function M.edit_tag_documentation(tag_name)
     if not tag_name then
@@ -36,8 +36,8 @@ function M.edit_tag_documentation(tag_name)
 end
 
 --- Rename the tag
---- @param from_tag_name vault.Tag.data.name
---- @param to_tag_name vault.Tag.data.name
+--- @param from_tag_name vault.Tag.Data.name
+--- @param to_tag_name vault.Tag.Data.name
 function M.rename_tag(from_tag_name, to_tag_name)
     if not from_tag_name then
         error("No from tag name provided")
@@ -105,6 +105,67 @@ end
 function M.open_picker_notes_in_directory(directory)
     require("vault.pickers").notes({
         notes = require("vault.notes")():with_relpath(directory, "startswith", false),
+    })
+end
+
+--- Open the picker with the given property name
+--- if property_name is not provided, it will open collect notes with empty property values
+--- @param property_name? vault.Property.Data.name
+--- @param value_name? vault.Property.Value.Data.name
+function M.open_picker_notes_with_empty_property_value(property_name, value_name)
+    local properties = require("vault.properties")()
+    local values = {}
+    local empty_values = {
+        "",
+        ".nan",
+        "unknown",
+        "not applicable",
+        "n/a",
+        "none",
+    }
+    local function add_sources(sources, property)
+        for k, value in pairs(property.data.values) do
+            if vim.tbl_contains(empty_values, k) then
+                if value.data.sources then
+                    for slug, occurences in pairs(value.data.sources) do
+                        if sources[slug] == nil then
+                            sources[slug] = occurences
+                        else
+                            sources[slug] = vim.tbl_extend("force", sources[slug], occurences)
+                        end
+                    end
+                end
+            end
+        end
+        return sources
+    end
+    local sources = {}
+    if property_name then
+        values = properties.map[property_name].data.values
+        if value_name then
+            sources = values[value_name].data.sources
+        else
+            sources = add_sources(sources, values)
+        end
+    else
+        for _, property in pairs(properties.map) do
+            values = property.data.values
+            sources = add_sources(sources, property)
+        end
+    end
+    local slugs = vim.tbl_keys(sources)
+
+    local notes = require("vault.notes")()
+
+    notes.map = {}
+    for _, slug in ipairs(slugs) do
+        local path = require("vault.utils").slug_to_path(slug)
+        local note = require("vault.notes.note")(path)
+        notes:add_note(note)
+    end
+    -- vault_pickers.notes(opts)
+    require("vault.pickers").notes({
+        notes = notes,
     })
 end
 

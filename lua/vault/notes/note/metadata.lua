@@ -1,5 +1,5 @@
 local metadata = {}
---- @alias NoteMetadataKey
+--- @alias NoteMetaDataKey
 --- | "'relpath'" -- unique
 --- | "'path'" -- unique
 --- | "'slug'" -- unique
@@ -18,20 +18,20 @@ local metadata = {}
 --- | "'type'"
 --- | "'status'"
 
---- @alias VaultNotesMedataKey.unique
+--- @alias VaultNotesMeDataKey.unique
 --- | "'relpath'" -- unique
 --- | "'path'" -- unique
 
 
---- @alias VaultNotesSearchTerm NoteMetadataKey
+--- @alias VaultNotesSearchTerm NoteMetaDataKey
 
---- @type table<NoteMetadataKey, boolean>
+--- @type table<NoteMetaDataKey, boolean>
 metadata.unique = {
     relpath = true,
     path = true,
 }
 
---- @type table<NoteMetadataKey, boolean>
+--- @type table<NoteMetaDataKey, boolean>
 metadata.keys = {
     relpath = true,
     path = true,

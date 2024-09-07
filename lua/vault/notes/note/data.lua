@@ -30,23 +30,23 @@ local utils = require("vault.utils")
 --- @alias vault.stem string
 
 --- |VaultProperty|
---- @alias vault.Note.data.properties vault.Property[]
+--- @alias vault.Note.Data.properties vault.Property[]
 
 --- Full text of the note
---- @alias vault.Note.data.content string
+--- @alias vault.Note.Data.content string
 
 --- Text of the note excluding |vault.Note.data.frontmatter|.
---- @alias vault.Note.data.body string
+--- @alias vault.Note.Data.body string
 
 --- Markdown heading of the |vault.Note|
---- @alias vault.Note.data.heading {level: integer, text: string}
+--- @alias vault.Note.Data.heading {level: integer, text: string}
 
 --- List of |vault.Note.data.heading|
---- @alias vault.Note.data.headings table<vault.lnum, vault.Note.data.heading>
+--- @alias vault.Note.Data.headings table<vault.lnum, vault.Note.Data.heading>
 
---- @alias vault.Note.data.list table
+--- @alias vault.Note.Data.list table
 
---- @alias vault.Note.data.field {line:{ row: vault.lnum, col: {start: integer, end: integer}, text: string}, data: table<string, any>} - A key in the note.
+--- @alias vault.Note.Data.field {line:{ row: vault.lnum, col: {start: integer, end: integer}, text: string}, Data: table<string, any>} - A key in the note.
 
 --- @alias vault.Note.Data._key
 --- | '"path"' - The absolute path to the note.
@@ -65,25 +65,25 @@ local utils = require("vault.utils")
 --- @field relpath vault.relpath
 --- @field slug vault.slug
 --- @field stem vault.stem
---- @field content vault.Note.data.content
---- @field body vault.Note.data.body
+--- @field content vault.Note.Data.content
+--- @field body vault.Note.Data.body
 --- @field title? vault.Note.Title
 --- @field frontmatter? vault.Note.Frontmatter
---- @field headings? vault.Note.data.headings - List of headings in the note.
---- @field lists? vault.Note.data.list[] - The lists of the note`s list items.
+--- @field headings? vault.Note.Data.headings - List of headings in the note.
+--- @field lists? vault.Note.Data.list[] - The lists of the note`s list items.
 --- @field tags? vault.Tags.map - The tags of the note.
---- @field properties? vault.Note.data.properties - The properties of the note.
+--- @field properties? vault.Note.Data.properties - The properties of the note.
 --- @field inlinks? vault.Wikilinks.map - List of inlinks to the note.
 --- @field outlinks? vault.Wikilinks.map - List of outlinks from the note.
 --- @field dangling_links? vault.Wikilinks.map - List of dangling_links from the note.
---- @field keys? vault.Note.data.keys - The keys of the note.
---- @field type? vault.Note.data.type - The type of the note.
---- @field status? vault.Note.data.status - The status of the note.
+--- @field keys? vault.Note.Data.keys - The keys of the note.
+--- @field type? vault.Note.Data.type - The type of the note.
+--- @field status? vault.Note.Data.status - The status of the note.
 --- @field stats table<string, any> - The stats of the note.
 
 local Data = {}
 
---- @param note_data vault.Note.Data
+--- @param note_Data vault.Note.Data
 --- @return vault.path
 Data.path = function(note_data)
     local relpath = note_data.relpath
@@ -91,7 +91,7 @@ Data.path = function(note_data)
     return path
 end
 
---- @param note_data vault.Note.Data
+--- @param note_Data vault.Note.Data
 --- @return string
 Data.relpath = function(note_data)
     local path = note_data.path
@@ -99,7 +99,7 @@ Data.relpath = function(note_data)
     return relpath
 end
 
---- @param note_data vault.Note.Data
+--- @param note_Data vault.Note.Data
 --- @return vault.slug
 Data.slug = function(note_data)
     local path = note_data.path
@@ -107,7 +107,7 @@ Data.slug = function(note_data)
     return slug
 end
 
---- @param note_data vault.Note.Data
+--- @param note_Data vault.Note.Data
 --- @return string
 Data.basename = function(note_data)
     local path = note_data.path
@@ -118,7 +118,7 @@ Data.basename = function(note_data)
     return basename
 end
 
---- @param note_data vault.Note.Data
+--- @param note_Data vault.Note.Data
 --- @return string
 Data.stem = function(note_data)
     local path = note_data.path
@@ -127,7 +127,7 @@ Data.stem = function(note_data)
     return stem
 end
 
---- @param note_data vault.Note.Data
+--- @param note_Data vault.Note.Data
 --- @return string
 Data.content = function(note_data)
     local path = note_data.path
@@ -141,7 +141,7 @@ Data.content = function(note_data)
     return content or ""
 end
 
---- @param note_data vault.Note.Data
+--- @param note_Data vault.Note.Data
 --- @return vault.Note.Frontmatter|table
 Data.frontmatter = function(note_data)
     local content = note_data.content
@@ -152,7 +152,7 @@ Data.frontmatter = function(note_data)
     return NoteFrontmatter(content)
 end
 
---- @param note_data vault.Note.Data
+--- @param note_Data vault.Note.Data
 --- @return string
 Data.body = function(note_data)
     local content = note_data.content
@@ -164,7 +164,7 @@ Data.body = function(note_data)
     return body
 end
 
---- @return vault.Note.data.headings
+--- @return vault.Note.Data.headings
 Data.headings = function()
     -- local body = note_data.body
     local body = [[
@@ -204,15 +204,15 @@ end
 --- Return the title of the note.
 --- Title is the first `VaultNote.data.headings` or the `VaultNote.data.stem`.
 ---
---- @param note_data vault.Note.Data
---- @return VaultNote.data.title
+--- @param note_Data vault.Note.Data
+--- @return VaultNote.Data.title
 Data.title = function(note_data)
     local content = note_data.content
     local title = content:match("#%s*(.*)[\r\n$]") or note_data.stem
     return title
 end
 
---- @param note_data vault.Note.Data
+--- @param note_Data vault.Note.Data
 --- @return vault.Tags.map
 Data.tags = function(note_data)
     local all_tags = state.get_global_key("tags") or require("vault.tags")()
@@ -224,10 +224,10 @@ Data.tags = function(note_data)
     return note_tags
 end
 
---- @alias vault.Note.data.list table<string, vault.lnum> - E.g. { ["- list"] = 1, ["- list"] = 2 }
+--- @alias vault.Note.Data.list table<string, vault.lnum> - E.g. { ["- list"] = 1, ["- list"] = 2 }
 
---- @param note_data vault.Note.Data
---- @return vault.Note.data.list[] - List of "- list-like" lines.
+--- @param note_Data vault.Note.Data
+--- @return vault.Note.Data.list[] - List of "- list-like" lines.
 Data.lists = function(note_data)
     --- @type string
     local body = note_data.body
@@ -246,7 +246,7 @@ Data.lists = function(note_data)
     return {}
 end
 
---- @param note_data vault.Note.Data
+--- @param note_Data vault.Note.Data
 --- @return vault.Wikilinks.map
 Data.outlinks = function(note_data)
     local slug = note_data.slug
@@ -302,7 +302,7 @@ Data.outlinks = function(note_data)
     return outlinks
 end
 
---- @param note_data vault.Note.Data
+--- @param note_Data vault.Note.Data
 --- @return vault.Wikilinks.map
 Data.inlinks = function(note_data)
     local wikilinks = state.get_global_key("wikilinks") or require("vault.wikilinks")()
@@ -327,10 +327,10 @@ Data.dangling_links = function(note_data)
     error("Not implemented: " .. vim.inspect(note_data))
 end
 
---- @alias vault.Note.data.keys table<string, vault.lnum> - E.g. { ["title"] = 1, ["created"] = 2 }
+--- @alias vault.Note.Data.keys table<string, vault.lnum> - E.g. { ["title"] = 1, ["created"] = 2 }
 
---- @param note_data vault.Note.Data
---- @return vault.Note.data.keys
+--- @param note_Data vault.Note.Data
+--- @return vault.Note.Data.keys
 Data.keys = function(note_data)
     local keys = {}
 
@@ -463,7 +463,7 @@ end
 
 --- @alias VaultNoteType table
 
---- @param note_data vault.Note.Data
+--- @param note_Data vault.Note.Data
 --- @return VaultNoteType
 Data.type = function(note_data)
     --- local keys = note_data.keys
@@ -492,7 +492,7 @@ end
 --   return status
 -- end
 
---- @param note_data vault.Note.Data
+--- @param note_Data vault.Note.Data
 --- @return string?
 Data.status = function(note_data)
     -- local keys = note_data.keys

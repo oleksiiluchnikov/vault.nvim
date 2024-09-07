@@ -1,6 +1,9 @@
 local vault = {}
 
 --- Setup `vault.nvim` plugin.
+--- ```lua
+--- require("vault").setup()
+--- ```
 --- @param opts? vault.Config.options
 function vault.setup(opts)
     opts = opts or {}
@@ -17,7 +20,6 @@ function vault.setup(opts)
 end
 
 --- Check the health of the vault plugin.
----
 --- This function is used by the `:checkhealth` command.
 --- @return table
 function vault.checkhealth()

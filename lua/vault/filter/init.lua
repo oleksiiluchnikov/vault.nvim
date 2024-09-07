@@ -1,7 +1,6 @@
 local Object = require("vault.core.object")
---- @type vault.StateManager
 local state = require("vault.core.state")
---- @type vault.Note.data.constructor|vault.Note.Data
+--- @type vault.Note.Data.constructor|vault.Note.Data
 local NoteData = state.get_global_key("class.vault.Note.data") or require("vault.notes.note.data")
 local enums = require("vault.utils.enums")
 
