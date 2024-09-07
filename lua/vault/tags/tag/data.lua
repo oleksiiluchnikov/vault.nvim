@@ -2,24 +2,24 @@ local TagDocumentation = require("vault.tags.tag.documentation")
 --- ```lua
 --- assert('foo/bar' == vault.Tag.data.name)
 --- ```
---- @alias vault.Tag.data.name string - The name of the tag. e.g., "foo/bar".
---- @alias vault.Tag.data.root string - The root tag of the tag. e.g., "foo" from "foo/bar".
---- @alias vault.Tag.data.children vault.Tag.children - The children of the tag
---- @alias vault.Tag.data.sources vault.Notes.data.slugs - The notes slugs of notes with the tag.
---- @alias vault.Tag.data.count number - The number of notes with the tag.
+--- @alias vault.Tag.Data.name string - The name of the tag. e.g., "foo/bar".
+--- @alias vault.Tag.Data.root string - The root tag of the tag. e.g., "foo" from "foo/bar".
+--- @alias vault.Tag.Data.children vault.Tag.children - The children of the tag
+--- @alias vault.Tag.Data.sources vault.Notes.Data.slugs - The notes slugs of notes with the tag.
+--- @alias vault.Tag.Data.count number - The number of notes with the tag.
 
---- @class vault.Tag.data
---- @field name vault.Tag.data.name - The name of the tag. e.g., "foo/bar".
---- @field root vault.Tag.data.root - The root tag of the tag. e.g., "foo" from "foo/bar".
+--- @class vault.Tag.Data
+--- @field name vault.Tag.Data.name - The name of the tag. e.g., "foo/bar".
+--- @field root vault.Tag.Data.root - The root tag of the tag. e.g., "foo" from "foo/bar".
 --- @field is_nested boolean - Whether the tag is nested. e.g., "foo/bar" is nested, "foo" is not.
 --- @field children vault.Tag.children[]
 --- @field sources vault.Sources.map - The notes slugs of notes with the tag.
 --- @field documentation vault.Tag.Documentation
 --- @field count number - The number of notes with the tag.
 
---- @class vault.Tag.data.parser
---- @field sources fun(tag_data: vault.Tag.data): vault.Notes.data.slugs - The notes slugs of notes with the tag.
---- @field children fun(tag_data: vault.Tag.data): vault.Tag.children - The children of the tag.
+--- @class vault.Tag.Data.parser
+--- @field sources fun(tag_data: vault.Tag.Data): vault.Notes.Data.slugs - The notes slugs of notes with the tag.
+--- @field children fun(tag_Data: vault.Tag.Data): vault.Tag.children - The children of the tag.
 local data = {}
 
 data.name = function(tag_data)
@@ -33,7 +33,7 @@ data.documentation = function(tag_data)
 end
 
 --- Fetch the children of a tag.
---- @param tag_data vault.Tag.data
+--- @param tag_Data vault.Tag.Data
 --- @return vault.Tag.children
 data.children = function(tag_data)
     local tag_name = tag_data.name

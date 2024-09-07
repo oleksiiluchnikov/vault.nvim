@@ -12,7 +12,7 @@ local Note = require("vault.notes.note")
 --- A filtered map of |vault.Note| objects keyed by |vault.slug| (unique identifier).
 --- @alias VaultNotes.groups.map table<vault.slug, vault.Notes.Group>
 --- A list of |vault.slug| (unique identifier).
---- @alias VaultNotes.data.slugs.list vault.slug[]
+--- @alias VaultNotes.Data.slugs.list vault.slug[]
 
 --- This is the main object that holds all the notes.
 --- It responsible for filtering, sorting, and grouping notes.
@@ -215,7 +215,7 @@ end
 ---  assert(average_content_count == 100)
 --- ```
 --- @return number
-function Notes:average_chars()
+function Notes:average_content_chars()
     local total_content_count = 0
     for _, note in pairs(self.map) do
         local note_content = note.data.content
@@ -630,7 +630,7 @@ end
 
 --- Get `VaultNotes` where `VaultNote.data[key]` is
 ---
---- @param key NoteMetadataKey - The key to search by.
+--- @param key NoteMetaDataKey - The key to search by.
 --- @return vault.Notes.Group
 function Notes:with_key(key)
     if not key then
@@ -1250,6 +1250,11 @@ function Notes:with_duplicate(key)
 end
 
 --- @alias vault.Notes.constructor fun(filter_opts: VaultNotesPrefilterOpts?): vault.Notes
+--- ```lua
+--- local notes = require("vault.notes")()
+---
+--- assert(notes.class.name == "VaultNotes")
+--- ```
 --- @type vault.Notes|vault.Notes.constructor
 local VaultNotes = Notes
 

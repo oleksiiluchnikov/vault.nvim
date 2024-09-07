@@ -95,7 +95,7 @@ function WikilinkData:init(this)
 end
 
 --- @class vault.Wikilink: vault.Object
---- @field data vault.Wikilink.Data
+--- @field Data vault.Wikilink.Data
 local Wikilink = Object("VaultWikilink")
 
 --- @param this vault.Wikilink.raw|vault.Wikilink.Data.partial

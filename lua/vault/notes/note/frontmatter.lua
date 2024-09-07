@@ -7,7 +7,7 @@ local Field = require("vault.fields.field")
 local NoteFrontmatter = Object("VaultNoteFrontmatter")
 
 --- Create a new NoteFrontmatter object.
---- @param this vault.Note.data.content - The content of the note.
+--- @param this vault.Note.Data.content - The content of the note.
 function NoteFrontmatter:init(this)
     if type(this) ~= "string" then
         error("Invalid argument: " .. vim.inspect(this))

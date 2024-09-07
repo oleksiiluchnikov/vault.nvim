@@ -1,5 +1,3 @@
---- @class vault.commands
-
 --- @class vault.completions.args
 --- @field args string[]
 --- @field bang boolean
@@ -15,6 +13,10 @@
 
 --- @class vault.commands.complete
 local complete = {}
+
+function complete.api()
+    return vim.tbl_keys(require("vault.api"))
+end
 
 --- Returns the list of notes slugs
 --- @return vault.slug[]
@@ -179,6 +181,28 @@ end
 
 --- @class vault.commands.callback
 local callbacks = {}
+
+--- @param args vault.completions.args
+function callbacks.api(args)
+    local fargs = args.fargs
+    -- if next(fargs) == nil then
+    --     require("vault.pickers").api()
+    --     return
+    -- end
+    local api = fargs[1]
+    if api == nil then
+        return
+    end
+    local api_function = require("vault.api")[api]
+    if api_function == nil then
+        return
+    end
+    local arguments = {}
+    for i = 2, #fargs do
+        table.insert(arguments, fargs[i])
+    end
+    api_function(unpack(arguments))
+end
 
 --- ```vim
 --- :vaultNotes <preset> <filter> ...
@@ -1139,6 +1163,14 @@ local M = {
         opts = {
             desc = "Open a picker with the directories in the vault",
             complete = complete.dirs,
+            nargs = "*",
+        },
+    },
+    ["Vault"] = {
+        callback = callbacks.api,
+        opts = {
+            desc = "Open a picker with the directories in the vault",
+            complete = complete.api,
             nargs = "*",
         },
     },

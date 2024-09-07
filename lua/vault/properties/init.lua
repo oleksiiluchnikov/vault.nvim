@@ -73,7 +73,7 @@ function Properties:filter(opts)
 end
 
 --- Return a list of values for a key from properties.
---- @param key string -- |vault.Property.data| key to get values for
+--- @param key string -- |vault.Property.Data| key to get values for
 --- @return any[] -- Values for the key
 function Properties:get_values_by_key(key)
     local values = {}
@@ -93,7 +93,7 @@ function Properties:get_random_property()
 end
 
 --- Filter properties by a specific key and value.
----@param key string The key to filter by. |vault.Property.data| key to filter by.
+---@param key string The key to filter by. |vault.Property.Data| key to filter by.
 ---@param value? string The value to filter by. If not provided, all properties with the specified key will be returned.
 ---@param match_opt? vault.enum.MatchOpts.key The match option to use for filtering. Defaults to "exact" if not provided.
 ---@return vault.Properties.map A table containing the filtered properties.
@@ -151,6 +151,22 @@ function Properties:sources()
     end
 
     return sources_map
+end
+
+--- Return properties with empty values.
+--- @return vault.Properties.list
+function Properties:with_empty_values()
+    local map = {}
+    for _, property in pairs(self.map) do
+        for key, value in pairs(property.data) do
+            if key == "" then
+                map[property.data.name] = value
+                break
+            end
+        end
+    end
+    self.map = map
+    return self
 end
 
 --- @alias vault.Properties.constructor fun(filter_opts?: table): vault.Properties

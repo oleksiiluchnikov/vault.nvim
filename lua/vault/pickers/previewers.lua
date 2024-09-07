@@ -1,6 +1,4 @@
 local previewers = require("telescope.previewers")
---- @type vault.Config|vault.Config.options
-local config = require("vault.config")
 local state = require("vault.core.state")
 local M = {}
 
@@ -23,11 +21,12 @@ M.notes = previewers.vim_buffer_vimgrep.new({
     end,
 })
 
+-- TODO: Optimize this previewer
 M.tags = previewers.new_buffer_previewer({
-    --- @param self telescope.previewers.Previewer
+    --- @param self table
     --- @param entry { value: vault.Tag }
     define_preview = function(self, entry)
-        local Note = state.get_global_key("class.vault.Note") or require("vault.notes.note")
+        local utils = require("vault.utils")
         --- @type vault.Tag
         local tag = entry.value
         local sources = tag.data.sources
@@ -48,7 +47,7 @@ M.tags = previewers.new_buffer_previewer({
 
         local seen_notes_paths = {}
         for slug, _ in pairs(sources) do
-            local relpath = require("vault.utils").slug_to_relpath(slug)
+            local relpath = utils.slug_to_relpath(slug)
             if not seen_notes_paths[relpath] then
                 seen_notes_paths[relpath] = true
                 table.insert(lines, relpath)
@@ -57,11 +56,6 @@ M.tags = previewers.new_buffer_previewer({
         --- @type integer
         local bufnr = self.state.bufnr
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-        -- vim.api.nvim_set_option_value("filetype", "markdown", {
-        --     -- win = self.state.winid,
-        --     bufnr = bufnr,
-        --     scope = "local",
-        -- })
         vim.api.nvim_set_option_value("filetype", "markdown", {
             buf = bufnr,
             scope = "local",

@@ -50,7 +50,7 @@ end
 --- Create a new note if it does not exist.
 ---
 --- @class vault.Note: vault.Object
---- @field data vault.Note.Data - The data of the note.data.
+--- @field data vault.Note.Data - The Data of the note.Data.
 local Note = Object("VaultNote")
 
 --- Initialize a new Note object.
@@ -58,7 +58,7 @@ local Note = Object("VaultNote")
 --- This handles converting a path string to a note data table.
 --- It also validates the note data and initializes the NoteData object.
 ---
---- @param this vault.path|vault.Note.Data - Either a path string or note data table.
+--- @param this vault.path|vault.Note.Data - Either a path string or note Data table.
 function Note:init(this)
     if type(this) == "string" then -- it's a possible path to the note
         local path = vim.fn.expand(this)
@@ -426,34 +426,24 @@ function Note:update_content(search_string, replace_string, lnums)
     if type(replace_string) ~= "string" then
         return
     end
-    local root_dir = config.options.root
-    local f, err = io.open(self.data.path, "r")
-    if not f then
-        return
-    end
-    local content = f:read("*all")
-    f:close()
-    local lines = vim.split(content, "\n")
+    local lines = vim.split(self.data.content, "\n")
     if next(lines) == nil then
         return
     end
 
     -- TODO: handle multiple matches in whole file
-    -- sources = {
-    --   ["Meta/finace-freedom"] = {
-    --     [10] = {
-    --       ["end"] = 13,
-    --       line = "#finance-freedom #finance #freedom",
-    --       start = 1
-    --     }
-    --   }
-    -- },
     if lnums then
         for _, occurence in pairs(lnums) do
-            local line = lines[occurence.lnum_start]
+            local line = lines[occurence.lnum]
             if line and utils.match(line, search_string, "contains", false) == true then
-                local escaped_search_string = vim.pesc(search_string)
-                lines[occurence.lnum_start] = line:gsub(escaped_search_string, replace_string)
+                -- local escaped_search_string = vim.pesc(search_string)
+                -- lines[occurence.lnum] = line:gsub(escaped_search_string, replace_string)
+                local start_col = occurence.col
+                local end_col = occurence.end_col
+                local new_line = line:sub(1, start_col - 1)
+                    .. replace_string
+                    .. line:sub(end_col + 1)
+                lines[occurence.lnum] = new_line
             end
         end
     else
@@ -466,13 +456,24 @@ function Note:update_content(search_string, replace_string, lnums)
     end
 
     -- write the new content to the file
-    f, err = io.open(self.data.path, "w")
-    if f == nil then
-        error(err)
-        return
+    local new_content = table.concat(lines, "\n")
+    self:overwrite(new_content)
+
+    return self
+end
+
+--- Overwrite note content
+--- @param content string
+function Note:overwrite(content)
+    ---@diagnostic disable-next-line: undefined-field
+    local fd = vim.uv.fs_open(self.data.path, "w", 438)
+    if not fd then
+        error("Could not open file: " .. self.data.path)
     end
-    f:write(table.concat(lines, "\n"))
-    f:close()
+    ---@diagnostic disable-next-line: undefined-field
+    vim.uv.fs_write(fd, content, 0)
+    ---@diagnostic disable-next-line: undefined-field
+    vim.uv.fs_close(fd)
 end
 
 --- Get list of available metohods
@@ -491,8 +492,8 @@ local VaultNote = Note
 
 state.set_global_key("class.vault.Note", VaultNote)
 
---- @alias vault.Note.data.constructor fun(this: vault.Note.Data): vault.Note.Data -- [[@as VaultNote.data.constructor]]
---- @type vault.Note.data.constructor|vault.Note.Data
+--- @alias vault.Note.Data.constructor fun(this: vault.Note.Data): vault.Note.Data -- [[@as VaultNote.Data.constructor]]
+--- @type vault.Note.Data.constructor|vault.Note.Data
 local VaultNoteData = NoteData
 state.set_global_key("class.vault.NoteData", VaultNoteData)
 return VaultNote -- [[@as VaultNote.constructor]]

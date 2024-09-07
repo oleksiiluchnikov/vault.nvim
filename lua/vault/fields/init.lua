@@ -3,7 +3,7 @@ local fetcher = require("vault.fetcher")
 
 --- @alias vault.Field.map table<string, vault.Field>
 
---- @class vault.Fields: vault.Object - Fields is key value pairs in the frontmatter, and dataview inlines.
+--- @class vault.Fields: vault.Object - Fields is key value pairs in the frontmatter, and Dataview inlines.
 --- The Fields module provides an object oriented interface for working with the
 --- key-value pairs in the frontmatter and dataview inlines of a Vault note.
 --- @field map vault.Field.map - A map of keys to fields.

@@ -6,12 +6,12 @@ local state = require("vault.core.state")
 -- local config = require("vault.config")
 local data = require("vault.tags.tag.data")
 
---- @class vault.Tag.data: vault.Object
+--- @class vault.Tag.Data: vault.Object
 local TagData = Object("VaultTagData")
 
---- @alias vault.Tag.Data.partial table - The partial data of the tag.
+--- @alias vault.Tag.Data.partial table - The partial Data of the tag.
 
---- @param this vault.Tag.data.name|vault.Tag.Data.partial
+--- @param this vault.Tag.Data.name|vault.Tag.Data.partial
 function TagData:init(this)
     if not this then
         error(error_formatter.missing_parameter("this"), 2)
@@ -35,12 +35,22 @@ function TagData:init(this)
         self.root = self.root:match("^[^/]+")
     end
     self.sources = this.sources or nil
-    self.count = this.count or 1
+
+    -- Count the number of sources
+    self.count = 0
+    self.occurences = 0
+    for _, occurences in pairs(self.sources) do
+        self.count = self.count + 1
+        for _, _ in pairs(occurences) do
+            self.occurences = self.occurences + 1
+        end
+    end
+    -- self.count = this.count or #self.sources
 end
 
 --- Fetch the data if it is not already cached.
 ---
---- @param key string -- `VaultTag.data` key
+--- @param key string -- `VaultTag.Data` key
 --- @return any
 function TagData:__index(key)
     --- @type fun(self: vault.Tag.data): any -- A function that fetches the data for the given key.
@@ -52,22 +62,22 @@ function TagData:__index(key)
     if self[key] == nil then
         error(
             "Invalid key: "
-            .. vim.inspect(key)
-            .. ". Valid keys: "
-            .. vim.inspect(vim.tbl_keys(data))
+                .. vim.inspect(key)
+                .. ". Valid keys: "
+                .. vim.inspect(vim.tbl_keys(data))
         )
     end
     return self[key]
 end
 
 --- @class vault.Tag: vault.Object
---- @field data vault.Tag.data - The data of the tag.
---- @field init fun(self: vault.Tag, this: vault.Tag.data.name|vault.Tag.Data.partial): vault.Tag
---- @field add_slug fun(self: vault.Tag, slug: string): vault.Tag - Add a slug to the `self.data.sources` table.
+--- @field data vault.Tag.Data - The Data of the tag.
+--- @field init fun(self: vault.Tag, this: vault.Tag.Data.name|vault.Tag.Data.partial): vault.Tag
+--- @field add_slug fun(self: vault.Tag, slug: string): vault.Tag - Add a slug to the `self.Data.sources` table.
 local Tag = Object("VaultTag")
 
 --- Create a new |vault.Tag| instance.
---- @param this vault.Tag.data.name|vault.Tag.Data.partial
+--- @param this vault.Tag.Data.name|vault.Tag.Data.partial
 function Tag:init(this)
     if not this then
         error(error_formatter.missing_parameter("this"), 2)
@@ -84,7 +94,7 @@ function Tag:init(this)
 end
 
 --- Rename the tag. and update all occurences of the tag in the notes.
---- @param name vault.Tag.data.name
+--- @param name vault.Tag.Data.name
 --- @param verbose? boolean
 --- @return vault.Tag
 function Tag:rename(name, verbose)

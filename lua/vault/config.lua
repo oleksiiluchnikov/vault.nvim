@@ -79,12 +79,20 @@ Config.defaults = {
         ".trash/*",
     },
     ext = ".md",
+    frontmatter = {
+        keys = {
+            tags = "tags",
+        },
+    },
     tags = {
         valid = {
             hex = true, -- Hex is a valid tag.
         },
     },
     search_pattern = {
+        task = {
+            pcre2 = [[^\s*-\s+\[.\]\s+\S+]],
+        },
         tag = "#([A-Za-z0-9/_-]+)[\r|%s|\n|$]",
         wikilink = "%[%[([^\\]]*)%]%]",
         note = {
@@ -102,7 +110,7 @@ Config.defaults = {
                 text = "Fleeting Note",
                 preview = "border", -- "border" | "prompt" | "none"
             },
-            editor = {              -- @see :h nui.popup
+            editor = { -- @see :h nui.popup
                 position = {
                     row = math.floor(vim.api.nvim_list_uis()[1].height / 2) - 9,
                     col = math.floor(vim.api.nvim_list_uis()[1].width / 2) - 40,
@@ -169,8 +177,8 @@ local function expand_root(root)
         if type(expanded_root) ~= "string" or expanded_root == "" then
             error(
                 "Invalid root directory: "
-                .. vim.inspect(root)
-                .. ". Please set a path to the root directory at the `root` option."
+                    .. vim.inspect(root)
+                    .. ". Please set a path to the root directory at the `root` option."
             )
         end
         root = expanded_root
