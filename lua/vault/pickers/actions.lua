@@ -354,7 +354,7 @@ vault_actions.invert = function()
         return
     end
     local notes = require("vault.notes")():filter(filter:invert())
-    require("vault.pickers").notes(nil, notes)
+    require("vault.pickers").notes({ notes = notes }):find()
 end ]]
 
 return vault_actions

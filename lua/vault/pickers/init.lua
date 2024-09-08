@@ -110,7 +110,7 @@ local Note = require("vault.notes.note")
 
 --- Search for notes in vault
 --- @param opts? telescope_popup_options.vault.Notes
---- @return nil
+--- @return Picker
 function vault_pickers.notes(opts)
     opts = opts or {}
     opts.notes = opts.notes or require("vault.notes")()
@@ -338,7 +338,6 @@ function vault_pickers.notes(opts)
     local picker = pickers.new(vault_layouts.notes(), picker_opts)
 
     vault_state.set_global_key("picker", picker)
-    picker:find()
     return picker
 end
 
@@ -346,6 +345,7 @@ end
 
 --- Search for tags
 --- @param opts? table - Telescope options
+--- @return Picker
 function vault_pickers.tags(opts)
     opts = opts or {}
     opts.tags = opts.tags or require("vault.tags")()
@@ -516,7 +516,6 @@ function vault_pickers.tags(opts)
         on_input_filter_cb = on_input_filter_cb,
     }
     local picker = pickers.new(vault_layouts.tags(), picker_opts)
-    picker:find()
     vault_state.set_global_key("picker", picker)
     return picker
 end
@@ -530,6 +529,7 @@ end
 -- --- status/TODO/later
 -- --- And then pick we open notes picker filtered by tag: status/TODO/later
 -- --- @param root_tag_name? string - Root tag to start browsing from
+--- @return Picker
 -- function vault_pickers.root_tags(root_tag_name)
 --     local root_dir = config.options.root
 --     local tags = {}
@@ -608,6 +608,7 @@ end
 --- Search for date and corresponding note
 --- TODO: Add option to create note if it doesn't exist
 --- TODO: Add option to configure date format
+--- @return Picker
 function vault_pickers.dates(opts)
     opts = opts or {}
     --- @type string
@@ -706,48 +707,47 @@ function vault_pickers.dates(opts)
         }
     end
 
-    local picker = pickers
-        .new({}, {
-            prompt_title = "Dates",
-            finder = finders.new_table({
-                results = daily_notes,
-                entry_maker = entry_maker,
-            }),
-            sorter = sorters.get_generic_fuzzy_sorter(),
-            previewer = previewers.vim_buffer_cat.new({
-                get_buffer_by_name = function(_, entry)
-                    local bufnr = vim.api.nvim_create_buf(false, true)
-                    local lines = {}
-                    if entry.exists then
-                        lines = vim.fn.readfile(entry.path)
-                    else
-                        lines = { "No notes for this date" }
-                    end
-                    if type(bufnr) ~= "number" then
-                        error("bufnr is not a number")
-                    end
-                    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-                    -- vim.api.nvim_buf_set_option(bufnr, "filetype", "markdown")
-                    vim.api.nvim_set_option_value("filetype", "markdown", { buf = bufnr })
-                    return bufnr
-                end,
-            }),
-            sorting_strategy = "ascending",
-            layout_config = {
-                height = results_height,
-                width = bufwidth,
-                preview_width = preview_width,
-            },
-            attach_mappings = function()
-                actions.select_default:replace(enter)
-                return true
+    local picker = pickers.new({}, {
+        prompt_title = "Dates",
+        finder = finders.new_table({
+            results = daily_notes,
+            entry_maker = entry_maker,
+        }),
+        sorter = sorters.get_generic_fuzzy_sorter(),
+        previewer = previewers.vim_buffer_cat.new({
+            get_buffer_by_name = function(_, entry)
+                local bufnr = vim.api.nvim_create_buf(false, true)
+                local lines = {}
+                if entry.exists then
+                    lines = vim.fn.readfile(entry.path)
+                else
+                    lines = { "No notes for this date" }
+                end
+                if type(bufnr) ~= "number" then
+                    error("bufnr is not a number")
+                end
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+                -- vim.api.nvim_buf_set_option(bufnr, "filetype", "markdown")
+                vim.api.nvim_set_option_value("filetype", "markdown", { buf = bufnr })
+                return bufnr
             end,
-        })
-        :find()
+        }),
+        sorting_strategy = "ascending",
+        layout_config = {
+            height = results_height,
+            width = bufwidth,
+            preview_width = preview_width,
+        },
+        attach_mappings = function()
+            actions.select_default:replace(enter)
+            return true
+        end,
+    })
     vault_state.set_global_key("picker", picker)
     return picker
 end
 
+--- @return Picker
 function vault_pickers.wikilinks()
     local Wikilinks = require("vault.wikilinks")
     local wikilinks = Wikilinks()
@@ -783,29 +783,27 @@ function vault_pickers.wikilinks()
         }
     end
 
-    local picker = pickers
-        .new({}, {
-            prompt_title = "Wikilinks",
-            finder = finders.new_table({
-                results = results,
-                entry_maker = entry_maker,
-            }),
-            sorter = sorters.get_generic_fuzzy_sorter(),
-            -- previewer = previewers.vim_buffer_cat.new({
-            --     get_buffer_by_name = function(_, entry)
-            --         local bufnr = vim.api.nvim_create_buf(false, true)
-            --         local lines = vim.fn.readfile(entry.path)
-            --         if type(bufnr) ~= "number" then
-            --             error("bufnr is not a number")
-            --         end
-            --         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-            --         vim.api.nvim_buf_set_option(bufnr, "filetype", "markdown")
-            --         return bufnr
-            --     end,
-            -- }),
-            sorting_strategy = "ascending",
-        })
-        :find()
+    local picker = pickers.new({}, {
+        prompt_title = "Wikilinks",
+        finder = finders.new_table({
+            results = results,
+            entry_maker = entry_maker,
+        }),
+        sorter = sorters.get_generic_fuzzy_sorter(),
+        -- previewer = previewers.vim_buffer_cat.new({
+        --     get_buffer_by_name = function(_, entry)
+        --         local bufnr = vim.api.nvim_create_buf(false, true)
+        --         local lines = vim.fn.readfile(entry.path)
+        --         if type(bufnr) ~= "number" then
+        --             error("bufnr is not a number")
+        --         end
+        --         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+        --         vim.api.nvim_buf_set_option(bufnr, "filetype", "markdown")
+        --         return bufnr
+        --     end,
+        -- }),
+        sorting_strategy = "ascending",
+    })
     vault_state.set_global_key("picker", picker)
     return picker
 end
@@ -817,6 +815,7 @@ end
 
 --- Search for notes in Inbox directory
 --- @param opts? telescope_popup_options.vault.Notes
+--- @return Picker
 function vault_pickers.inbox(opts)
     local inbox_dir = config.options.dirs.inbox
 
@@ -832,6 +831,7 @@ end
 
 --- @class telescope_popup_options.vault.Tasks: telescope_popup_options
 --- @field tasks? table<string, table>
+--- @return Picker
 function vault_pickers.tasks(opts)
     opts = opts or {}
     opts.tasks = opts.tasks or require("vault.fetcher").tasks()
@@ -947,25 +947,23 @@ function vault_pickers.tasks(opts)
         }
     end
 
-    local picker = pickers
-        .new({}, {
-            prompt_title = "Tasks",
-            finder = finders.new_table({
-                results = results,
-                entry_maker = entry_maker,
-            }),
-            sorter = sorters.get_generic_fuzzy_sorter(),
-            sorting_strategy = "ascending",
-            layout_config = {
-                height = vim.api.nvim_list_uis()[1].height - 4,
-                width = vim.api.nvim_list_uis()[1].width,
-            },
-            attach_mappings = function(_, _)
-                actions.select_default:replace(enter)
-                return true
-            end,
-        })
-        :find()
+    local picker = pickers.new({}, {
+        prompt_title = "Tasks",
+        finder = finders.new_table({
+            results = results,
+            entry_maker = entry_maker,
+        }),
+        sorter = sorters.get_generic_fuzzy_sorter(),
+        sorting_strategy = "ascending",
+        layout_config = {
+            height = vim.api.nvim_list_uis()[1].height - 4,
+            width = vim.api.nvim_list_uis()[1].width,
+        },
+        attach_mappings = function(_, _)
+            actions.select_default:replace(enter)
+            return true
+        end,
+    })
     vault_state.set_global_key("picker", picker)
     return picker
 end
@@ -974,6 +972,7 @@ end
 --- @field note? vault.Note
 
 --- @param opts table
+--- @return Picker
 function vault_pickers.move_note_to(opts)
     opts = opts or {}
     opts.note = opts.note
@@ -1049,17 +1048,15 @@ function vault_pickers.move_note_to(opts)
         table.insert(results, dir)
     end
 
-    local picker = pickers
-        .new({}, {
-            prompt_title = "Move note to",
-            finder = finders.new_table({
-                results = results,
-                entry_maker = entry_maker,
-            }),
-            sorter = sorters.get_generic_fuzzy_sorter(),
-            attach_mappings = attach_mappings,
-        })
-        :find()
+    local picker = pickers.new({}, {
+        prompt_title = "Move note to",
+        finder = finders.new_table({
+            results = results,
+            entry_maker = entry_maker,
+        }),
+        sorter = sorters.get_generic_fuzzy_sorter(),
+        attach_mappings = attach_mappings,
+    })
     vault_state.set_global_key("picker", picker)
     return picker
 end
@@ -1071,6 +1068,7 @@ end
 
 --- Open picker for |vault.Notes.Cluster| from provided `vault.Note`. Default is current buffer.
 --- @param opts table
+--- @return Picker
 function vault_pickers.open_cluster(opts)
     opts = opts or {}
     opts.notes = opts.notes or require("vault.notes")()
@@ -1090,6 +1088,7 @@ end
 
 -- Live Grep across all notes
 --- @param opts table
+--- @return Picker
 function vault_pickers.live_grep(opts)
     local root_dir = config.options.root
     local screen_width = vim.api.nvim_list_uis()[1].width
@@ -1112,7 +1111,6 @@ function vault_pickers.live_grep(opts)
     opts = vim.tbl_deep_extend("force", default_opts, opts or {})
     -- require("telescope.builtin").live_grep(opts)
     local picker = require("telescope.builtin").live_grep(opts)
-    picker:find()
     return picker
 end
 
@@ -1127,6 +1125,7 @@ end
 -- --- ```
 -- --- @param opts table
 -- --- @param query? string[] - List of property names to show. If not provided, all properties will be shown.
+--- @return Picker
 -- function vault_pickers.properties(opts)
 --     --- @type vault.Notes
 --     local notes = require("vault.notes")()
@@ -1224,6 +1223,7 @@ end
 
 --- Pick a value from the selected property.
 --- @param opts table
+--- @return Picker
 function vault_pickers.property_values(opts)
     opts = opts or {}
     opts.values = opts.values or error("No values provided") -- TODO: Implement fetcher for values only
@@ -1408,7 +1408,6 @@ function vault_pickers.property_values(opts)
         on_input_filter_cb = on_input_filter_cb,
     })
     vault_state.set_global_key("picker", picker)
-    picker:find()
     return picker
 end
 
@@ -1417,6 +1416,7 @@ end
 --- @field query? string[] List of property names to show. If not provided, all properties will be shown.
 
 --- @param opts? table
+--- @return Picker
 function vault_pickers.properties(opts)
     opts = opts or {}
     opts.query = opts.query or {}
@@ -1606,7 +1606,6 @@ function vault_pickers.properties(opts)
             on_input_filter_cb = on_input_filter_cb,
         })
         vault_state.set_global_key("picker", picker)
-        picker:find()
         return picker
     end
 end
@@ -1615,6 +1614,7 @@ end
 --- @field query? string[] List of property names to show. If not provided, all properties will be shown.
 
 --- @param opts? table
+--- @return Picker
 function vault_pickers.dirs(opts)
     opts = opts or {}
     opts.query = opts.query or require("vault.fetcher").dirs()
@@ -1824,7 +1824,6 @@ function vault_pickers.dirs(opts)
         on_input_filter_cb = on_input_filter_cb,
     })
     vault_state.set_global_key("picker", picker)
-    picker:find()
     return picker
 end
 
