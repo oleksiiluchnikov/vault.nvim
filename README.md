@@ -30,6 +30,7 @@ serve as a reference and potentially become more customizable in the future.
 I developed this plugin with the goal of harnessing Neovim's power to manage my [Obsidian](https://obsidian.md) vault, tailored to my distinctive note organization style.
 While I also appreciate and use the fantastic [obsidian.nvim](https://github.com/epwalsh/obsidian.nvim) plugin, I embarked on creating my own solution to provide the flexibility to adapt and customize it according to my unique requirements and preferences.
 s
+
 ## 📦 Installation
 
 Install the plugin with your preferred package manager:
@@ -136,20 +137,20 @@ require("vault").tags(include, exclude, match_opt)
 ```lua
 --- Open Telescope note search picker.
 --- @param notes? table[] -- An optional list of Note objects to search. If not provided, all notes in vault will be searched.
-require("vault.pickers").notes(notes)
+require("vault.pickers").notes(notes):find()
 
 --- Open Telescope tag search picker.
 --- @param include? table[] -- An optional list of tag names to include.
 --- @param exclude? table[] -- An optional list of tag names to exclude.
 --- @param match_opt? MatchOptsKeys -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
-require("vault.pickers").tags(include, exclude, match_opt)
+require("vault.pickers").tags(include, exclude, match_opt):find()
 
 --- Open Telescope notes picker for a specific tags.
 --- @param include? table[] -- An list of tag names to include.
 --- @param exclude? table[] -- An list of tag names to exclude.
 --- @param match_opt? MatchOptsKeys -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
 --- @param mode? string -- A mode to filter notes by. E.g. "all", "any", "none". If not provided, "all" will be used.
-require("vault.pickers").notes_filter_by_tags(include, exclude, match_opts, mode)
+require("vault.pickers").notes_filter_by_tags(include, exclude, match_opts, mode):find()
 
 --- Open Telescope picker to browse nested tags from a root tag.
 require("vault.pickers").root_tags()
@@ -157,7 +158,7 @@ require("vault.pickers").root_tags()
 --- Open Telescope picker for dates.
 --- @param start_date string -- Start date in ISO 8601 format. E.g. "2023-01-01". If not provided, the week ago date will be used.
 --- @param end_date string -- End date in ISO 8601 format. E.g. "2023-01-31". If not provided, the current date will be used.
-require("vault.pickers").dates(start_date, end_date)
+require("vault.pickers").dates(start_date, end_date):find()
 
 --- Open Telescope picker for notes in the inbox directory.
 require("vault.pickers").inbox()

@@ -16,7 +16,7 @@ function M.open_picker_notes_with_tag(tag_name)
             mode = "all",
             case_sensitive = false,
         }),
-    })
+    }):find()
 end
 
 --- Open the tag documentation with the given tag name
@@ -78,7 +78,7 @@ function M.open_picker_property_values(property_name)
     require("vault.pickers").property_values({
         prompt_title = property_name,
         values = values,
-    })
+    }):find()
 end
 
 function M.open_picker_notes_with_property_value(property_name, value_name)
@@ -99,13 +99,13 @@ function M.open_picker_notes_with_property_value(property_name, value_name)
     -- vault_pickers.notes(opts)
     require("vault.pickers").notes({
         notes = notes,
-    })
+    }):find()
 end
 
 function M.open_picker_notes_in_directory(directory)
     require("vault.pickers").notes({
         notes = require("vault.notes")():with_relpath(directory, "startswith", false),
-    })
+    }):find()
 end
 
 --- Open the picker with the given property name
@@ -166,7 +166,7 @@ function M.open_picker_notes_with_empty_property_value(property_name, value_name
     -- vault_pickers.notes(opts)
     require("vault.pickers").notes({
         notes = notes,
-    })
+    }):find()
 end
 
 --- Open the picker with note with empty content
@@ -188,14 +188,14 @@ function M.open_picker_notes_with_empty_content()
 
     require("vault.pickers").notes({
         notes = require("vault.notes")():with_content(pattern, "regex", false),
-    })
+    }):find()
 end
 
 --- Open the picker with note without frontmatter(not starting with ---)
 function M.open_picker_notes_without_frontmatter()
     require("vault.pickers").notes({
         notes = require("vault.notes")():without_frontmatter(),
-    })
+    }):find()
 end
 
 return M

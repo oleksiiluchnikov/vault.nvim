@@ -56,15 +56,15 @@ local function register_date_source()
         return [=[\[\d\-*\s*\]+$]=]
     end
 
-    --- @param request cmp.Context|table
-    --- @param callback function
-    source.complete = function(_, request, callback)
+    ---Invoke completion (required).
+    ---@param params cmp.SourceCompletionApiParams
+    ---@param callback fun(response: lsp.CompletionResponse|nil)
+    function source:complete(params, callback)
         --- @type cmp.Context
-        local context = request.context
         --- @type string
-        local cursor_before_line = request.context.cursor_before_line
+        local cursor_before_line = params.context.cursor_before_line
 
-        local offset = request.offset
+        local offset = params.offset
         local date_length = 11
 
         local input = cursor_before_line:sub(offset - 1)
@@ -100,12 +100,12 @@ local function register_date_source()
                     newText = new_text,
                     range = {
                         start = {
-                            line = context.cursor.row - 1,
-                            character = context.cursor.col - #input,
+                            line = params.context.cursor.row - 1,
+                            character = params.context.cursor.col - #input,
                         },
                         ["end"] = {
-                            line = context.cursor.row - 1,
-                            character = context.cursor.col,
+                            line = params.context.cursor.row - 1,
+                            character = params.context.cursor.col,
                         },
                     },
                 },
@@ -141,12 +141,12 @@ local function register_date_source()
                         newText = date,
                         range = {
                             start = {
-                                line = context.cursor.row - 1,
-                                character = context.cursor.col - #typed_string - 1,
+                                line = params.context.cursor.row - 1,
+                                character = params.context.cursor.col - #typed_string - 1,
                             },
                             ["end"] = {
-                                line = context.cursor.row - 1,
-                                character = context.cursor.col,
+                                line = params.context.cursor.row - 1,
+                                character = params.context.cursor.col,
                             },
                         },
                     },
@@ -187,13 +187,13 @@ local function register_tags_source()
         return [=[\%(#\%(\w\|\-\|_\|\/\)\+\)]=]
     end
 
-    --- @param request cmp.Context|table
-    --- @param callback function
-    source.complete = function(_, request, callback)
-        local offset = request.offset
-        local context = request.context
+    ---Invoke completion (required).
+    ---@param params cmp.SourceCompletionApiParams
+    ---@param callback fun(response: lsp.CompletionResponse|nil)
+    function source:complete(params, callback)
+        local offset = params.offset
 
-        local cursor_before_line = context.cursor_before_line
+        local cursor_before_line = params.context.cursor_before_line
         local input = cursor_before_line:sub(offset - 1)
         --- @type string
         --- | "#"
@@ -218,12 +218,12 @@ local function register_tags_source()
                     newText = tag_name,
                     range = {
                         start = {
-                            line = context.cursor.row - 1,
-                            character = context.cursor.col - #input,
+                            line = params.context.cursor.row - 1,
+                            character = params.context.cursor.col - #input,
                         },
                         ["end"] = {
-                            line = context.cursor.row - 1,
-                            character = context.cursor.col,
+                            line = params.context.cursor.row - 1,
+                            character = params.context.cursor.col,
                         },
                     },
                 },
@@ -284,24 +284,34 @@ local function register_properties_sources()
     end
 
     source.get_keyword_pattern = function()
-        return [=[^\S*]=] -- TODO: Make configurable
+        -- return [=[^\S*]=] -- TODO: Make configurable
+        return [=[^[A-Za-z0-9_-]\+$]=]
     end
 
-    --- @param request cmp.Context|table
-    --- @param callback function
-    source.complete = function(_, request, callback)
-        local offset = request.offset
-        local context = request.context
-        if is_in_frontmatter(context.cursor.row) == false then
+    --- Check if we are in the property
+    --- @param line string
+    --- @return boolean
+    local function is_in_property(line)
+        if vim.split(line, ":")[2] then
+            return false
+        end
+        if not line:match([=[^[A-Za-z0-9_-]+$]=]) then -- TODO: Validate frontmatter keys
+            return false
+        end
+        return true
+    end
+
+    ---Invoke completion (required).
+    ---@param params cmp.SourceCompletionApiParams
+    ---@param callback fun(response: lsp.CompletionResponse|nil)
+    function source:complete(params, callback)
+        if is_in_frontmatter(params.context.cursor.row) == false then
             return
         end
 
-        local cursor_before_line = context.cursor_before_line
-        -- if we typed "^key: "
-        if not cursor_before_line:match([=[^[A-Za-z0-9_-]+$]=]) then -- TODO: Validate frontmatter keys
+        if is_in_property(params.context.cursor_before_line) == false then
             return
         end
-        local input = cursor_before_line:sub(offset - 1)
 
         --- @type vault.Properties
         local properties = state.get_global_key("properties") or require("vault.properties")()
@@ -309,6 +319,7 @@ local function register_properties_sources()
         --- @type lsp.CompletionItem[]
         local items = {}
         for property_name, _ in pairs(properties.map) do
+            property_name = property_name .. ":"
             --- @type lsp.CompletionItem
             local item = {
                 label = property_name,
@@ -317,12 +328,12 @@ local function register_properties_sources()
                     newText = property_name,
                     range = {
                         start = {
-                            line = context.cursor.row - 1,
+                            line = params.context.cursor.row - 1,
                             character = 0,
                         },
                         ["end"] = {
-                            line = context.cursor.row - 1,
-                            character = context.cursor.col,
+                            line = params.context.cursor.row - 1,
+                            character = params.context.cursor.col,
                         },
                     },
                     replaceText = property_name,
@@ -349,7 +360,6 @@ end
 --- the frontmatter of a note from the beginning of the line.
 --- @see cmp.Source
 local function register_property_values_source()
-    local state = require("vault.core.state")
     --- @class cmp.Source
     local source = {
         is_available = is_available,
@@ -368,17 +378,17 @@ local function register_property_values_source()
         return [=[%(\s*|\S*%)]=] -- TODO: Make configurable
     end
 
-    --- @param request cmp.Context|table
-    --- @param callback function
-    source.complete = function(_, request, callback)
+    ---Invoke completion (required).
+    ---@param params cmp.SourceCompletionApiParams
+    ---@param callback fun(response: lsp.CompletionResponse|nil)
+    function source:complete(params, callback)
         --- @type vault.Properties
         local properties = state.get_global_key("properties") or require("vault.properties")()
-        local context = request.context
-        if is_in_frontmatter(context.cursor.row) == false then
+        if is_in_frontmatter(params.context.cursor.row) == false then
             return
         end
 
-        local cursor_before_line = context.cursor_before_line
+        local cursor_before_line = params.context.cursor_before_line
         -- local key = vim.fn.matchstr(cursor_before_line, [=[\v(^[A-Za-z0-9_-]+):.*$]=])
         if not cursor_before_line:find(":") then
             return
@@ -420,12 +430,12 @@ local function register_property_values_source()
                     newText = new_text,
                     range = {
                         start = {
-                            line = context.cursor.row - 1,
-                            character = context.cursor.col,
+                            line = params.context.cursor.row - 1,
+                            character = params.context.cursor.col,
                         },
                         ["end"] = {
-                            line = context.cursor.row - 1,
-                            character = context.cursor.col,
+                            line = params.context.cursor.row - 1,
+                            character = params.context.cursor.col,
                         },
                     },
                     replaceText = new_text,
