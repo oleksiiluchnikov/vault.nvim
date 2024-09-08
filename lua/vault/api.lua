@@ -169,4 +169,33 @@ function M.open_picker_notes_with_empty_property_value(property_name, value_name
     })
 end
 
+--- Open the picker with note with empty content
+function M.open_picker_notes_with_empty_content()
+    local empty_vim_regex_patterns = {
+        -- No any character
+        [[^\(\s*|\n*\})$]],
+        -- TODO: Has heading, but no further content
+    }
+
+    local pattern = empty_vim_regex_patterns[1]
+    if vim.tbl_count(empty_vim_regex_patterns) > 1 then
+        pattern = table.concat(empty_vim_regex_patterns, "|")
+        pattern = [[(]] .. pattern .. [[)]]
+    end
+    print(pattern)
+    -- error("Pattern: " .. pattern)
+    -- error("Pattern: " .. pattern)
+
+    require("vault.pickers").notes({
+        notes = require("vault.notes")():with_content(pattern, "regex", false),
+    })
+end
+
+--- Open the picker with note without frontmatter(not starting with ---)
+function M.open_picker_notes_without_frontmatter()
+    require("vault.pickers").notes({
+        notes = require("vault.notes")():without_frontmatter(),
+    })
+end
+
 return M

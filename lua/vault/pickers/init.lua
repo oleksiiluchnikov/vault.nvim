@@ -609,10 +609,12 @@ end
 --- TODO: Add option to create note if it doesn't exist
 --- TODO: Add option to configure date format
 function vault_pickers.dates(opts)
+    opts = opts or {}
+    --- @type string
+    opts.start_date = opts.start_date
+        or tostring(os.date("%Y-%m-%d", os.time() - 365 * 24 * 60 * 60))
     --- @type string
     opts.end_date = opts.end_date or tostring(os.date("%Y-%m-%d"))
-    --- @type string
-    opts.start_date = opts.start_date or tostring(os.date("%Y-%m-%d", os.time() - 7 * 24 * 60 * 60))
 
     local Dates = require("dates")
     local date_values = Dates.from_to(opts.start_date, opts.end_date)
