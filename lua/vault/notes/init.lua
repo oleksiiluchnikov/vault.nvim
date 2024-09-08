@@ -362,9 +362,9 @@ function Notes:add_note(note)
     if self.map[slug] then
         error(
             "Note already exists: "
-            .. vim.inspect(self.map[slug])
-            .. " compared to "
-            .. vim.inspect(note)
+                .. vim.inspect(self.map[slug])
+                .. " compared to "
+                .. vim.inspect(note)
         )
     end
 
@@ -812,9 +812,11 @@ end
 function Notes:with_content(query, match_opt, case_sensitive)
     if not query then
         for slug, note in pairs(self.map) do
-            if note.data.content == "" then
+            local note_content = note.data.content
+            if not note_content then
                 self.map[slug] = nil
             end
+            -- end
         end
         return self:to_group()
     end
@@ -1247,6 +1249,12 @@ function Notes:with_duplicate(key)
     self.map = notes_with_duplicates
 
     return self:to_group()
+end
+
+--- Notes without frontmatter
+function Notes:without_frontmatter()
+    local pattern = [[^\(---\)\@!.*$]]
+    return self:with_content(pattern, "regex", false)
 end
 
 --- @alias vault.Notes.constructor fun(filter_opts: VaultNotesPrefilterOpts?): vault.Notes

@@ -93,6 +93,10 @@ Config.defaults = {
         task = {
             pcre2 = [[^\s*-\s+\[.\]\s+\S+]],
         },
+        date = {
+            pcre2 = [[\d{4}-\d{2}-\d{2}]],
+            lua = "[%d%d%d%d]-[%d%d]-[%d%d]",
+        },
         tag = "#([A-Za-z0-9/_-]+)[\r|%s|\n|$]",
         wikilink = "%[%[([^\\]]*)%]%]",
         note = {

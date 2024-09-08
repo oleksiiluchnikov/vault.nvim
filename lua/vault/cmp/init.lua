@@ -1,17 +1,21 @@
+local state = require("vault.core.state")
+local config = require("vault.config")
 local M = {}
 
 --- Date pattern string used for date matching.
 local DATE_PATTERN = "%d%d%d%d%-%d%d%-%d%d"
+-- local DATE_PATTERN = config.options.search_pattern.date.lua
 
 local has_cmp, cmp = pcall(require, "cmp")
 if not has_cmp then
-    error("`nvim-cmp` is not installed")
+    -- error("`nvim-cmp` is not installed")
+    error("`hrsh7th/nvim-cmp` is not installed")
     return
 end
 
 local has_dates, Dates = pcall(require, "dates")
 if not has_dates then
-    error("`dates.nvim` is not installed")
+    error("`olekesiiluchnikov/dates.nvim` is not installed")
     return
 end
 
@@ -49,16 +53,14 @@ local function register_date_source()
 
     --- Notice that it uses vim regex pattern, not lua regex pattern.
     source.get_keyword_pattern = function()
-        return [=[\[\d\-\s*\]+$]=]
+        return [=[\[\d\-*\s*\]+$]=]
     end
 
     --- @param request cmp.Context|table
     --- @param callback function
     source.complete = function(_, request, callback)
+        --- @type cmp.Context
         local context = request.context
-        if not context or type(context) ~= "table" then
-            return
-        end
         --- @type string
         local cursor_before_line = request.context.cursor_before_line
 
@@ -118,8 +120,6 @@ local function register_date_source()
             local dates = Dates.get(typed_string)
             --- @type lsp.CompletionItem[]
             local items = {}
-            --- @type vault.Config.options|vault.Config
-            local config = require("vault.config")
             local journal_dir = config.options.dirs.journal.daily
             for _, date in ipairs(dates) do
                 local weekday = Dates.get_weekday(date)
@@ -169,7 +169,6 @@ local function register_date_source()
 end
 
 local function register_tags_source()
-    local tags = require("vault.tags")()
     --- @class cmp.Source
     local source = {
         is_available = is_available,
@@ -206,6 +205,8 @@ local function register_tags_source()
             return
         end
 
+        --- @type vault.Tags
+        local tags = state.get_global_key("tags") or require("vault.tags")()
         --- @type lsp.CompletionItem[]
         local items = {}
         for tag_name, _ in pairs(tags.map) do
@@ -242,19 +243,215 @@ local function register_tags_source()
     cmp.register_source("vault_tag", source.new())
 end
 
+--- Check if we are in the frontmatter
+--- @param lnum number
+--- @return boolean
+local function is_in_frontmatter(lnum)
+    -- if we are not in the frontmatter then return
+    local buffer = vim.api.nvim_get_current_buf()
+    local lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
+    if not lines[1]:match("^---") then
+        return false
+    end
+
+    local second_frotmatter_line_index = 0
+    for i = 2, #lines do
+        if lines[i]:match("^---") then
+            second_frotmatter_line_index = i
+            break
+        end
+    end
+
+    if second_frotmatter_line_index < lnum then -- we are not in the frontmatter
+        return false
+    end
+    return true
+end
+
 --- Register the cmp.Source for the `vault_properties` source.
 --- It will provide completion for properties when we start typing inside
 --- the frontmatter of a note from the beginning of the line.
 --- @see cmp.Source
-local function register_properties_source()
-    --- TODO: Implement completion for properties
-    --- use vim.tbl_keys(fetcher.properties()) to get all properties
+local function register_properties_sources()
+    --- @class cmp.Source
+    local source = {
+        is_available = is_available,
+    }
+
+    --- @return cmp.Source
+    source.new = function()
+        return setmetatable({}, { __index = source })
+    end
+
+    source.get_keyword_pattern = function()
+        return [=[^\S*]=] -- TODO: Make configurable
+    end
+
+    --- @param request cmp.Context|table
+    --- @param callback function
+    source.complete = function(_, request, callback)
+        local offset = request.offset
+        local context = request.context
+        if is_in_frontmatter(context.cursor.row) == false then
+            return
+        end
+
+        local cursor_before_line = context.cursor_before_line
+        -- if we typed "^key: "
+        if not cursor_before_line:match([=[^[A-Za-z0-9_-]+$]=]) then -- TODO: Validate frontmatter keys
+            return
+        end
+        local input = cursor_before_line:sub(offset - 1)
+
+        --- @type vault.Properties
+        local properties = state.get_global_key("properties") or require("vault.properties")()
+
+        --- @type lsp.CompletionItem[]
+        local items = {}
+        for property_name, _ in pairs(properties.map) do
+            --- @type lsp.CompletionItem
+            local item = {
+                label = property_name,
+                kind = 5,
+                textEdit = {
+                    newText = property_name,
+                    range = {
+                        start = {
+                            line = context.cursor.row - 1,
+                            character = 0,
+                        },
+                        ["end"] = {
+                            line = context.cursor.row - 1,
+                            character = context.cursor.col,
+                        },
+                    },
+                    replaceText = property_name,
+                },
+                -- TODO: Add documentation
+                -- documentation = {
+                --     kind = "markdown",
+                --     value = property.data.documentation:content(property.data.name),
+                -- },
+            }
+            table.insert(items, item)
+        end
+        callback({
+            items = items,
+            isIncomplete = true,
+        })
+    end
+
+    cmp.register_source("vault_properties", source.new()) -- TODO: Use a better name
+end
+
+--- Register the cmp.Source for the `vault_properties` source.
+--- It will provide completion for properties when we start typing inside
+--- the frontmatter of a note from the beginning of the line.
+--- @see cmp.Source
+local function register_property_values_source()
+    local state = require("vault.core.state")
+    --- @class cmp.Source
+    local source = {
+        is_available = is_available,
+    }
+
+    --- @return cmp.Source
+    source.new = function()
+        return setmetatable({}, { __index = source })
+    end
+
+    source.get_trigger_characters = function()
+        return { " ", ":" }
+    end
+
+    source.get_keyword_pattern = function()
+        return [=[%(\s*|\S*%)]=] -- TODO: Make configurable
+    end
+
+    --- @param request cmp.Context|table
+    --- @param callback function
+    source.complete = function(_, request, callback)
+        --- @type vault.Properties
+        local properties = state.get_global_key("properties") or require("vault.properties")()
+        local context = request.context
+        if is_in_frontmatter(context.cursor.row) == false then
+            return
+        end
+
+        local cursor_before_line = context.cursor_before_line
+        -- local key = vim.fn.matchstr(cursor_before_line, [=[\v(^[A-Za-z0-9_-]+):.*$]=])
+        if not cursor_before_line:find(":") then
+            return
+        end
+        local key = vim.split(cursor_before_line, ":")[1]
+        -- TODO: Add validation for frontmatter keys
+
+        if not properties.map[key] then
+            return
+        end
+
+        --- @type lsp.CompletionItem[]
+        local items = {}
+
+        --- @type table<string, vault.Property.Value>
+        local values = properties.map[key].data.values
+        local seen_values = {}
+
+        for value_name, value in pairs(values) do
+            local unquoted_value = string.match(value_name, [=[^['"](.+)['"]$]=], 1) or value_name
+            if seen_values[unquoted_value] then
+                goto continue
+            end
+            seen_values[unquoted_value] = true
+            local new_text = value_name
+            -- if last character is a colon in the cursor_before_line then add a space
+            if cursor_before_line:sub(cursor_before_line:len()) == ":" then
+                new_text = " " .. value_name
+            end
+            local value_type = value.data.type
+            if value_type == "list" then
+                new_text = "\n  - " .. new_text
+            end
+            --- @type lsp.CompletionItem
+            local item = {
+                label = unquoted_value,
+                kind = 13,
+                textEdit = {
+                    newText = new_text,
+                    range = {
+                        start = {
+                            line = context.cursor.row - 1,
+                            character = context.cursor.col,
+                        },
+                        ["end"] = {
+                            line = context.cursor.row - 1,
+                            character = context.cursor.col,
+                        },
+                    },
+                    replaceText = new_text,
+                },
+                documentation = {
+                    kind = "markdown",
+                    value = tostring(value.data.type),
+                },
+            }
+            table.insert(items, item)
+            ::continue::
+        end
+        callback({
+            items = items,
+            isIncomplete = true,
+        })
+    end
+
+    cmp.register_source("vault_property_values", source.new()) -- TODO: Use a better name
 end
 
 function M.setup()
     register_tags_source()
     register_date_source()
-    register_properties_source()
+    register_properties_sources()
+    register_property_values_source()
 end
 
 return M

@@ -266,10 +266,7 @@ function utils.match(a, b, match_opt, case_sensitive)
             return true
         end
     elseif v == 5 then -- regex
-        -- Convert regex to lua valid pattern
-        -- TODO: Add support for regex validation
-        -- if string.match(a, b) then
-        if vim.fn.matchlist(a, b) ~= nil then
+        if vim.regex(b):match_str(a) then
             return true
         end
     elseif v == 6 then -- fuzzy
