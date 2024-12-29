@@ -1,3 +1,4 @@
+--- @module "busted"
 local assert = require("luassert")
 local config = require("vault.config")
 

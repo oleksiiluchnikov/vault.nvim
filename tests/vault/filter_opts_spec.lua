@@ -1,3 +1,4 @@
+--- @module "busted"
 local assert = require("luassert")
 local FilterOpts = require("vault.filter_opts")
 -- stdpath

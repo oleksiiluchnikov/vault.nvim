@@ -1,4 +1,4 @@
--- Import the classes and modules
+--- @module "busted"
 local Notes = require("vault.notes")
 local Note = require("vault.notes.note")
 local NotesCluster = require("vault.notes.cluster")

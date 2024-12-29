@@ -2,7 +2,7 @@ local Object = require("vault.core.object")
 local state = require("vault.core.state")
 --- @type vault.Note.Data.constructor|vault.Note.Data
 local NoteData = state.get_global_key("class.vault.Note.data") or require("vault.notes.note.data")
-local enums = require("vault.utils.enums")
+local enums = require("vault.enums")
 
 --- @class vault.Filter.option: vault.Object
 --- Array of query terms to include.

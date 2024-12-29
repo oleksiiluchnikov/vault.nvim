@@ -1,6 +1,6 @@
 local utils = {}
 local config = require("vault.config")
-local enums = require("vault.utils.enums")
+local enums = require("vault.enums")
 
 -- path
 --- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----

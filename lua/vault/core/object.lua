@@ -1,4 +1,4 @@
---- @source https://github.com/MunifTanjim/nui.nvim
+--- @source Many thanks to: https://github.com/MunifTanjim/nui.nvim
 
 --- @class vault.Object
 --- @field class vault.Class -- Represents the class of the object.

@@ -1,9 +1,19 @@
+-- - Completion module for vault.nvim
+-- - Implements completion for:
+--   - Dates with weekday detection
+--   - Tags with # prefix
+--   - YAML frontmatter properties
+--   - Property values with context awareness
+-- - Smart context detection (frontmatter boundaries, property lines)
 local state = require("vault.core.state")
 local config = require("vault.config")
+
 local M = {}
 
 --- Date pattern string used for date matching.
-local DATE_PATTERN = "%d%d%d%d%-%d%d%-%d%d"
+-- local DATE_PATTERN = "%d%d%d%d%-%d%d%-%d%d"
+local default_date_pattern = "%d%d%d%d%-%d%d%-%d%d"
+local DATE_PATTERN = config.options.search_pattern.date.lua or default_date_pattern
 -- local DATE_PATTERN = config.options.search_pattern.date.lua
 
 local has_cmp, cmp = pcall(require, "cmp")
@@ -56,7 +66,6 @@ local function register_date_source()
         return [=[\[\d\-*\s*\]+$]=]
     end
 
-    ---Invoke completion (required).
     ---@param params cmp.SourceCompletionApiParams
     ---@param callback fun(response: lsp.CompletionResponse|nil)
     function source:complete(params, callback)
@@ -187,7 +196,6 @@ local function register_tags_source()
         return [=[\%(#\%(\w\|\-\|_\|\/\)\+\)]=]
     end
 
-    ---Invoke completion (required).
     ---@param params cmp.SourceCompletionApiParams
     ---@param callback fun(response: lsp.CompletionResponse|nil)
     function source:complete(params, callback)
@@ -243,14 +251,19 @@ local function register_tags_source()
     cmp.register_source("vault_tag", source.new())
 end
 
---- Check if we are in the frontmatter
---- @param lnum number
---- @return boolean
+--- Check if the current line number is within a YAML frontmatter block
+--- Frontmatter blocks are delimited by '---' markers at start and end
+---@param lnum number The line number to check (1-indexed)
+---@return boolean|false True if line is in frontmatter, false otherwise
+---@return string|nil Error message if operation failed
 local function is_in_frontmatter(lnum)
-    -- if we are not in the frontmatter then return
-    local buffer = vim.api.nvim_get_current_buf()
-    local lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
-    if not lines[1]:match("^---") then
+    local success, lines =
+        pcall(vim.api.nvim_buf_get_lines, vim.api.nvim_get_current_buf(), 0, -1, false)
+    if not success then
+        return false
+    end
+
+    if #lines == 0 or not lines[1]:match("^---") then
         return false
     end
 
@@ -262,7 +275,7 @@ local function is_in_frontmatter(lnum)
         end
     end
 
-    if second_frotmatter_line_index < lnum then -- we are not in the frontmatter
+    if second_frotmatter_line_index < lnum then
         return false
     end
     return true
@@ -288,20 +301,29 @@ local function register_properties_sources()
         return [=[^[A-Za-z0-9_-]\+$]=]
     end
 
-    --- Check if we are in the property
-    --- @param line string
-    --- @return boolean
+    --- Validate if cursor is in a valid property position
+    --- @param line string The line to check
+    --- @return boolean is_valid If the position is valid for property completion
+    --- @return string? error_message Optional error message if validation fails
     local function is_in_property(line)
+        if not line then
+            return false
+        end
+
+        -- Check if line already has a value part (after colon)
         if vim.split(line, ":")[2] then
             return false
         end
-        if not line:match([=[^[A-Za-z0-9_-]+$]=]) then -- TODO: Validate frontmatter keys
+
+        -- Validate property name format
+        local property_pattern = [=[^[A-Za-z0-9_-]+$]=]
+        if not line:match(property_pattern) then
             return false
         end
+
         return true
     end
 
-    ---Invoke completion (required).
     ---@param params cmp.SourceCompletionApiParams
     ---@param callback fun(response: lsp.CompletionResponse|nil)
     function source:complete(params, callback)
@@ -378,7 +400,6 @@ local function register_property_values_source()
         return [=[%(\s*|\S*%)]=] -- TODO: Make configurable
     end
 
-    ---Invoke completion (required).
     ---@param params cmp.SourceCompletionApiParams
     ---@param callback fun(response: lsp.CompletionResponse|nil)
     function source:complete(params, callback)

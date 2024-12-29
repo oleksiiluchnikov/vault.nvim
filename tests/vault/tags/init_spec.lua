@@ -1,3 +1,4 @@
+--- @module "busted"
 -- Extend runtime path to include current working directory and Lazy plugins
 vim.opt.runtimepath:append(vim.fn.getcwd() .. "/**")
 vim.opt.runtimepath:append(vim.fn.getenv("HOME") .. "/.local/share/nvim/lazy/**")

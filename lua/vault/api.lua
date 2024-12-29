@@ -1,3 +1,5 @@
+--- @module "telescope"
+local pickers = require("vault.pickers")
 local M = {}
 
 --- Open the picker with the given tag name
@@ -7,16 +9,18 @@ function M.open_picker_notes_with_tag(tag_name)
     if not tag_name then
         error("No tag name provided")
     end
-    require("vault.pickers").notes({
-        notes = require("vault.notes")():filter({
-            search_term = "tags",
-            include = { tag_name },
-            exclude = {},
-            match_opt = "exact",
-            mode = "all",
-            case_sensitive = false,
-        }),
-    }):find()
+    pickers
+        .notes({
+            notes = require("vault.notes")():filter({
+                search_term = "tags",
+                include = { tag_name },
+                exclude = {},
+                match_opt = "exact",
+                mode = "all",
+                case_sensitive = false,
+            }),
+        })
+        :find()
 end
 
 --- Open the tag documentation with the given tag name
@@ -26,6 +30,7 @@ function M.edit_tag_documentation(tag_name)
     if not tag_name then
         error("No tag name provided")
     end
+    --- @type vault.Tag
     local tag = require("vault.tags")():by("name", tag_name, "exact"):get_random_tag()
     if not tag then
         error("Tag not found")
@@ -45,6 +50,7 @@ function M.rename_tag(from_tag_name, to_tag_name)
     if not to_tag_name then
         error("No to tag name provided")
     end
+    --- @type vault.Tag
     local tag = require("vault.tags")():by("name", from_tag_name, "exact"):get_random_tag()
     if not tag then
         error("Tag not found")
@@ -75,10 +81,12 @@ function M.open_picker_property_values(property_name)
     local properties = require("vault.properties")()
     local values = properties.map[property_name].data.values
     -- pick_value(opts, property_name, values, on_value_selected)
-    require("vault.pickers").property_values({
-        prompt_title = property_name,
-        values = values,
-    }):find()
+    pickers
+        .property_values({
+            prompt_title = property_name,
+            values = values,
+        })
+        :find()
 end
 
 function M.open_picker_notes_with_property_value(property_name, value_name)
@@ -97,15 +105,19 @@ function M.open_picker_notes_with_property_value(property_name, value_name)
         notes:add_note(note)
     end
     -- vault_pickers.notes(opts)
-    require("vault.pickers").notes({
-        notes = notes,
-    }):find()
+    pickers
+        .notes({
+            notes = notes,
+        })
+        :find()
 end
 
 function M.open_picker_notes_in_directory(directory)
-    require("vault.pickers").notes({
-        notes = require("vault.notes")():with_relpath(directory, "startswith", false),
-    }):find()
+    pickers
+        .notes({
+            notes = require("vault.notes")():with_relpath(directory, "startswith", false),
+        })
+        :find()
 end
 
 --- Open the picker with the given property name
@@ -164,9 +176,11 @@ function M.open_picker_notes_with_empty_property_value(property_name, value_name
         notes:add_note(note)
     end
     -- vault_pickers.notes(opts)
-    require("vault.pickers").notes({
-        notes = notes,
-    }):find()
+    pickers
+        .notes({
+            notes = notes,
+        })
+        :find()
 end
 
 --- Open the picker with note with empty content
@@ -186,16 +200,20 @@ function M.open_picker_notes_with_empty_content()
     -- error("Pattern: " .. pattern)
     -- error("Pattern: " .. pattern)
 
-    require("vault.pickers").notes({
-        notes = require("vault.notes")():with_content(pattern, "regex", false),
-    }):find()
+    pickers
+        .notes({
+            notes = require("vault.notes")():with_content(pattern, "regex", false),
+        })
+        :find()
 end
 
 --- Open the picker with note without frontmatter(not starting with ---)
 function M.open_picker_notes_without_frontmatter()
-    require("vault.pickers").notes({
-        notes = require("vault.notes")():without_frontmatter(),
-    }):find()
+    pickers
+        .notes({
+            notes = require("vault.notes")():without_frontmatter(),
+        })
+        :find()
 end
 
 return M
