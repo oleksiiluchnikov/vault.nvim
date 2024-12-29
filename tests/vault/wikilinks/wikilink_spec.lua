@@ -1,3 +1,4 @@
+--- @module "busted"
 -- "\[\[([^\]]*)\]\]" in PCRE (PHP >= 7.3) Flavor
 -- test wikilink parser
 

@@ -71,13 +71,13 @@ end
 --- Returns the list of match options
 --- @return vault.enum.MatchOpts.key[]
 function complete.match_opts()
-    return vim.tbl_keys(require("vault.utils.enums").match_opts)
+    return vim.tbl_keys(require("vault.enums").match_opts)
 end
 
 --- Returns the list of match types
 --- @return vault.enum.MatchOpts.mode[]
 function complete.match_types()
-    return vim.tbl_keys(require("vault.utils.enums").filter_mode)
+    return vim.tbl_keys(require("vault.enums").filter_mode)
 end
 
 --- Returns the list of notes filters

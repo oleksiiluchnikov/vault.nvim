@@ -117,6 +117,11 @@ function Tags:list()
     return vim.tbl_values(self.map)
 end
 
+--- Get a random tag from the tags map.
+--- ```lua
+--- local tag = require("vault.tags"):get_random_tag()
+--- assert(tag.class == "VaultTag")
+--- ```
 --- @return vault.Tag
 function Tags:get_random_tag()
     local tags = self:list()
@@ -129,7 +134,7 @@ end
 --- | "'notes_paths'" # Filter by notes paths.
 --- @param value? string - The value to filter by.
 --- @param match_opt? string - The match option to use.
---- @return vault.Tags.map
+--- @return vault.Tags
 function Tags:by(key, value, match_opt)
     if not key then
         error("missing `key` argument: string")

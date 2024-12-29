@@ -1,3 +1,4 @@
+--- @module "busted"
 vim.opt.runtimepath:append(vim.fn.getcwd() .. "/**")
 vim.opt.runtimepath:append(vim.fn.getenv("HOME") .. "/.local/share/nvim/lazy/**")
 local assert = require("luassert")

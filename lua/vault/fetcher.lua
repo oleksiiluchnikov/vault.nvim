@@ -755,6 +755,7 @@ end
 --- Fetches all tags from the vault with ripgrep.
 ---
 --- @return vault.Tags.map
+--- @example
 function Fetcher.tags()
     local tag_pattern = [=[(?:\s|^|[\.,; >])#([A-Za-z0-9_][A-Za-z0-9-_/]*)]=]
     local args = {
@@ -770,7 +771,6 @@ function Fetcher.tags()
     }
 
     local stdout = rg(args)
-
 
     --- @type vault.Tags.map
     local tags_map = {}

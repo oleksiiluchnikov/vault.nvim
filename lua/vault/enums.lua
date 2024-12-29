@@ -1,4 +1,4 @@
-local enums = {}
+local M = {}
 --- @alias vault.FilterOpts.search_term string
 --- | '"tag"' # Filter on tags.
 --- | '"slug"' # Filter on slugs.
@@ -16,7 +16,7 @@ local enums = {}
 --- |"'fuzzy'" -  Matches value if it matches the query fuzzily. E.g., "foo" matches "foo" and "barfoo".
 
 --- @enum vault.enum.MatchOpts
-enums.match_opts = {
+M.match_opts = {
     --- Matches exact value. E.g., "foo" matches "foo" but not "foobar".
     exact = 1,
     contains = 2,
@@ -31,9 +31,9 @@ enums.match_opts = {
 --- |"'any'" # Matches any value.
 
 --- @enum vault.enum.MatchOpts.mode.key
-enums.filter_mode = {
+M.filter_mode = {
     all = 1,
     any = 2,
 }
 
-return enums
+return M

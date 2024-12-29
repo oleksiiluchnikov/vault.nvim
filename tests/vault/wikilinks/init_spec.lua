@@ -1,3 +1,4 @@
+--- @module "busted"
 local Notes = require("vault.notes")
 local assert = require("luassert")
 

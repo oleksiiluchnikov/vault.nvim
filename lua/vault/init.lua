@@ -23,30 +23,33 @@ end
 --- This function is used by the `:checkhealth` command.
 --- @return table
 function vault.checkhealth()
-    --- @param plugin_name string
-    --- @return table
-    local function format_error(plugin_name)
-        local has = pcall(require, plugin_name)
-        local message = string.format("`%s` is required to run vault.nvim", plugin_name)
-        if not has then
-            return {
+    local dependencies = {
+        "telescope",
+        "cmp",
+    }
+
+    local results = {}
+    local all_ok = true
+
+    for _, plugin_name in ipairs(dependencies) do
+        local has_plugin = pcall(require, plugin_name)
+        if not has_plugin then
+            all_ok = false
+            table.insert(results, {
                 status = "error",
-                message = message,
-            }
-        else
-            return {}
+                message = string.format("`%s` is required to run vault.nvim", plugin_name),
+            })
         end
     end
 
-    if pcall(require, "telescope") == false then
-        return format_error("telescope")
-    elseif not pcall(require, "cmp") then
-        return format_error("cmp")
+    if all_ok then
+        return {
+            status = "ok",
+            message = "All dependencies are installed",
+        }
     end
-    return {
-        status = "ok",
-        message = "All dependencies are installed",
-    }
+
+    return results
 end
 
 return vault
