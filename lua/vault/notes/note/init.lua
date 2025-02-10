@@ -58,7 +58,7 @@ local Note = Object("VaultNote")
 --- This handles converting a path string to a note data table.
 --- It also validates the note data and initializes the NoteData object.
 ---
---- @param this vault.path|vault.Note.Data - Either a path string or note Data table.
+--- @param this vault.path|vault.Note.Data|vault.EntryInfo|table<{path: vault.path}>|string - The path to the note or the note data.
 function Note:init(this)
     if type(this) == "string" then -- it's a possible path to the note
         local path = vim.fn.expand(this)
@@ -180,26 +180,51 @@ function Note:preview()
     vim.cmd("Glow " .. self.data.path)
 end
 
---- Check if note has an exact tag name.
+--- Check if note has values for the specified keys.
 ---
---- @param tag_name string - Exact tag name to search for.
---- @param match_opt? vault.enum.MatchOpts.key - Match option. @see utils.matcher
-function Note:has_tag(tag_name, match_opt)
-    if not tag_name then
-        error("`tag_name` is required")
+--- @param keys string|string[] - The key(s) to check
+--- @param values string|string[] - The value(s) to match against
+--- @param match_opt? "exact"|"fuzzy"|"contains"|"start"|"end" - Match option
+--- @return boolean
+function Note:has(keys, values, match_opt)
+    -- TEST: This function is not tested.
+    if not values then
+        error("values parameter is required")
     end
-    local note_tags = self.data.tags
-    if not note_tags then
-        return false
+
+    -- Convert single key/value to tables for consistent handling
+    keys = type(keys) == "string" and { keys } or keys
+    values = type(values) == "string" and { values } or values
+
+    -- Validate inputs
+    if type(keys) ~= "table" or type(values) ~= "table" then
+        error("keys and values must be strings or arrays")
     end
 
     match_opt = match_opt or "exact"
 
-    for _, tag in pairs(note_tags) do
-        if utils.match(tag.data.name, tag_name, match_opt) then
-            return true
+    -- Check each key
+    for _, key in ipairs(keys) do
+        local data_value = self.data[key]
+        if not data_value then
+            return false
+        end
+
+        -- Convert single value to table
+        data_value = type(data_value) == "table" and data_value or { data_value }
+
+        -- Look for matches
+        for _, value in pairs(data_value) do
+            for _, target in ipairs(values) do
+                -- Handle both objects with .data.name and direct values
+                local compare_value = type(value) == "table" and value.data.name or value
+                if utils.match(compare_value, target, match_opt) then
+                    return true
+                end
+            end
         end
     end
+
     return false
 end
 
@@ -252,6 +277,30 @@ function Note:update_inlinks(path)
     end
 end
 
+--- Open note in the Obsidian app.
+--- ```lua
+--- require("vault.notes")():get_random():open_in_obsidian()
+--- ```
+--- @param path string - The path to the note to open.
+function Note:open_in_obsidian(path)
+    -- if type(path) ~= "string" then
+    --     error("Invalid path: " .. vim.inspect(path))
+    -- end
+    path = path or self.data.path
+    local function percent_encode(str)
+        return str:gsub("([^%w])", function(c)
+            return string.format("%%%02X", string.byte(c))
+        end)
+    end
+
+    local url = "obsidian://open?vault="
+        .. percent_encode(vim.fn.fnamemodify(config.options.root, ":t"))
+        .. "&file="
+        .. percent_encode(utils.path_to_relpath(path))
+
+    vim.fn.jobstart({ "open", url }, { detach = true })
+end
+
 --- Compare two values of a note keys.
 ---
 --- @param key_a string - The key to compare.
@@ -283,17 +332,13 @@ function Note:compare_values_of(key_a, key_b)
     return false
 end
 
---- Refreshes the buffers for the given paths in the current Neovim instance.
----@param paths vault.path[]
 local function refresh_buffers(paths)
-    local bufnrs = vim.fn.getbufinfo({ buflisted = 1 })
     for _, path in ipairs(paths) do
-        for _, bufinfo in ipairs(bufnrs) do
-            if bufinfo.name == path then
-                vim.api.nvim_buf_call(bufinfo.bufnr, function()
-                    vim.cmd("e")
-                end)
-            end
+        local bufnr = vim.fn.bufnr(path)
+        if bufnr > 0 then
+            vim.api.nvim_buf_call(bufnr, function()
+                vim.cmd("e")
+            end)
         end
     end
 end
@@ -307,7 +352,7 @@ local function handle_existing_note_stem(new_path)
     notes:init()
     local new_stem = utils.path_to_stem(new_path)
     local new_slug = utils.path_to_slug(new_path)
-    local is_stem_exists = notes:has_note("stem", new_stem)
+    local is_stem_exists = notes:has("stem", new_stem)
 
     if is_stem_exists == true then
         new_slug = vim.fn.input("New slug: ")
@@ -325,19 +370,31 @@ local function create_parent_directories(path)
 end
 
 --- Rename(Move) a note and update connected notes.
+---
+--- Goals:
+--- 1. Updates file path and name on disk
+--- 2. Updates note data and metadata
+--- 3. Updates references in connected notes (inlinks/outlinks)
+--- 4. Refreshes Neovim buffers to reflect changes
+--- 5. Shows move notifications if verbose enabled
+--- 6. Handles existing note stem
+--- 7. Creates parent directories if they don't exist
+---
 --- @param new_path vault.path - The new path to move the note to.
 --- @param force? boolean - Whether to force rename even if the note with the same stem already exists.
 --- @param verbose? boolean - Whether to print a notification when the connected notes are updated.
+--- @return boolean
 function Note:move(new_path, force, verbose)
     if self.data.path == new_path then
         vim.notify("Same path: " .. vim.inspect(new_path))
-        return
+        return false
     end
     force = force or false
     verbose = verbose or true
 
     if new_path == "" then
         error("Invalid path: " .. vim.inspect(new_path))
+        return false
     end
 
     create_parent_directories(new_path)
@@ -492,7 +549,7 @@ local VaultNote = Note
 
 state.set_global_key("class.vault.Note", VaultNote)
 
---- @alias vault.Note.Data.constructor fun(this: vault.Note.Data): vault.Note.Data -- [[@as VaultNote.Data.constructor]]
+--- @alias vault.Note.Data.constructor fun(this: vault.Note.Data|vault.EntryInfo): vault.Note.Data -- [[@as VaultNote.Data.constructor]]
 --- @type vault.Note.Data.constructor|vault.Note.Data
 local VaultNoteData = NoteData
 state.set_global_key("class.vault.NoteData", VaultNoteData)

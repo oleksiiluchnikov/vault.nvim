@@ -1,5 +1,5 @@
 local state = require("vault.core.state")
-local error_formatter = require("vault.utils.fmt.error")
+local error_formatter = require("vault.utils.error")
 --- @type vault.Notes.constructor|vault.Notes
 local Notes = state.get_global_key("class.vault.Notes") or require("vault.notes")
 
@@ -11,7 +11,7 @@ local NotesGroup = Notes:extend("VaultNotesGroup")
 --- @param notes vault.Notes
 function NotesGroup:init(notes)
     if not notes then
-        error(error_formatter.missing_parameter("notes"))
+        error(error_formatter.MISSING_PARAMETER("notes"))
     end
 
     self.map = notes.map
