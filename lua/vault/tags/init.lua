@@ -1,4 +1,4 @@
-local Object = require("vault.core.object")
+local Collection = require("vault.core.collection")
 local state = require("vault.core.state")
 local utils = require("vault.utils")
 local Filter = require("vault.filter")
@@ -8,17 +8,17 @@ local fetcher = require("vault.fetcher")
 --- @alias vault.Tags.map table<string, vault.Tag> - Map of tags.
 --- @alias vault.Tags.list table<integer, vault.Tag> - Map of tags.
 
---- @alias VaultMap.tags.sources vault.Sources.map - Map of sources.
+--- @alias vault.Map.tags.sources vault.Sources.map - Map of sources.
 
---- @alias VaultTagsGroup vault.Tags - Tags that have children.
+--- @alias vault.TagsGroup vault.Tags - Tags that have children.
 
 --- VaultTags class represents a collection of tags loaded from vault.
 --- @class vault.Tags: vault.Object - Retrieve tags from vault.
 --- @field map vault.Tags.map - Map of tags.
---- @field nested VaultTagsGroup -- Tags that have children.
---- @field sources fun(self: vault.Tags): VaultMap.tags.sources - Get all sources from tags.
+--- @field nested vault.TagsGroup -- Tags that have children.
+--- @field sources fun(self: vault.Tags): vault.Map.tags.sources - Get all sources from tags.
 --- @field list fun(self: vault.Tags): vault.Tags.list - Return `VaultTags` as a `VaultArray`.
-local Tags = Object("VaultTags")
+local Tags = Collection:extend("VaultTags")
 
 --- Initializes the VaultTags object by fetching all tags from the vault.
 --- Sets the tags map and registers the tags globally.
@@ -26,12 +26,6 @@ local Tags = Object("VaultTags")
 function Tags:init()
     self.map = fetcher.tags()
     state.set_global_key("tags", self)
-end
-
---- Returns the number of tags in the tags map.
---- @return integer Number of tags
-function Tags:count()
-    return #vim.tbl_keys(self.map)
 end
 
 --- Filters the tags based on the provided filter options.
@@ -92,94 +86,6 @@ function Tags:filter(opts)
     end
 
     return self
-end
-
---- Return a list of values for a key from tags.
----
---- @param key string Key to get values for
---- @return any[] Values for the key
---- @see VaultTag
-function Tags:get_values_by_key(key)
-    local values = {}
-    for _, tag in pairs(self.map) do
-        if tag.data[key] then
-            table.insert(values, tag.data[key])
-        end
-    end
-    return values
-end
-
---- Return `VaultTags` as a `VaultArray`.
---- string
---- @return vault.Tags.list
-function Tags:list()
-    --- @type vault.Tags.list
-    return vim.tbl_values(self.map)
-end
-
---- Get a random tag from the tags map.
---- ```lua
---- local tag = require("vault.tags"):get_random_tag()
---- assert(tag.class == "VaultTag")
---- ```
---- @return vault.Tag
-function Tags:get_random_tag()
-    local tags = self:list()
-    local random_tag = tags[math.random(#tags)]
-    return random_tag
-end
-
---- @param key string - The key to filter by.
---- | "'name'" # Filter by tag name.
---- | "'notes_paths'" # Filter by notes paths.
---- @param value? string - The value to filter by.
---- @param match_opt? string - The match option to use.
---- @return vault.Tags
-function Tags:by(key, value, match_opt)
-    if not key then
-        error("missing `key` argument: string")
-    end
-    match_opt = match_opt or "exact"
-    local tags = self:list()
-    local tags_by = {}
-    for _, tag in pairs(tags) do
-        if tag.data[key] and not value then
-            tags_by[tag.data.name] = tag
-        elseif tag.data[key] and value then
-            if utils.match(tag.data[key], value, match_opt) then
-                tags_by[tag.data.name] = tag
-            end
-        end
-    end
-    self.map = tags_by
-    return self
-end
-
---- Return a map of all sources from tags.
----
---- @return VaultMap.tags.sources
-function Tags:sources()
-    local tags = self:list()
-    --- @type VaultMap.tags.sources
-    local sources_map = {}
-
-    for _, tag in pairs(tags) do
-        for slug, _ in pairs(tag.data.sources) do
-            if not sources_map[slug] then
-                sources_map[slug] = {}
-            end
-            if not sources_map[slug][tag.data.name] then
-                sources_map[slug][tag.data.name] = tag
-            end
-        end
-    end
-
-    return sources_map
-end
-
-function Tags:reset()
-    state.clear_all()
-    self:init()
 end
 
 --- @alias VaultTags.constructor fun(filter_opts?: table): vault.Tags
