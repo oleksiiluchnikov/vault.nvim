@@ -159,27 +159,6 @@ function Notes:wikilinks()
     return Wikilinks(self)
 end
 
---- Get map of note values by a specific key.
---- Supports string, number, and boolean values.
----
---- ```lua
---- local notes = require("vault.notes")()
----
---- -- Get map of basenames (lowercased)
---- local basename_map = notes:values_map_by_key("basename", { lowercase = true })
---- assert(basename_map["foo.md"] == true)
----
---- -- Get map of word counts with count as value
---- local count_map = notes:values_map_by_key("word_count", { as_value = true })
---- assert(type(count_map["150"]) == "number")
---- ```
---- @param key string The key to get values from note.data
---- @param opts? {lowercase?:boolean, as_value?:boolean} Options for mapping
---- @return table<string,boolean|number|string> Map of values found
-function Notes:values_map_by_key(key, opts)
-    return utils.map.values_by_key(self.map, key, opts)
-end
-
 function Notes:stats()
     return VaultNotesStats(self)
 end
