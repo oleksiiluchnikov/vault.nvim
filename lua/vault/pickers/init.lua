@@ -26,7 +26,7 @@ local fetcher = require("vault.fetcher")
 -- local vault_highlights = require("vault.highlights")
 
 local utils = require("vault.utils")
-local error_msg = require("vault.utils.fmt.error")
+local error_msg = require("vault.utils.error")
 
 local vault_previewers = require("vault.pickers.previewers")
 local vault_mappings = require("vault.pickers.mappings")
@@ -109,7 +109,7 @@ local Note = require("vault.notes.note")
 --- @field sort_by? string
 
 --- Search for notes in vault
---- @param opts? telescope_popup_options.vault.Notes
+--- @param opts? telescope_popup_options.vault.Notes|table<string, any>
 --- @return Picker
 function vault_pickers.notes(opts)
     opts = opts or {}
@@ -123,7 +123,6 @@ function vault_pickers.notes(opts)
         return
     end
 
-    opts.notes:average_content_chars()
     -- local prompt_title = string.format("average chars: %d", average_content_count)
     local prompt_title = opts.sort_by
 
@@ -534,7 +533,7 @@ end
 --     local root_dir = config.options.root
 --     local tags = {}
 --     if root_tag_name ~= nil then
---         tags = Tags():by(root_tag_name)
+--         tags = Tags():filter(root_tag_name)
 --     else
 --         tags = Tags()
 --     end
@@ -829,128 +828,171 @@ function vault_pickers.inbox(opts)
     vault_pickers.notes(opts)
 end
 
+--- Constants for task display configuration
+local DISPLAY_CONFIG = {
+    WIDTHS = {
+        STATUS = 1, -- For the status symbol
+        ID = 10,
+        REPEAT = 50,
+        DATE = 10, -- For created, due, start, schedule, completed
+        PRIORITY = 3,
+        SEPARATOR = 2, -- Space between columns
+    },
+    COLORS = {
+        GRADIENT = {
+            STEPS = 64,
+            START = "#444444",
+            END = "#a9a9a9",
+            TYPE = "String",
+        },
+        STATUS = {
+            ["-"] = { symbol = "⊖", hl = "DiagnosticWarn" }, -- PENDING
+            ["x"] = { symbol = "⊗", hl = "DiagnosticOk" }, -- DONE
+            [" "] = { symbol = "⊙", hl = "DiagnosticHint" }, -- TODO
+            ["/"] = { symbol = "⊘", hl = "DiagnosticInfo" }, -- IN PROGRESS
+        },
+    },
+    HIGHLIGHT_GROUP = "VaultTask",
+}
+
+--- Setup gradient colors for tasks display
+--- @return boolean success
+local function setup_task_colors()
+    if vim.b.vault_task_colors_initialized then
+        return true
+    end
+
+    local config = DISPLAY_CONFIG.COLORS.GRADIENT
+    local colors = Gradient.from_stops(config.STEPS, config.START, config.END, config.TYPE)
+
+    if type(colors) ~= "table" then
+        error("Failed to generate gradient colors for tasks")
+        return false
+    end
+
+    for i, color in ipairs(colors) do
+        vim.api.nvim_set_hl(0, DISPLAY_CONFIG.HIGHLIGHT_GROUP .. i, { fg = color })
+    end
+
+    vim.b.vault_task_colors_initialized = true
+    return true
+end
+
+--- Right align text in a fixed width
+--- @param text string|nil Text to align
+--- @param width integer Width to align within
+--- @return string
+local function right_align(text, width)
+    text = text or ""
+    return string.rep(" ", width - #text) .. text
+end
+
+--- Calculate description width based on window and other columns
+--- @param window_width integer Full window width
+--- @return integer desc_width
+local function calculate_desc_width(window_width)
+    local widths = DISPLAY_CONFIG.WIDTHS
+
+    local desc_width = window_width
+        - widths.STATUS
+        - widths.ID
+        - widths.REPEAT
+        - (widths.DATE * 5)
+        - widths.PRIORITY
+        - (widths.SEPARATOR * 8)
+
+    local max_desc_width = 160
+    if desc_width > max_desc_width then
+        desc_width = max_desc_width
+    end
+    return desc_width
+end
+
 --- @class telescope_popup_options.vault.Tasks: telescope_popup_options
 --- @field tasks? table<string, table>
 --- @return Picker
 function vault_pickers.tasks(opts)
     opts = opts or {}
-    opts.tasks = opts.tasks or require("vault.fetcher").tasks()
-    local tasks = fetcher.tasks()
-    local results = {}
-    for slug, map in pairs(tasks) do
-        for line_number, task in pairs(map) do
-            if task.status == "[x]" then
-                goto continue
-            end
-            task = {
-                line_number = line_number,
-                slug = slug,
-                line = task.line,
-                text = task.text,
-                status = task.status,
-            }
-            table.insert(results, task)
-            ::continue::
-        end
+    opts.tasks = opts.tasks or require("vault.tasks")()
+    local tasks_list = opts.tasks:list()
+
+    if next(tasks_list) == nil then
+        Log.info("No tasks found in vault")
+        return
     end
-    -- Chunk example
-    --     {
-    --   line = "- [-] [[Routine/workout]]\n",
-    --   line_number = 30,
-    --   slug = "Journal/Daily/2022-01-03 Monday",
-    --   status = "[-]",
-    --   text = "[[Routine/workout]]"
-    -- }
 
     local function enter(bufnr)
         local selection = actions_state.get_selected_entry()
-        local path = selection.filename
-        local line_number = selection.value.line_number
         actions.close(bufnr)
-        -- vim.cmd("edit " .. path)
-        -- vim.cmd(tostring(line_number) .. "G")
-        vim.cmd("edit +" .. tostring(line_number) .. " " .. path)
+        vim.cmd(string.format("edit +%d %s", selection.value.line_number, selection.filename))
     end
 
     local make_display = function(entry)
-        local verbose_status = entry.value.status
-        if verbose_status == "[-]" then
-            verbose_status = "PENDING"
-        elseif verbose_status == "[x]" then
-            verbose_status = "DONE"
-        elseif verbose_status == "[ ]" then
-            verbose_status = "TODO"
-        elseif verbose_status == "[>]" then
-            verbose_status = "IN PROGRESS"
+        if not setup_task_colors() then
+            return
         end
-        -- local stem = entry.value.slug:match("([^/]+)$")
-        -- -- local slug_width = string.len(entry.value.slug) + 1
-        -- local full_width = vim.api.nvim_get_option("columns") - 6
-        -- -- align stem to the right
-        -- local stem_width = string.len(stem)
-        -- local entry_width = full_width - stem_width - 2
-        -- local status_width = string.len(entry.value.status)
-        -- verbose_status = verbose_status
-        --     .. string.rep(" ", status_width - string.len(verbose_status))
 
-        local full_width = vim.api.nvim_list_uis()[1].width
-        local stem = entry.value.slug:match("([^/]+)$")
-        local stem_width = string.len(stem)
-        local status_width = string.len(entry.value.status)
-        -- local verbose_status_width = string.len(verbose_status) - should be fixed to max of verbose_statuses
-        local verbose_status_width = 8
-        -- align verbose_status to the right of column
-        verbose_status = string.rep(" ", verbose_status_width - string.len(verbose_status))
-            .. verbose_status
-        local entry_width = full_width - stem_width - status_width - verbose_status_width - 2
+        local task = entry.value
+        local window_width = vim.api.nvim_list_uis()[1].width
+        -- local status_info = DISPLAY_CONFIG.COLORS.`STATUS[task.status]` or { symbol = "?", hl = "Normal" }
+        local status_info = DISPLAY_CONFIG.COLORS.STATUS[task.data.status]
+            or { symbol = "?", hl = "Normal" }
+
+        -- Calculate gradient for description
+        local desc_length = #task.data.description
+        local gradient_idx = math.max(
+            1,
+            math.min(math.floor(desc_length / 16), DISPLAY_CONFIG.COLORS.GRADIENT.STEPS)
+        )
+        local desc_hl = DISPLAY_CONFIG.HIGHLIGHT_GROUP .. gradient_idx
 
         local displayer = entry_display.create({
-            separator = " ",
+            separator = string.rep(" ", DISPLAY_CONFIG.WIDTHS.SEPARATOR),
             items = {
-                { width = verbose_status_width },
-                { width = status_width },
-                { width = entry_width },
-                { remaining = true },
-                { width = stem_width },
+                { width = DISPLAY_CONFIG.WIDTHS.STATUS }, -- Status symbol
+                { width = calculate_desc_width(window_width) }, -- Description
+                { width = DISPLAY_CONFIG.WIDTHS.ID }, -- ID
+                { width = DISPLAY_CONFIG.WIDTHS.REPEAT }, -- Repeat
+                { width = DISPLAY_CONFIG.WIDTHS.DATE }, -- Created
+                { width = DISPLAY_CONFIG.WIDTHS.DATE }, -- Due
+                { width = DISPLAY_CONFIG.WIDTHS.DATE }, -- Start
+                { width = DISPLAY_CONFIG.WIDTHS.DATE }, -- Schedule
+                { width = DISPLAY_CONFIG.WIDTHS.DATE }, -- Completed
+                { width = DISPLAY_CONFIG.WIDTHS.PRIORITY }, -- Priority
             },
         })
-        local verbose_status_value = {
-            verbose_status,
-            "TelescopeResultsNumber",
-        }
-        local status_value = {
-            entry.value.status,
-            "TelescopeResultsNormal",
-        }
-        local text_value = {
-            entry.value.text,
-            "TelescopeResultsNormal",
-        }
-        local stem_value = {
-            stem,
-            "TelescopeResultsComment",
-        }
+
         return displayer({
-            verbose_status_value,
-            status_value,
-            text_value,
-            stem_value,
+            { status_info.symbol, status_info.hl },
+            { task.data.description, desc_hl },
+            { right_align(task.data.id, DISPLAY_CONFIG.WIDTHS.ID), "Comment" },
+            { right_align(task.data.due, DISPLAY_CONFIG.WIDTHS.DATE), "Repeat" },
+            { right_align(task.data.created, DISPLAY_CONFIG.WIDTHS.DATE), "Special" },
+            { right_align(task.data.due, DISPLAY_CONFIG.WIDTHS.DATE), "WarningMsg" },
+            { right_align(task.data.start, DISPLAY_CONFIG.WIDTHS.DATE), "Type" },
+            { right_align(task.data.schedule, DISPLAY_CONFIG.WIDTHS.DATE), "String" },
+            { right_align(task.data.completed, DISPLAY_CONFIG.WIDTHS.DATE), "DiagnosticOk" },
+            { right_align(task.data.priority, DISPLAY_CONFIG.WIDTHS.PRIORITY), "Error" },
         })
     end
 
-    local entry_maker = function(entry)
+    local entry_maker = function(task)
         return {
-            value = entry,
-            ordinal = entry.line:match("%s*(.*)"),
+            value = task,
+            ordinal = task.data.line,
             display = make_display,
-            filename = config.options.root .. "/" .. entry.slug .. config.options.ext,
+            -- display = task.data.line:gsub("^%s*(.-)%s*$", "%1"):gsub("^-%s*%[.]%s*", ""),
+            -- filename = config.options.root
+            --     .. "/"
+            --     .. task.data.sources[1].slug
+            --     .. config.options.ext,
         }
     end
 
     local picker = pickers.new({}, {
         prompt_title = "Tasks",
         finder = finders.new_table({
-            results = results,
+            results = tasks_list,
             entry_maker = entry_maker,
         }),
         sorter = sorters.get_generic_fuzzy_sorter(),
@@ -1649,8 +1691,8 @@ function vault_pickers.dirs(opts)
         --- @type string
         local directory = entry.value
         -- local sources_count =
-        --     -- require("vault.notes")():with_relpath(directory, "startswith", false):count()
-        --     notes:with_slug(directory, "startswith", false):count()
+        --     -- require("vault.notes")():filter("relpath",directory, "startswith", false):count()
+        --     notes:filter('slug',directory, "startswith", false):count()
         local sources_count = 0
         for _, slug in ipairs(slugs) do
             if utils.match(slug, directory, "startswith", false) then

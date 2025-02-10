@@ -37,7 +37,7 @@ end
 
 function vault_actions.resort()
     local current_picker = vault_state.get_global_key("picker")
-    P(current_picker)
+    current_picker:resort()
 end
 
 --- Close the picker
