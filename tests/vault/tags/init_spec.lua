@@ -84,17 +84,17 @@ describe("VaultTags:get_random_tag()", function()
 
     -- Test fetching a random tag
     it("should return a random tag", function()
-        local random_tag = tags:get_random_tag()
+        local random_tag = tags:get_random()
         assert.is_true(random_tag.class.name == "VaultTag")
     end)
 end)
 
-describe("VaultTags:by()", function()
+describe("VaultTags:filter()", function()
     local tags = VaultTags()
 
     -- Test filtering tags by key and value
     it("should return tags filtered by a specific key and value", function()
-        local tags_by = tags:by("name", "specific_tag")
+        local tags_by = tags:filter("name", "specific_tag")
         assert.is_true(#tags_by > 0)
     end)
 end)

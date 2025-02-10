@@ -1,53 +1,145 @@
 --- @module "busted"
--- "\[\[([^\]]*)\]\]" in PCRE (PHP >= 7.3) Flavor
--- test wikilink parser
+local assert = require("luassert")
+local Wikilink = require("vault.wikilinks.wikilink")
 
-local string_with_wikilink = [=[
-This is a simple [[wikilink]] example.
-Another example with a heading pointer: [[wikilink#Heading]].
-Now, let's include a wikilink with a relative path: [[../folder/wikilink]].
-Now, let's include a wikilink with a relative path: [[folder/wikilink]].
-Here's a wikilink with an alias: [[wikilink|Alias]].
-And now, a combination of all: [[complex/link#Section|Complex Link]] within a sentence.
-Wikilink with Spaces: [[wiki link]].
-Wikilink with Numbers: [[wiki123]].
-Wikilink with Special Characters: [[wiki-123]].
-External Link: [https://example.com External Link].
-Mixed Inline Style: Some text with a [[wikilink]] and [https://example.com External Link].
-Wikilink with Line Breaks:
-[[wiki
-link]].
+describe("VaultWikilink", function()
+    describe("parsing", function()
+        local test_cases = {
+            {
+                input = "[[simple]]",
+                expected = {
+                    raw = "simple",
+                    stem = "simple",
+                    display = "simple",
+                },
+            },
+            {
+                input = "[[path/to/note]]",
+                expected = {
+                    raw = "path/to/note",
+                    stem = "path/to/note",
+                    display = "note",
+                },
+            },
+            {
+                input = "[[note#heading]]",
+                expected = {
+                    raw = "note#heading",
+                    stem = "note",
+                    display = "note",
+                    heading = "heading",
+                },
+            },
+            {
+                input = "[[note|Custom Title]]",
+                expected = {
+                    raw = "note|Custom Title",
+                    stem = "note",
+                    display = "Custom Title",
+                },
+            },
+            {
+                input = "[[path/to/note#heading|Custom Title]]",
+                expected = {
+                    raw = "path/to/note#heading|Custom Title",
+                    stem = "path/to/note",
+                    display = "Custom Title",
+                    heading = "heading",
+                },
+            },
+            {
+                input = "[[../relative/path]]",
+                expected = {
+                    raw = "../relative/path",
+                    stem = "../relative/path",
+                    display = "path",
+                },
+            },
+        }
 
-[[wikilink]] with another [[wikilink]] on same line
-]=]
+        for _, case in ipairs(test_cases) do
+            it(string.format("should parse %s correctly", case.input), function()
+                local wikilink = Wikilink(case.input)
+                for key, value in pairs(case.expected) do
+                    assert.are.equal(
+                        value,
+                        wikilink.data[key],
+                        string.format(
+                            "Expected %s to be %s but got %s",
+                            key,
+                            value,
+                            wikilink.data[key]
+                        )
+                    )
+                end
+            end)
+        end
+    end)
 
-local tbl_wikilink = {
-  "wikilink",
-  "wikilink#Heading",
-  "../folder/wikilink",
-  "folder/wikilink",
-  "wikilink|Alias",
-  "complex/link#Section",
-  "wiki link",
-  "wiki123",
-  "wiki-123",
-  "wikilink",
-  "wikilink",
-}
+    describe("content extraction", function()
+        local text_with_links = [=[
+            Some text with a [[basic]] link.
+            A [[complex/path/note#section|Display Text]] link.
+            Multiple [[link1]] [[link2]] links.
+            [[link with spaces]]
+            Not a ][ link
+            Also not a [[incomplete link
+        ]=]
 
-local function get_wikilinks(str)
-  local wikilinks = {}
-  for wikilink in string.gmatch(str, "%[%[([^]]*)%]%]") do
-      table.insert(wikilinks, wikilink)
-  end
-  return wikilinks
-end
+        it("should extract all valid wikilinks from text", function()
+            local expected_links = {
+                "basic",
+                "complex/path/note#section|Display Text",
+                "link1",
+                "link2",
+                "link with spaces",
+            }
 
-  -- "wikilink#Heading", to get "wikilink" do:
--- print(string.match("wikilink#Heading", "(.-)#"))
--- print(string.match("wikilink|Alias", "(.-)|"))
--- print(string.match("complex/link#Section", "(.-)#"))
--- print(string.match("complex/link#Section|Complex Link", "(.-)#"))
--- print(string.match("complex/link#Section|Complex Link", "(.-)[|#]"))
+            local wikilinks = Wikilink.extract_from_text(text_with_links)
+            assert.are.equal(#expected_links, #wikilinks)
 
--- P(get_wikilinks(string_with_wikilink))
+            for i, link in ipairs(wikilinks) do
+                assert.are.equal(expected_links[i], link.data.raw)
+            end
+        end)
+    end)
+
+    describe("validation", function()
+        it("should reject invalid wikilinks", function()
+            local invalid_inputs = {
+                "",
+                "[[]]",
+                "[[|]]",
+                "[[#]]",
+                "not a link",
+                "[single bracket]",
+                "[[unterminated",
+                "extra]]brackets]]",
+            }
+
+            for _, input in ipairs(invalid_inputs) do
+                assert.has_error(function()
+                    Wikilink(input)
+                end, "Invalid wikilink format")
+            end
+        end)
+    end)
+
+    describe("methods", function()
+        it("should convert wikilink to string representation", function()
+            local wikilink = Wikilink("[[test/note#section|Display]]")
+            assert.are.equal("[[test/note#section|Display]]", tostring(wikilink))
+        end)
+
+        it("should check if wikilink is resolved", function()
+            local wikilink = Wikilink("[[existing/note]]")
+            -- Mock the resolution check based on your implementation
+            assert.is_false(wikilink:is_resolved())
+        end)
+
+        it("should get parent path", function()
+            local wikilink = Wikilink("[[parent/child/note]]")
+            assert.are.equal("parent/child", wikilink:get_parent_path())
+        end)
+    end)
+end)
