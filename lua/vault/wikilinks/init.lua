@@ -5,6 +5,7 @@ local state = require("vault.core.state")
 local config = require("vault.config")
 local Wikilink = require("vault.wikilinks.wikilink")
 local fetcher = require("vault.fetcher")
+local Collection = require("vault.core.collection")
 
 local Job = require("plenary.job")
 
@@ -17,7 +18,7 @@ local Job = require("plenary.job")
 --- @class vault.Wikilinks: vault.Object
 --- @field map vault.Wikilinks.map
 --- @field groups table<string, vault.Wikilinks.Group>
-local Wikilinks = Object("VaultWikilinks")
+local Wikilinks = Collection:extend("VaultWikilinks")
 
 --- Map of |vault.Wikilink| objects.
 --- Each key is the |vault.slug| of the wikilink.
@@ -106,35 +107,6 @@ function Wikilinks:targets()
     return targets
 end
 
---- @return vault.Wikilinks.list
-function Wikilinks:list()
-    return vim.tbl_values(self.map)
-end
-
---- Get wikilinks length
---- @return integer
-function Wikilinks:len()
-    return vim.tbl_count(self:list())
-end
-
---- Get values by key
---- @param key string
---- @return table
-function Wikilinks:get_values_by_key(key)
-    if not key then
-        error("`key` is required")
-    end
-
-    local values = {}
-    for _, wikilink in pairs(self.map) do
-        if wikilink.data[key] then
-            table.insert(values, wikilink.data[key])
-        end
-    end
-
-    return values
-end
-
 --- @param slug vault.slug
 --- @param match_opt vault.enum.MatchOpts.key
 --- @param case_sensitive? boolean
@@ -158,20 +130,6 @@ function Wikilinks:by_target(slug, match_opt, case_sensitive)
     end
 
     return wikilinks
-end
-
---- @return vault.Notes.Data.slugs
-function Wikilinks:sources()
-    --- @type vault.Notes.data.slugs
-    local sources = {}
-    for _, wikilink in pairs(self.map) do
-        for source, _ in pairs(wikilink.data.sources) do
-            if not sources[source] then
-                sources[source] = true
-            end
-        end
-    end
-    return sources
 end
 
 --- @return vault.Wikilinks.map
