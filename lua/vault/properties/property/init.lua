@@ -1,5 +1,5 @@
 local Object = require("vault.core.object")
-local error_formatter = require("vault.utils.fmt.error")
+local Error = require("vault.utils.error")
 
 local state = require("vault.core.state")
 local data = require("vault.properties.property.data")
@@ -14,7 +14,7 @@ local PropertyData = Object("VaultPropertyData")
 --- @param this vault.Property.Data.name|VaultPropertyDataPartial
 function PropertyData:init(this)
     if not this then
-        error(error_formatter.missing_parameter("this"), 2)
+        error(Error.MISSING_PARAMETER("this"), 2)
     end
     self.name = this.name
     self.values = this.values or {}
@@ -61,14 +61,14 @@ local Property = Object("VaultProperty")
 --- @param this vault.Property.Data.name|VaultPropertyDataPartial
 function Property:init(this)
     if not this then
-        error(error_formatter.missing_parameter("this"), 2)
+        error(Error.MISSING_PARAMETER("this"), 2)
     end
     if type(this) == "string" then
         this = { name = this }
     end
 
     if not this.name then
-        error(error_formatter.missing_parameter("name"), 2)
+        error(Error.MISSING_PARAMETER("name"), 2)
     end
 
     self.data = PropertyData(this)
