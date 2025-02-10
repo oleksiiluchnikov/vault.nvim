@@ -1,10 +1,56 @@
---- The configuration for the vault plugin.
 --- @class vault.Config
---- @field options vault.Config.options
---- @field setup fun(options: vault.Config.options): nil
+--- @field options vault.Config.options The plugin configuration options
+--- @field setup fun(options?: vault.Config.options): nil Setup the plugin configuration
+--- @field reset fun(): nil Reset configuration to default state
+--- @field get_defaults fun(): vault.Config.options Get a fresh copy of default configuration
+--- @field check_dirs fun(): nil Validate and check directory structure
+
+--- @class vault.Config.options
+--- @field root? string Root directory path of the vault where notes are stored. Example: "~/vault" or "/Users/user/Documents/vault"
+--- @field dirs? table Directory configuration for organizing different note types
+---   Example structure:
+---   ```lua
+---   {
+---     inbox = "inbox",           -- Quick capture/inbox notes
+---     docs = "_docs",           -- Documentation
+---     templates = "_templates", -- Note templates
+---     journal = {              -- Journal structure
+---       root = "Journal",
+---       daily = "Journal/Daily",
+---       weekly = "Journal/Weekly",
+---       monthly = "Journal/Monthly",
+---       yearly = "Journal/Yearly"
+---     }
+---   }
+---   ```
+--- @field ignore? string[] Glob patterns for files/directories to ignore during searches. Example: {".git/*", ".obsidian/*", "_templates/*"}
+--- @field ext? string File extension for notes. Example: ".md"
+--- @field tags? table Tag configuration and validation settings. Example: { valid = { hex = true } }
+--- @field search_pattern? table Regular expression patterns for parsing note elements. Example:
+---   ```lua
+---   {
+---     task = { pcre2 = [[^\s*-\s+\[.\]\s+\S+]] },
+---     date = { pcre2 = [[\d{4}-\d{2}-\d{2}]] },
+---     tag = "#([A-Za-z0-9/_-]+)[\r|%s|\n|$]",
+---     wikilink = "%[%[([^\\]]*)%]%]",
+---     note = { type = "class::%s#class/([A-Za-z0-9_-]+)" }
+---   }
+---   ```
+--- @field search_tool? string Tool used for searching vault. Example: "rg" or "fd"
+--- @field ui? { popups: table, notify: table} UI configuration settings
+--- @field notify? table Notification settings and preferences. Example: { on_write = true }
+--- @field features? { cmp: boolean, commands: boolean, blink: boolean } Feature toggles for plugin components. Example: { cmp = true, commands = true, blink = true }
+--- @field frontmatter? table YAML frontmatter configuration. Example: { keys = { tags = "tags" } }
+--- @field check_duplicate_basename? boolean Enable duplicate filename detection. Example: true
+
+--- The configuration for the vault plugin.
+--- @type vault.Config
+--- @diagnostic disable-next-line: missing-fields
 local Config = {
     --- @diagnostic disable-next-line: missing-fields
     options = {},
+    --- @type boolean
+    is_initialized = false,
 }
 
 --- Get the root directory for the demo vault
@@ -32,7 +78,7 @@ local function get_demo_vault_root()
         return nil
     end
 
-    local demo_vault_root = plugin_root .. "/demo_vault"
+    local demo_vault_root = plugin_root .. "/tests/fixtures/demo-vault"
     if vim.fn.isdirectory(demo_vault_root) == 0 then
         return nil
     end
@@ -40,42 +86,14 @@ local function get_demo_vault_root()
     return demo_vault_root
 end
 
--- --- @type VaultConfig.options.root|nil
--- local demo_vault_root = get_demo_vault_root()
--- if demo_vault_root == nil then
---     error("Unable to find demo vault root")
--- end
-
---- @class vault.Config.options
---- @field root string - The root directory of the vault.
---- @field dirs? table - The directories for various elements in the note.
---- @field ignore string[] - List of ignore patterns in glob format (e.g., ".obdidian/*, .git/*").
---- @field ext string - The extension of the note files. Default: ".md"
---- @field tags table - The tag configuration.
---- @field search_pattern table - The search pattern for various elements in the note.
---- @field search_tool string - The search tool to use. Default: "rg"
---- @field popups table - The popup configuration.
---- @field notify table - The notification configuration.
---- @field features { cmp: boolean, commands: boolean } - The features to enable.
-Config.defaults = {
-    root = "~/knowledge",
-    dirs = {
-        inbox = "inbox",
-        docs = "_docs",
-        templates = "_templates",
-        journal = {
-            root = "Journal",
-            daily = "Journal/Daily",
-            weekly = "Journal/Weekly",
-            monthly = "Journal/Monthly",
-            yearly = "Journal/Yearly",
-        },
-    },
+--- Default configuration options
+--- @type vault.Config.options
+local DEFAULT_OPTIONS = {
+    root = nil,
+    dirs = nil,
     ignore = {
         ".git/*",
         ".obsidian/*",
-        "_docs/*",
-        "_templates/*",
         ".trash/*",
     },
     ext = ".md",
@@ -108,65 +126,71 @@ Config.defaults = {
         on_write = true,
     },
     check_duplicate_basename = true,
-    popups = {
-        fleeting_note = {
-            title = {
-                text = "Fleeting Note",
-                preview = "border", -- "border" | "prompt" | "none"
-            },
-            editor = { -- @see :h nui.popup
-                position = {
-                    row = math.floor(vim.api.nvim_list_uis()[1].height / 2) - 9,
-                    col = math.floor(vim.api.nvim_list_uis()[1].width / 2) - 40,
+    ui = {
+
+        popups = {
+            fleeting_note = {
+                title = {
+                    text = "Fleeting Note",
+                    preview = "border", -- "border" | "prompt" | "none"
                 },
-                size = {
-                    height = 6,
-                    width = 80,
-                },
-                enter = true,
-                focusable = true,
-                zindex = 60,
-                relative = "editor",
-                border = {
-                    padding = {
-                        top = 0,
-                        bottom = 0,
-                        left = 0,
-                        right = 0,
+                editor = { -- @see :h nui.popup
+                    -- position = {
+                    --     row = math.floor(vim.api.nvim_list_uis()[1].height / 2) - 9 or 0,
+                    --     col = math.floor(vim.api.nvim_list_uis()[1].width / 2) - 40 or 0,
+                    -- },
+                    size = {
+                        height = 6,
+                        width = 80,
                     },
-                    -- T shape side border: ├
-                    style = "rounded",
+                    enter = true,
+                    focusable = true,
+                    zindex = 60,
+                    relative = "editor",
+                    border = {
+                        padding = {
+                            top = 0,
+                            bottom = 0,
+                            left = 0,
+                            right = 0,
+                        },
+                        -- T shape side border: ├
+                        style = "rounded",
+                    },
+                    buf_options = {
+                        modifiable = true,
+                        readonly = false,
+                        filetype = "markdown",
+                        buftype = "nofile",
+                        swapfile = false,
+                        bufhidden = "wipe",
+                    },
+                    win_options = {
+                        winhighlight = "Normal:Normal,FloatBorder:FloatBorder",
+                    },
                 },
-                buf_options = {
-                    modifiable = true,
-                    readonly = false,
-                    filetype = "markdown",
-                    buftype = "nofile",
-                    swapfile = false,
-                    bufhidden = "wipe",
+                prompt = {
+                    hidden = true,
+                    size = {
+                        height = 0.8,
+                        width = 0.8,
+                    },
                 },
-                win_options = {
-                    winhighlight = "Normal:Normal,FloatBorder:FloatBorder",
-                },
-            },
-            prompt = {
-                hidden = true,
-                size = {
-                    height = 0.8,
-                    width = 0.8,
-                },
-            },
-            results = {
-                size = {
-                    height = 10,
-                    width = 80,
+                results = {
+                    size = {
+                        height = 10,
+                        width = 80,
+                    },
                 },
             },
         },
     },
+    previewer = "glow", -- The previewer to use. Default: "glow"
+    -- Features to enable
     features = {
-        cmp = true,
-        commands = true,
+        cmp = true, -- Enable cmp
+        commands = true, -- Enable commands
+        blink = true, -- blink.cmp inegration
     },
 }
 
@@ -197,8 +221,7 @@ end
 --- @return table? - The expanded directories.
 local function expand_dirs(root, dirs)
     if dirs == nil then
-        error("Implement default dirs")
-        return
+        return nil
     end
     -- Expand the directories.
     for key, dir in pairs(dirs) do
@@ -231,36 +254,62 @@ function Config.check_dirs()
     Config.options.dirs = dirs
 end
 
+--- Validate configuration options
+--- @param options vault.Config.options
+--- @return boolean, string? error message if validation fails
+local function validate_config(options)
+    -- If root is not specified, try to use demo vault
+    if not options.root then
+        vim.notify("No root directory specified. Attempting to use demo vault", vim.log.levels.INFO)
+        local demo_vault_root = get_demo_vault_root()
+        error("TODO: implement get_demo_vault_root()")
+    end
+
+    if type(options.root) ~= "string" then
+        return false, "root directory must be a string"
+    end
+
+    -- Add more specific validations
+    return true
+end
+
 --- Setup the vault plugin configuration.
 ---
 --- @param options? vault.Config.options
 function Config.setup(options)
-    options = vim.tbl_deep_extend("force", Config.options, options)
-    if not options then
-        error("Failed to load `vault.nvim` configuration.")
+    -- Allow re-initialization with a warning
+    if Config.is_initialized then
+        vim.notify("Reinitializing vault.nvim configuration", vim.log.levels.INFO)
     end
-    --- @type vault.Config.options.root
+
+    options = vim.tbl_deep_extend("force", Config.get_defaults(), options or {})
+
+    local is_valid, err = validate_config(options)
+    if not is_valid then
+        error("Invalid configuration: " .. err)
+    end
+
     options.root = expand_root(options.root)
     options.dirs = expand_dirs(options.root, options.dirs)
 
-    -- Validate the options.
-    vim.validate({
-        root = { options.root, "string" },
-        dirs = { options.dirs, "table" },
-        ignore = { options.ignore, "table" },
-        ext = { options.ext, "string" },
-        tags = { options.tags, "table" },
-        search_pattern = { options.search_pattern, "table" },
-        search_tool = { options.search_tool, "string" },
-        notify = { options.notify, "table" },
-        popups = { options.popups, "table" },
-    })
-
     --- @cast options vault.Config.options
     Config.options = options
+    Config.is_initialized = true
 end
 
-Config.setup(Config.defaults)
+--- Reset the configuration to empty state
+--- This is useful for testing
+function Config.reset()
+    --- @diagnostic disable-next-line: missing-fields
+    Config.options = {}
+end
 
---- @type vault.Config.options
+--- Get a fresh copy of default options
+--- @return vault.Config.options
+function Config.get_defaults()
+    local defaults = vim.deepcopy(DEFAULT_OPTIONS)
+    return defaults
+end
+
+--- @type vault.Config
 return Config
