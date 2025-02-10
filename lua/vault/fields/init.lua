@@ -44,19 +44,6 @@ function Fields:key_values()
     return key_values
 end
 
---- Get a list of fields.
----
---- @return vault.Field[]
-function Fields:list()
-    local list = {}
-    for key, field in pairs(self.map) do
-        for value, data in pairs(self.map) do
-            table.insert(list, data)
-        end
-    end
-    return list
-end
-
 --- Get list of keys with values count.
 --- @return {key: string, count: number}[]
 function Fields:keys_with_values_count()
@@ -74,31 +61,31 @@ function Fields:keys_with_values_count()
     return keys
 end
 
-function Fields:sources()
-    local sources = {}
-    for key, values in pairs(self.map) do
-        for value, data in pairs(values) do
-            for slug, source in pairs(data.sources) do
-                if not sources[slug] then
-                    sources[slug] = source
-                else
-                    for line_number, source_line in pairs(source) do
-                        if not sources[slug][line_number] then
-                            sources[slug][line_number] = source_line
-                        else
-                            for column, source_column in pairs(source_line) do
-                                if not sources[slug][line_number][column] then
-                                    sources[slug][line_number][column] = source_column
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return sources
-end
+-- function Fields:sources()
+--     local sources = {}
+--     for key, values in pairs(self.map) do
+--         for value, data in pairs(values) do
+--             for slug, source in pairs(data.sources) do
+--                 if not sources[slug] then
+--                     sources[slug] = source
+--                 else
+--                     for line_number, source_line in pairs(source) do
+--                         if not sources[slug][line_number] then
+--                             sources[slug][line_number] = source_line
+--                         else
+--                             for column, source_column in pairs(source_line) do
+--                                 if not sources[slug][line_number][column] then
+--                                     sources[slug][line_number][column] = source_column
+--                                 end
+--                             end
+--                         end
+--                     end
+--                 end
+--             end
+--         end
+--     end
+--     return sources
+-- end
 
 function Fields:datas()
     local datas = {}

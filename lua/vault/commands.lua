@@ -229,7 +229,7 @@ function callbacks.create_new_note(args)
     end
 
     local new_slug = table.concat(fargs, " ")
-    local notes = require("vault.notes")():with_slug(new_slug, "exact", false)
+    local notes = require("vault.notes")():filter("slug", new_slug, "exact", false)
     if next(notes.map) then
         notes.map[new_slug]:edit()
         return
@@ -247,7 +247,7 @@ function callbacks.pick_dirs(args)
         require("vault.pickers").dirs():find()
         return
     end
-    local notes = require("vault.notes")():with_relpath(fargs[1], "startswith", false)
+    local notes = require("vault.notes")():filter("relpath", fargs[1], "startswith", false)
     require("vault.pickers").notes({ notes = notes }):find()
 end
 
@@ -260,9 +260,9 @@ function callbacks.edit_random_note(args)
     if #args.fargs == 0 then
         notes = require("vault.notes")()
     else
-        notes = require("vault.notes")():with_slug(table.concat(args.fargs, " "), "fuzzy")
+        notes = require("vault.notes")():filter("slug", table.concat(args.fargs, " "), "fuzzy")
     end
-    local random_note = notes:get_random_note()
+    local random_note = notes:get_random()
     if random_note == nil then
         return
     end
@@ -471,7 +471,7 @@ function callbacks.note_inlinks_picker()
     if next(inlinks) == nil then
         return
     end
-    local notes = require("vault.notes")():with_slugs(vim.tbl_keys(inlinks))
+    local notes = require("vault.notes")():filter(vim.tbl_keys(inlinks))
     require("vault.pickers").notes({ notes = notes }):find()
 end
 
@@ -498,7 +498,7 @@ function callbacks.note_outlinks_picker()
         table.insert(slugs, outlink.data.slug)
     end
 
-    require("vault.pickers").notes({ notes = require("vault.notes")():with_slugs(slugs) }):find()
+    require("vault.pickers").notes({ notes = require("vault.notes")():filter(slugs) }):find()
 end
 
 --- vault.NoteTags
@@ -542,7 +542,7 @@ function callbacks.note_tags_picker(args)
     -- if args.range == 2 then
     --     error("Not implemented")
     -- end
-    require("vault.pickers").notes({ notes = require("vault.notes")():with_slugs(slugs) }):find()
+    require("vault.pickers").notes({ notes = require("vault.notes")():filter(slugs) }):find()
 end
 
 --- Create a new note from the selected text, and replace the selected text with a link to the new note
@@ -621,12 +621,12 @@ function callbacks.open_note_by_dir_picker(args)
         -- return notes in the root directory
         require("vault.pickers")
             .notes({
-                notes = require("vault.notes")():with_relpath("", "exact", false),
+                notes = require("vault.notes")():filter("relpath", "", "exact", false),
             })
             :find()
         return
     end
-    local notes = require("vault.notes")():with_relpath(fargs[1], "startswith", false)
+    local notes = require("vault.notes")():filter("relpath", fargs[1], "startswith", false)
     require("vault.pickers").notes({ notes = notes }):find()
 end
 
@@ -969,7 +969,7 @@ local M = {
 
             local note_slug = input
             local notes = require("vault.notes")()
-            local note = vim.deepcopy(notes):with_slug(note_slug, "exact"):list()[1]
+            local note = vim.deepcopy(notes):filter("slug", note_slug, "exact"):list()[1]
             if not note then
                 vim.notify("Note not found " .. note_slug)
                 return
