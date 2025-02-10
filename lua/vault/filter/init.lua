@@ -5,12 +5,14 @@ local NoteData = state.get_global_key("class.vault.Note.data") or require("vault
 local enums = require("vault.enums")
 
 --- @class vault.Filter.option: vault.Object
+--- Search term to filter on.
+--- @field search_term vault.FilterOpts.search_term
 --- Array of query terms to include.
---- @field include string[]|number[]
+--- @field include string[]|number[] Array of query terms to include
 --- Array of tag names to exclude.
---- @field exclude string[]|number[]
---- @field match_opt vault.enum.MatchOpts.key
---- @field mode vault.enum.MatchOpts.mode
+--- @field exclude string[]|number[] Array of terms to exclude from search
+--- @field match_opt vault.enum.MatchOpts.key The matching option (exact, fuzzy, etc)
+--- @field mode vault.enum.MatchOpts.mode The filter mode (all, any)
 --- Whether or not to match case sensitively.
 --- @field case_sensitive boolean
 
@@ -94,7 +96,7 @@ function Filter:init(opts, search_term)
         error("invalid argument: must be a table: " .. vim.inspect(opts))
     end
 
-    if vim.tbl_islist(opts) and type(opts[1]) ~= "table" then
+    if vim.islist(opts) and type(opts[1]) ~= "table" then
         opts = args_to_opts(opts)
     end
 
@@ -121,7 +123,7 @@ function Filter:init(opts, search_term)
         self.opts[k] = {}
 
         -- Validate `search_term`
-        if type(opt.search_term) ~= "string" or type(opt.search_term) ~= "string" then
+        if type(opt.search_term) ~= "string" then
             error("invalid argument: must be a string: " .. vim.inspect(opt.search_term))
         elseif not NoteData[opt.search_term] then
             error("invalid argument: must be a valid search term: " .. vim.inspect(opt.search_term))
@@ -183,7 +185,7 @@ end
 
 -- Invert filter options
 function Filter:invert()
-    for k, opt in pairs(self.opts) do
+    for _, opt in pairs(self.opts) do
         opt.include = vim.tbl_filter(function(v)
             return not vim.tbl_contains(opt.exclude, v)
         end, opt.include)
@@ -197,7 +199,7 @@ function Filter:invert()
 end
 
 --- Filter
---- @alias vault.Filter.constructor fun(opts:
+--- @alias vault.Filter.constructor fun(opts: vault.Filter.option|vault.Filter.option[], search_term?: string): vault.Filter
 --- @type vault.Filter.constructor|vault.Filter
 local M = Filter
 

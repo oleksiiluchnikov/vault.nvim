@@ -98,7 +98,7 @@ function PopupFleetingNote:init(content, opts)
     local telescope_layout
     --- @type vault.Notes
     local notes = Notes()
-    --- @type vault.Notes.list
+    --- @type vault.Note[]
     local notes_list = notes:list()
     --- @type vault.path
     local new_note_path = config.options.dirs.inbox .. "/" .. opts.title.text .. config.options.ext

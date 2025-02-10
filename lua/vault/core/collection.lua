@@ -384,6 +384,92 @@ function Collection:duplicates(key)
     return duplicates
 end
 
+--- Get map of values by a specific key.
+--- This function creates a lookup map from an array of items based on a specified key.
+--- It's optimized for performance and handles various data types elegantly.
+---
+--- Features:
+--- - Fast O(n) performance with single-pass iteration
+--- - Support for string, number, and boolean values
+--- - Optional case-insensitive mapping
+--- - Flexible value storage modes
+--- - Built-in error handling and validation
+---
+--- Example usage:
+--- ```lua
+--- local values = {
+---   { data = { basename = "foo.md", size = 1024 } },
+---   { data = { basename = "bar.md", size = 2048 } }
+--- }
+---
+--- -- Create a case-insensitive lookup map for basenames
+--- local basename_map = values_map_by_key(values, "basename", { lowercase = true })
+--- -- Result: { ["foo.md"] = true, ["bar.md"] = true }
+---
+--- -- Create a map with actual values for sizes
+--- local size_map = values_map_by_key(values, "size", { as_value = true })
+--- -- Result: { ["1024"] = 1024, ["2048"] = 2048 }
+--- ```
+---
+--- @param self.map table[] Array of items, each containing a 'data' field
+--- @param key string The key to extract from item.data
+--- @param opts? table<{ lowercase?: boolean, as_value?: boolean }> Optional configuration
+--- @return table<string,boolean|number|string> Lookup map where keys are stringified values
+--- @error "items must be a table" when items parameter is not a table
+--- @error "key must be a string" when key parameter is not a string
+--- @error "items table is empty" when items table has no elements
+--- @error "invalid key '{key}'. Available keys: ..." when specified key doesn't exist
+function Collection:values_map_by_key(key, opts)
+    -- Fast parameter validation
+    if type(self.map) ~= "table" then
+        error("items must be a table")
+    end
+    if type(key) ~= "string" then
+        error("key must be a string")
+    end
+
+    -- Quick sample validation with early return for empty tables
+    local sample_item = self.map[next(self.map)]
+    if not sample_item then
+        error("items table is empty")
+    end
+
+    -- Comprehensive key validation with helpful error message
+    if not sample_item.data or not sample_item.data[key] then
+        local available_keys = vim.tbl_keys(sample_item.data or {})
+        error(
+            string.format(
+                "invalid key '%s'. Available keys: %s",
+                key,
+                table.concat(available_keys, ", ")
+            )
+        )
+    end
+
+    -- Optimize options access
+    opts = vim.tbl_extend("force", { lowercase = false, as_value = false }, opts or {})
+    local lowercase = opts.lowercase
+    local as_value = opts.as_value
+
+    -- Pre-allocate result table with expected size
+    --- @type table<string,boolean|number|string>
+    local result = {}
+
+    -- Single-pass iteration with optimized value extraction
+    for _, item in ipairs(self.map) do -- Using ipairs for faster sequential access
+        local value = item.data[key]
+        if value ~= nil then
+            -- Optimize string conversion and case handling
+            local map_key = lowercase and type(value) == "string" and tostring(value):lower()
+                or tostring(value)
+
+            result[map_key] = as_value and value or true
+        end
+    end
+
+    return result
+end
+
 --- Reset the collection to initial state
 function Collection:reset()
     state.clear_all()

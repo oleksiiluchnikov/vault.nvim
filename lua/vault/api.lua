@@ -31,7 +31,7 @@ function M.edit_tag_documentation(tag_name)
         error("No tag name provided")
     end
     --- @type vault.Tag
-    local tag = require("vault.tags")():by("name", tag_name, "exact"):get_random_tag()
+    local tag = require("vault.tags")():filter("name", tag_name, "exact"):get_random()
     if not tag then
         error("Tag not found")
     end
@@ -51,7 +51,7 @@ function M.rename_tag(from_tag_name, to_tag_name)
         error("No to tag name provided")
     end
     --- @type vault.Tag
-    local tag = require("vault.tags")():by("name", from_tag_name, "exact"):get_random_tag()
+    local tag = require("vault.tags")():filter("name", from_tag_name, "exact"):get_random()
     if not tag then
         error("Tag not found")
     end
@@ -102,7 +102,7 @@ function M.open_picker_notes_with_property_value(property_name, value_name)
     for _, slug in ipairs(slugs) do
         local path = require("vault.utils").slug_to_path(slug)
         local note = require("vault.notes.note")(path)
-        notes:add_note(note)
+        notes:push(note)
     end
     -- vault_pickers.notes(opts)
     pickers
@@ -115,7 +115,7 @@ end
 function M.open_picker_notes_in_directory(directory)
     pickers
         .notes({
-            notes = require("vault.notes")():with_relpath(directory, "startswith", false),
+            notes = require("vault.notes")():filter("relpath", directory, "startswith", false),
         })
         :find()
 end
@@ -173,7 +173,7 @@ function M.open_picker_notes_with_empty_property_value(property_name, value_name
     for _, slug in ipairs(slugs) do
         local path = require("vault.utils").slug_to_path(slug)
         local note = require("vault.notes.note")(path)
-        notes:add_note(note)
+        notes:push(note)
     end
     -- vault_pickers.notes(opts)
     pickers
@@ -202,7 +202,7 @@ function M.open_picker_notes_with_empty_content()
 
     pickers
         .notes({
-            notes = require("vault.notes")():with_content(pattern, "regex", false),
+            notes = require("vault.notes")():filter("content", pattern, "regex", false),
         })
         :find()
 end
@@ -211,7 +211,8 @@ end
 function M.open_picker_notes_without_frontmatter()
     pickers
         .notes({
-            notes = require("vault.notes")():without_frontmatter(),
+            -- notes = require("vault.notes")():without_frontmatter(),
+            notes = require("vault.notes")():filter("content", [=[^\(---\)\@!.*$]=], "regex", true),
         })
         :find()
 end
