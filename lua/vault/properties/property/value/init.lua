@@ -1,5 +1,5 @@
 local Object = require("vault.core.object")
-local error_formatter = require("vault.utils.fmt.error")
+local error_formatter = require("vault.utils.error")
 
 local state = require("vault.core.state")
 local data = require("vault.properties.property.data")
@@ -59,9 +59,9 @@ function PropertyValueData:__index(key)
     if self[key] == nil then
         error(
             "Invalid key: "
-            .. vim.inspect(key)
-            .. ". Valid keys: "
-            .. vim.inspect(vim.tbl_keys(data))
+                .. vim.inspect(key)
+                .. ". Valid keys: "
+                .. vim.inspect(vim.tbl_keys(data))
         )
     end
     return self[key]
