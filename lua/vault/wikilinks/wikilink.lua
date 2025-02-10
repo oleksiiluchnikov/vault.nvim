@@ -2,35 +2,43 @@ local Object = require("vault.core.object")
 local state = require("vault.core.state")
 local fetcher = require("vault.fetcher")
 
---- @alias vault.Wikilink.Data.partial string
+--- @alias vault.Wikilink.Data.partial string A partial wikilink that might not contain full markdown syntax
 
+--- @description Represents all possible components and metadata for a wikilink in a vault note
 --- The raw link as it appears in the note. e.g. [[foo/bar/buzz|alias#heading]]
---- @alias vault.Wikilink.Data.raw string
+--- @alias vault.Wikilink.Data.raw string The complete wikilink text as it appears in the source
+
 --- Whether the link is embedded file link. e.g. ![[foo/bar/buzz|alias#heading]]
---- @alias vault.Wikilink.Data.embedded boolean
+--- @alias vault.Wikilink.Data.embedded boolean Indicates if this is an embedded file/image link
+
 --- The slug of the link. e.g. [[foo/bar/buzz|alias#heading]] -> foo/bar/buzz
---- @alias vault.Wikilink.Data.slug string
+--- @alias vault.Wikilink.Data.slug string The unique identifier path for the linked note
+
 --- The title of the link. e.g. [[foo/bar/buzz|alias#heading]] -> buzz
---- @alias vault.Wikilink.Data.stem string
+--- @alias vault.Wikilink.Data.stem string The display name or title extracted from the slug
+
 --- The number of times the link appears in the note.
---- @alias vault.Wikilink.Data.count number
+--- @alias vault.Wikilink.Data.count number Frequency count of this link's occurrence
+
 --- The aliases of the link. e.g. [[foo/bar/buzz|alias#heading]] -> alias
---- @alias vault.Wikilink.Data.alias string
+--- @alias vault.Wikilink.Data.alias string Alternative display text for the link
+
 --- All aliases used with that wikilink. e.g. [[foo/bar/buzz|alias#heading]] -> {["buzz"] = true, ["foo/bar/buzz"] = true, ["alias"] = true}
---- @alias vault.Wikilink.Data.aliases table<string, boolean>
+--- @alias vault.Wikilink.Data.aliases table<string, boolean> Collection of all valid display names for this link
 
 --- @class vault.Wikilink.Data: vault.Object
---- @field raw vault.Wikilink.Data.raw
---- @field embedded boolean
---- @field slug vault.slug
---- @field stem vault.stem
---- @field count number
---- @field alias vault.Wikilink.Data.alias
---- @field aliases vault.map
---- @field section? vault.Note.Data.heading
---- @field sources vault.Sources.map
---- @field target vault.Note
---- @field variants vault.map
+--- @description Core data structure representing a wikilink in a vault note
+--- @field raw vault.Wikilink.Data.raw The complete original wikilink text
+--- @field embedded boolean Indicates if this is an embedded media link
+--- @field slug vault.slug Unique identifier path for the linked note
+--- @field stem vault.stem Display name extracted from slug
+--- @field count number Number of occurrences in the note
+--- @field alias vault.Wikilink.Data.alias Optional display text override
+--- @field aliases vault.map Set of all valid display names
+--- @field section? vault.Note.Data.heading Optional heading/section reference
+--- @field sources vault.Sources.map References to source notes containing this link
+--- @field target vault.Note The resolved target note object
+--- @field variants vault.map Alternative forms of the link
 --- ```lua
 --- assert(wikilink.raw == "[[foo/bar/buzz|alias#heading]]") -- Raw link as it appears in the note
 --- assert(wikilink.content== "foo/bar/buzz") -- Content of the link as it appears in the note
