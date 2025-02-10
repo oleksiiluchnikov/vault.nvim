@@ -1,11 +1,11 @@
 --- That module contains `VaultNotesCluster` class.
 local state = require("vault.core.state")
-local error_msg = require("vault.utils.fmt.error")
+local error_msg = require("vault.utils.error")
 
 --- @type vault.Notes.constructor|vault.Notes
 local Notes = require("vault.notes")
 
---- @class VaultNotesCluster: vault.Notes
+--- @class vault.Notes.Cluster: vault.Notes
 --- Is sub set of `VaultNotes` object.
 --- It used to build local scope of notes based on the note.
 --- We could explore to look related notes.
@@ -36,7 +36,7 @@ function NotesCluster:init(notes, note, depth)
     self.note = note
     self.depth = depth
     self.map = {}
-    self._raw_map = {}
+    self._map = {}
 
     -- self:increase_depth()
     self:fetch_cluster()
@@ -44,7 +44,7 @@ end
 
 --- Increase the depth of the cluster.
 ---
---- @return VaultNotesCluster
+--- @return vault.Notes.Cluster
 function NotesCluster:increase_depth()
     self.depth = self.depth + 1
     -- self:reset()
@@ -54,7 +54,7 @@ end
 
 --- Decrease the depth of the cluster.
 ---
---- @return VaultNotesCluster
+--- @return vault.Notes.Cluster
 function NotesCluster:decrease_depth()
     self.depth = self.depth - 1
     -- self:reset()
@@ -64,7 +64,7 @@ end
 
 --- Reset the cluster to the initial state.
 ---
---- @return VaultNotesCluster
+--- @return vault.Notes.Cluster
 function NotesCluster:reset_depth()
     self.depth = 0
     -- self:reset()
@@ -74,7 +74,7 @@ end
 
 --- Fetch cluster of notes.
 ---
---- @return VaultNotesCluster
+--- @return vault.Notes.Cluster
 function NotesCluster:fetch_cluster()
     local notes = self.notes
     --- Fetch cluster recursively.
@@ -114,7 +114,7 @@ function NotesCluster:fetch_cluster()
             for _, wikilink in pairs(wikilinks) do
                 local sources = wikilink.data.sources
                 for source, _ in pairs(sources) do
-                    inlinks_sources[source] = self.notes._raw_map[source]
+                    inlinks_sources[source] = self.notes._map[source]
                 end
             end
         end
@@ -125,7 +125,7 @@ function NotesCluster:fetch_cluster()
         for slug, wikilink in pairs(outlinks) do
             local target = wikilink.data.target
             if target then
-                targets[target] = self.notes._raw_map[target]
+                targets[target] = self.notes._map[target]
             end
         end
 
@@ -142,8 +142,8 @@ function NotesCluster:fetch_cluster()
     return self
 end
 
---- @alias VaultNotesCluster.constructor fun(notes: vault.Notes, note: vault.Note, depth: number): VaultNotesCluster
---- @type VaultNotesCluster.constructor|VaultNotesCluster
+--- @alias VaultNotesCluster.constructor fun(notes: vault.Notes, note: vault.Note, depth: number): vault.Notes.Cluster
+--- @type VaultNotesCluster.constructor|vault.Notes.Cluster
 local VaultNotesCluster = NotesCluster
 
 state.set_global_key("class.vault.NotesCluster", VaultNotesCluster)
