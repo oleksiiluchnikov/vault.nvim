@@ -3,11 +3,9 @@ local config = require("vault.config")
 --- @type vault.StateManager
 local state = require("vault.core.state")
 local utils = require("vault.utils")
+local fmt_error = require("vault.utils.error")
 --- @type Job
 local Job = require("plenary.job")
-
---- @type string
-local filetype = config.options.ext:sub(2)
 
 --- @type string
 local COMMAND = config.options.search_tool or "rg" -- TODO: Make this configurable.
@@ -25,64 +23,123 @@ local COMMAND = config.options.search_tool or "rg" -- TODO: Make this configurab
 --- @field fields fun(): vault.Fields.map - Fetch all the key value pairs from the frontmatter and inline Dataview
 --- @field dirs fun(): vault.Dirs.map - Fetch all dirs from the vault with rg.
 --- @field slugs fun(): vault.Notes.Data.slugs
---- @field paths fun(): vault.Notes.map - Fetches all paths from the vault with ripgrep.
+--- @field paths fun(): vault.EntryInfoMap - Fetches all paths from the vault with ripgrep.
 local Fetcher = {}
 
 --- Executes the ripgrep command.
 ---
 --- @return string[]
 local function rg(args)
-    local stdout = {}
+    if not args or next(args) == nil then
+        error(fmt_error.MISSING_PARAMETER("args"))
+    end
 
+    local stdout = {}
+    --- @diagnostic disable-next-line: missing-fields
     Job:new({
         command = COMMAND,
         args = args,
-
-        on_exit = function(j, _, _)
+        on_exit = function(j, code, _)
+            if code ~= 0 then
+                error(string.format("ripgrep failed with code %d", code))
+            end
             stdout = j:result()
         end,
     }):sync()
 
     if not stdout then
-        error("Failed to fetch data from the vault.")
+        error("ripgrep returned no results")
     end
 
     return stdout
 end
 
+
 --- @alias vault.fetcher.ripgrep.line string
 
---- Converts a JSON line to a match entry.
+--- Converts a JSON line from ripgrep output into a structured match entry.
 ---
---- This function decodes the JSON line and verifies if it is a match entry.
---- It returns the entry if it is a match and contains submatches, otherwise nil.
+--- This function handles the parsing and validation of JSON lines from ripgrep output,
+--- specifically looking for match entries with submatch data. It provides strict validation
+--- to ensure the entry contains all required fields.
 ---
 --- Example:
 --- ```lua
---- local line = '{"type":"match","data":{"path":{"text":"path/to/file.md"},"lines":{"text":"line content"},"submatches":[{"match":{"text":"match content"},"start":0,"end":0}]}}'
---- assert(line_to_match_entry(line) ~= nil)
+--- -- Basic match entry
+--- local line = [[{
+---   "type": "match",
+---   "data": {
+---     "path": {"text": "docs/example.md"},
+---     "lines": {"text": "Example content"},
+---     "submatches": [
+---       {
+---         "match": {"text": "Example"},
+---         "start": 0,
+---         "end": 7
+---       }
+---     ]
+---   }
+--- }]]
+---
+--- local entry = line_to_match_entry(line)
+--- assert(entry.type == "match")
+--- assert(entry.data.path.text == "docs/example.md")
 --- ```
---- @param line string: A JSON-encoded string representing a ripgrep line.
---- @return vault.fetcher.ripgrep.entry|nil: The match entry if the line is a match and contains submatches, otherwise nil.
+---
+--- @param line string The JSON-encoded ripgrep output line to parse
+--- @return vault.fetcher.ripgrep.entry|nil The parsed and validated match entry, or nil if invalid
+--- ```lua
+--- match {
+---     data = {
+---         absolute_offset = 1026,
+---         line_number = 37,
+---         lines = {
+---             text = "- [x] create a mood board\n"
+---         },
+---         path = {
+---             text = "/Users/username/vault/foo/bar.md"
+---         },
+---         submatches = { {
+---             ["end"] = 12,
+---             match = {
+---                 text = "- [x] paint an etude"
+---             },
+---             start = 0
+---         } }
+---     },
+---     type = "match"
+--- }
+--- ```
+--- @error string Error message if JSON parsing fails
+--- @see https://docs.rs/grep-printer/0.1.0/grep_printer/struct.JSON.html Ripgrep JSON format docs
 local function line_to_match_entry(line)
-    --- @type vault.fetcher.ripgrep.entry
-    local entry = vim.fn.json_decode(line)
-    if not entry.type == "match" then
-        return nil
-    elseif not entry.data then
-        return nil
-    elseif not entry.data.submatches or next(entry.data.submatches) == nil then
+    -- Safely parse the JSON string
+    --- @type boolean, vault.fetcher.ripgrep.entry
+    local ok, entry = pcall(vim.fn.json_decode, line)
+    if not ok then
+        error(string.format("Failed to parse ripgrep JSON output: %s", line))
+    end
+
+    -- Validate entry structure and required fields
+    if type(entry) ~= "table"
+        or entry.type ~= "match"
+        or type(entry.data) ~= "table"
+        or type(entry.data.submatches) ~= "table"
+        or #entry.data.submatches == 0 then
         return nil
     end
+
     return entry
 end
 
+
 --- Fetches all paths from the vault with ripgrep.
 --- TODO: Add support for ignore files. that is in the config.options.ignore option.
---- @return table<vault.slug, {path: vault.path, slug: vault.slug, relpath: string, basename: string}>
+--- @return vault.EntryInfoMap
 function Fetcher.paths()
     local args = {
-        "-t" .. filetype,
+        "-t",
+        "md",
         "--files",
         config.options.root,
     }
@@ -90,7 +147,7 @@ function Fetcher.paths()
     --- @type string[]
     local paths = rg(args)
 
-    --- @type table<vault.slug, {path: vault.path, slug: vault.slug, relpath: string, basename: string}>
+    --- @type table<vault.slug, vault.EntryInfo>
     local map = {}
     for _, path in ipairs(paths) do
         local slug = utils.path_to_slug(path)
@@ -114,7 +171,7 @@ end
 --- @return vault.Notes.Data.slugs
 function Fetcher.slugs()
     local paths = Fetcher.paths()
-    --- @type vault.Notes.data.slugs
+    --- @type vault.Notes.Data.slugs
     local slugs = {}
     for slug, _ in pairs(paths) do
         slugs[slug] = true
@@ -128,24 +185,83 @@ end
 ---
 --- @return vault.Wikilinks.map
 function Fetcher.wikilinks()
-    --- https://regex101.com/r/T1me3d/2 - Wikilink regex pattern
-    local wikilink_pattern =
-    [=[^\[\[(?<link>[^\]\|]+)?(\#(?<anchor>[^\]\|]+))?(\|(?<title>[^\]\|]+))?(\|(?<tooltip>[^\]\|]+))?\]\]]=]
+    --- Comprehensive wikilink pattern for Obsidian-style syntax
+    --- Handles:
+    --- - Basic wikilinks: [[Page Name]]
+    --- - Embedded wikilinks: ![[Page Name]]
+    --- - Aliases: [[Page Name|Alias]]
+    --- - Headers: [[Page Name#Header]]
+    --- - Subheaders: [[Page Name#Header#Subheader]]
+    --- - Block references: [[Page Name^block-id]]
+    --- - Ranges: ![[Page Name#^start-id]]
+    --- - Special characters in names
+    local wikilink_pattern_parts = {
+        "(!)?",                    -- Optional ! for embeds
+        "\\[\\[",                  -- Opening [[
+        "(?!\\${[^}]+})",         -- Negative lookahead for template expressions
+        "([^\\[\\]|#^]+)",        -- Main page name (capture group 1)
+        "(?:\\|([^\\[\\]]+))?",   -- Optional alias after | (capture group 2)
+        "(?:#([^\\[\\]#^]+))?",   -- Optional header after # (capture group 3)
+        "(?:#([^\\[\\]#^]+))?",   -- Optional subheader after second # (capture group 4)
+        "(?:\\^([^\\[\\]]+))?",   -- Optional block reference after ^ (capture group 5)
+        "\\]\\]",                  -- Closing ]]
+    }
 
     local args = {
         "--json",
-        "-t" .. filetype,
+        "-t",
+        "md",
         "--no-heading",
+        "--multiline",
         "--only-matching",
         "--pcre2",
-        wikilink_pattern,
+        table.concat(wikilink_pattern_parts),
         config.options.root,
     }
     local stdout = rg(args)
 
     --- @type vault.Wikilink.constructor|vault.Wikilink
     local Wikilink = state.get_global_key("class.vault.Wikilink")
-        or require("vault.wikilinks.wikilink")
+    or require("vault.wikilinks.wikilink")
+
+    -- Function to validate the main page of a wikilink (i.e., the part before any |, #, or ^)
+    -- For Obsidian compatibility, we allow:
+    -- - Alphanumeric characters
+    -- - Spaces
+    -- - Special characters like -_.
+    -- - ISO dates (YYYYMMDDHHmmss format)
+    local validate_main_page = function(main_page)
+        -- Strip leading/trailing whitespace
+        main_page = vim.trim(main_page)
+
+        -- Remove any embed indicator (!)
+        main_page = main_page:gsub("^!", "")
+
+        -- Remove surrounding brackets
+        main_page = main_page:gsub("^%[%[", ""):gsub("%]%]$", "")
+
+        -- Get the main page part (before any |, #, or ^) o
+        local page = main_page:match("^([^|#^]+)")
+        if not page then
+            return false
+        end
+
+        -- Trim whitespace again
+        page = vim.trim(page)
+
+        -- Check if empty after trimming
+        if page == "" then
+            return false
+        end
+
+        -- Check for dots/spaces only
+        if page:match("^[%. ]+$") then
+            return false
+        end
+
+        return true
+    end
+
 
     --- @type vault.Wikilinks.map
     local wikilinks_map = {}
@@ -155,6 +271,10 @@ function Fetcher.wikilinks()
             goto continue
         end
         for _, submatch in ipairs(match.data.submatches) do
+            -- Validate the main page of the wikilink
+            if not validate_main_page(submatch.match.text) then
+                goto continue
+            end
             --- @type vault.Wikilink
             local wikilink = Wikilink(submatch.match.text)
 
@@ -242,20 +362,22 @@ end
 --- ```
 --- @return vault.Tasks.map
 function Fetcher.tasks()
-    local todo_pattern = config.options.search_pattern.task.pcre2
-    local args = {
+    local stdout = rg({
         "--json",
-        "-t" .. filetype,
+        "-t",
+        "md",
         "--no-heading",
         "--only-matching",
-        todo_pattern,
+        config.options.search_pattern.task.pcre2 or [=[\s*-\s+\[.\]\s+(.*)\s$]=],
         config.options.root,
-    }
+    })
 
-    local stdout = rg(args)
+    --- @type vault.Task.constructor|vault.Task
+    local Task = state.get_global_key("class.vault.Task") or require("vault.tasks.task")
 
     local tasks_map = {}
     for _, entry in ipairs(stdout) do
+
         local match = line_to_match_entry(entry)
         if not match then
             goto continue
@@ -263,34 +385,45 @@ function Fetcher.tasks()
 
         local line = match.data.lines.text
 
-        for _, submatch in ipairs(match.data.submatches) do
-            --- @type vault.Task
-            local task = {
-                line = line,
-                status = submatch.match.text:match("%[.%]"),
-                text = line:match("^%s*-%s+%[.%]%s+(.*)%s$"),
-                wikilinks = {},
-            }
-            for wikilink in line:gmatch("%[%[.-]]") do
-                task.wikilinks[wikilink] = true
-            end
+        --- @type vault.Task
+        local task = Task(line)
 
-            local path = match.data.path.text
-            local slug = utils.path_to_slug(path)
-            local line_number = match.data.line_number
+        local path = match.data.path.text
+        local slug = utils.path_to_slug(path)
+        local lnum = match.data.line_number
 
-            if not tasks_map[slug] then
-                tasks_map[slug] = {}
-            end
-
-            if not tasks_map[slug][line_number] then
-                tasks_map[slug][line_number] = task
-            end
+        if not tasks_map[task.data.description] then
+            tasks_map[task.data.description] = task
+        else
+            tasks_map[task.data.description].data.count = tasks_map[task.data.description].data.count + 1
         end
+
+        if not tasks_map[task.data.description].data.sources then
+            tasks_map[task.data.description].data.sources = {}
+        end
+
+        if not tasks_map[task.data.description].data.sources[slug] then
+            tasks_map[task.data.description].data.sources[slug] = {}
+        end
+
+        if not tasks_map[task.data.description].data.sources[slug][lnum] then
+            tasks_map[task.data.description].data.sources[slug][lnum] = {}
+        end
+
+        -- add the source info from the match
+        tasks_map[task.data.description].data.sources[slug][lnum] = {
+            lnum = lnum,
+            line = line,
+            end_lnum = lnum,
+            col = match.data.submatches[1].start,
+            end_col = match.data.submatches[1]["end"],
+        }
+
         ::continue::
     end
     return tasks_map
 end
+
 
 --- @class vault.Links
 --- @field map table<string, VaultMap.links.lines>
@@ -302,7 +435,8 @@ function Fetcher.links()
     local link_pattern = [[\[(.*?)\]\((.*?)\)]]
     local args = {
         "--json",
-        "-t" .. filetype,
+        "-t",
+        "md",
         "--no-heading",
         "--only-matching",
         link_pattern,
@@ -353,7 +487,8 @@ function Fetcher.fields()
 
     local args = {
         "--json",
-        "-t" .. filetype,
+        "-t",
+        "md",
         "--no-heading",
         "--only-matching",
         inline_pattern,
@@ -555,7 +690,8 @@ function Fetcher.properties()
     local frontmatter_pattern = [[(?s)^---\n(.*?)\n---]]
     local args = {
         "--json",
-        "-t" .. filetype,
+        "-t",
+        "md",
         "--no-heading",
         "--only-matching",
         "-U",
@@ -757,16 +893,21 @@ end
 --- @return vault.Tags.map
 --- @example
 function Fetcher.tags()
-    local tag_pattern = [=[(?:\s|^|[\.,; >])#([A-Za-z0-9_][A-Za-z0-9-_/]*)]=]
+    -- TODO: Testing needed
+    local tag_pattern_parts = {
+        "(?:\\s|^|[\\.,; >])", -- Match whitespace, start of line, or punctuation
+        "#",                   -- Match the tag prefix
+        "([A-Za-z0-9_][A-Za-z0-9-_/]*)", -- Match the tag name
+    }
     local args = {
         "--json",
-        "-t" .. filetype,
+        "-t",
+        "md",
         "--no-heading",
         "--only-matching",
         -- TODO: Add support for ignore files. that is in the config.options.ignore option.
         -- "--ignore-file",
-
-        tag_pattern,
+        table.concat(tag_pattern_parts),
         config.options.root,
     }
 
@@ -815,7 +956,7 @@ function Fetcher.tags()
         local slug = utils.path_to_slug(path)
 
         for _, submatch in ipairs(match.data.submatches) do
-            --- @type vault.Tag.data.name
+            --- @type vault.Tag.Data.name
             -- Remove the # from the beginning
             local tag_name = submatch.match.text:match("#(%S+)%s*$")
 
@@ -823,7 +964,7 @@ function Fetcher.tags()
                 matches_map[tag_name] = {}
             end
 
-            --- @type vault.Tag.data
+            --- @type vault.Tag.Data
             local tag_data = matches_map[tag_name]
             tag_data.name = tag_name
 
