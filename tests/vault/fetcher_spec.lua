@@ -10,7 +10,7 @@ local config = require("vault.config")
 local demo_vault = vim.fn.getcwd() .. "/tests/fixtures/demo-vault"
 local temp_file_path = demo_vault .. "/test_note.md"
 
-describe("Vaultrequire('vault.fetcher')", function()
+describe("Vaultrequire('vault.scanner')", function()
     before_each(function()
         -- Set up vault config for testing first
         config.setup({
@@ -63,7 +63,7 @@ describe("Vaultrequire('vault.fetcher')", function()
     describe("paths()", function()
         it("should return map of paths with correct structure", function()
             --- @type vault.EntryInfoMap
-            local paths = require("vault.fetcher").paths()
+            local paths = require("vault.scanner").paths()
             assert.is_table(paths)
 
             -- Test first path entry
@@ -80,7 +80,7 @@ describe("Vaultrequire('vault.fetcher')", function()
 
     describe("wikilinks()", function()
         -- it("should return map of wikilinks", function()
-        --     local wikilinks = require("vault.fetcher").wikilinks()
+        --     local wikilinks = require("vault.scanner").wikilinks()
         --     assert.is_table(wikilinks)
         --
         --     -- Should find our test wikilinks
@@ -95,14 +95,14 @@ describe("Vaultrequire('vault.fetcher')", function()
         -- end)
 
         it("should return first wikilink", function()
-            local wikilinks = require("vault.fetcher").wikilinks()
+            local wikilinks = require("vault.scanner").wikilinks()
             print(vim.inspect(wikilinks))
         end)
     end)
     --
     -- describe("tags()", function()
     --     it("should return map of tags", function()
-    --         local tags = require("vault.fetcher").tags()
+    --         local tags = require("vault.scanner").tags()
     --         assert.is_table(tags)
     --
     --         -- Should find both frontmatter and inline tags
@@ -121,7 +121,7 @@ describe("Vaultrequire('vault.fetcher')", function()
     --
     -- describe("tasks()", function()
     --     it("should return map of tasks", function()
-    --         local tasks = require("vault.fetcher").tasks()
+    --         local tasks = require("vault.scanner").tasks()
     --         assert.is_table(tasks)
     --
     --         -- Should find all todo items
@@ -139,7 +139,7 @@ describe("Vaultrequire('vault.fetcher')", function()
     --
     -- describe("links()", function()
     --     it("should return map of external links", function()
-    --         local links = require("vault.fetcher").links()
+    --         local links = require("vault.scanner").links()
     --         assert.is_table(links)
     --
     --         -- Should find our test external link
@@ -155,7 +155,7 @@ describe("Vaultrequire('vault.fetcher')", function()
     --
     -- describe("fields()", function()
     --     it("should return map of fields", function()
-    --         local fields = require("vault.fetcher").fields()
+    --         local fields = require("vault.scanner").fields()
     --         assert.is_table(fields)
     --
     --         -- Should find inline fields
@@ -170,7 +170,7 @@ describe("Vaultrequire('vault.fetcher')", function()
     --
     -- describe("properties()", function()
     --     it("should return map of frontmatter properties", function()
-    --         local properties = require("vault.fetcher").properties()
+    --         local properties = require("vault.scanner").properties()
     --         assert.is_table(properties)
     --
     --         -- Should find frontmatter properties

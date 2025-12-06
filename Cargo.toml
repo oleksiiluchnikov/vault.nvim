@@ -1,0 +1,16 @@
+[package]
+name = "vault_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"] # Critical: Compiles to .so/.dylib for Lua
+
+[dependencies]
+mlua = { version = "0.9", features = ["lua51", "module"] } # lua51 targets LuaJIT (Neovim)
+walkdir = "2"
+regex = "1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+gray_matter = "0.2" # Blazingly fast Frontmatter parser
+rayon = "1.7" # Parallel iterator for multicore scanning

@@ -31,7 +31,7 @@ function TagChild:init(parent, name)
     })
 end
 
---- Fetch the data if it is not already cached.
+--- Scann the data if it is not already cached.
 ---
 --- @param key string -- |vault.Tag.Data| key
 --- @return any

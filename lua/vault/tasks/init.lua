@@ -1,5 +1,5 @@
 local state = require("vault.core.state")
-local fetcher = require("vault.fetcher")
+local scanner = require("vault.scanner")
 local Collection = require("vault.core.collection")
 
 -- Aliases
@@ -18,11 +18,11 @@ local Collection = require("vault.core.collection")
 --- @field list fun(self: vault.Tasks): vault.Tasks.list - Return `VaultTasks` as a `VaultArray`.
 local Tasks = Collection:extend("VaultTasks")
 
---- Initializes the VaultTasks object by fetching all tasks from the vault.
+--- Initializes the VaultTasks object by scanning all tasks from the vault.
 --- Sets the tasks map and registers the tasks globally.
 --- @return nil
 function Tasks:init()
-    self.map = fetcher.tasks()
+    self.map = scanner.tasks()
     state.set_global_key("tasks", self)
 end
 

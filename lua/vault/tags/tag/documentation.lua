@@ -63,7 +63,7 @@ function TagDocumentation:write(path)
     vim.cmd("normal! Go")
 end
 
---- Fetch content of tag documentation.
+--- Scann content of tag documentation.
 --- @return string
 function TagDocumentation:content()
     local docs_dir = config.options.dirs.docs

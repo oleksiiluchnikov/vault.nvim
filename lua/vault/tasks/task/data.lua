@@ -32,13 +32,13 @@ local data = {}
 --     return task_data.sources
 -- end
 --
--- --- Fetch the children of a task.
+-- --- Scann the children of a task.
 -- --- @param task_Data vault.Task.Data
 -- --- @return vault.Task.children
 -- data.children = function(task_data)
 --     local task_name = task_data.name
 --     if not task_name then
---         error("fetch_children(task_name) - task_name is nil", 2)
+--         error("scann_children(task_name) - task_name is nil", 2)
 --     end
 --
 --     if task_name:find("/") == nil then

@@ -4,53 +4,49 @@
 --- @field slug vault.slug The unique identifier for the entry
 --- @field relpath vault.relpath The relative path from the vault root
 --- @field basename string The filename without path
+--- @see vault.path
+--- @see vault.slug
+--- @see vault.relpath
 
+--- Mapping of slugs to entry information
 --- @alias vault.EntryInfoMap table<vault.slug, vault.EntryInfo>
+--- @see vault.EntryInfo
+--- @see vault.slug
 
 --- Represents a path relative to the vault root directory
 --- The relative path to the `VaultPathRoot`
 --- @alias vault.relpath string
+--- @usage local relpath = "notes/example.md"
 
 --- Configuration option specifying the root directory of the vault
 --- The path to the root of the vault.
 --- @alias vault.Config.options.root vault.path
+--- @usage local root = "~/vaults/knowledge"
 
 --- Generic key-value mapping structure
 --- @alias vault.map table<string, any>
+--- @see table
 
 --- Mapping of note slugs to their existence state
 --- @alias vault.Notes.Data.slugs table<vault.slug, boolean>
+--- @see vault.slug
 
 --- Mapping of absolute paths to their existence state
 --- @alias vault.map.paths table<vault.path, boolean>
+--- @see vault.path
 
 --- Mapping of relative paths to their existence state
 --- @alias vault.map.relpaths table<vault.relpath, boolean>
+--- @see vault.relpath
 
 --- Generic indexed list structure
 --- @alias vault.List table<integer, any>
+--- @see table
 
 --- Indexed list of absolute paths
 --- @alias vault.list.paths table<integer, vault.path>
+--- @see vault.path
 
 --- Indexed list of relative paths
 --- @alias vault.list.relpaths table<integer, vault.relpath>
-
---- Mapping of line numbers to source occurrences
---- @alias vault.source.lnums table<integer, vault.source.occurence>
-
---- Represents a matched line in source code
---- @class vault.source.match {line: string, lnum_start: integer, ["end"]: number}
---- @field line string The content of the matched line
---- @field lnum_start integer The starting line number
---- @field ["end"] number The ending position
-
---- Mapping of slugs to their corresponding line number occurrences
---- @alias vault.Sources.map table<vault.slug, vault.source.lnums>
-
---- Represents the position of a source code occurrence
---- @class vault.source.occurence
---- @field lnum integer The starting line number
---- @field end_lnum? integer Optional ending line number
---- @field col integer The starting column number
---- @field end_col? integer Optional ending column number
+--- @see vault.relpath

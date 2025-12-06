@@ -82,7 +82,7 @@ end)
 describe("VaultTags:get_random_tag()", function()
     local tags = VaultTags()
 
-    -- Test fetching a random tag
+    -- Test scanning a random tag
     it("should return a random tag", function()
         local random_tag = tags:get_random()
         assert.is_true(random_tag.class.name == "VaultTag")

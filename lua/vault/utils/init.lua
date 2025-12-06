@@ -48,6 +48,9 @@ function utils.path_to_slug(path)
         error("path must be a string, got " .. type(path))
     end
     local relpath = utils.path_to_relpath(path)
+    if not utils.match(relpath, config.options.ext, "endswith") then
+        error("path must end with " .. config.options.ext)
+    end
     local slug = relpath:sub(1, #relpath - #config.options.ext)
     return slug
 end

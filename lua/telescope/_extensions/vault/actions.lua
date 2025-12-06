@@ -2,58 +2,45 @@ local actions_state = require("telescope.actions.state")
 local actions = require("telescope.actions")
 local vault_state = require("vault.core.state")
 local highlights = require("vault.highlights")
+local utils = require("telescope._extensions.vault.utils")
 
 local Popup = require("nui.popup")
 local event = require("nui.utils.autocmd").event
 
 --- @class vault.Picker.actions.note
 
---- @class vault.Picker.actions
---- @field get_picker_selection fun(prompt_bufnr: integer): Picker, vault.TelescopeEntry, vault.TelescopeEntry[]
+--- @alias vault.Picker.action fun(bufnr?: number, selections?: table<vault.TelescopeEntry>): nil
+
+--- @alias vault.Picker.actions vault.Picker.action|table<string, vault.Picker.action>
+
+--- @type table<string, vault.Picker.actions>
 local vault_actions = {}
 
---- @param prompt_bufnr integer
---- @return Picker
---- @return vault.TelescopeEntry
---- @return vault.TelescopeEntry[]
-local function get_picker_selection(prompt_bufnr)
-    --- @type Picker
-    local current_picker = vault_state.get_global_key("picker")
-        or actions_state.get_current_picker(prompt_bufnr)
-    --- @type vault.TelescopeEntry
-    local selection = actions_state.get_selected_entry()
-    --- @type vault.TelescopeEntry[]
-    local selections = current_picker:get_multi_selection()
-    if next(selections) == nil then
-        selections = { selection }
-    end
-    return current_picker, selection, selections
-end
-
+--- Refresh the picker
 function vault_actions.refresh()
     local current_picker = vault_state.get_global_key("picker")
     current_picker:refresh()
 end
 
+--- Resort the picker
 function vault_actions.resort()
     local current_picker = vault_state.get_global_key("picker")
     current_picker:resort()
 end
 
 --- Close the picker
---- @param bufnr integer
 function vault_actions.close(bufnr)
     actions.close(bufnr)
     highlights.detach()
     vault_actions.refresh(bufnr)
 end
 
+--- @type table<string, fun(bufnr?: number, selections?: table<vault.TelescopeEntry>): nil>
 vault_actions.note = {}
 
 --- Edit the selected note
---- @param bufnr integer
 function vault_actions.note.edit(bufnr)
-    local _, selection, _ = get_picker_selection(bufnr)
+    local _, selection, _ = utils.get_picker_selection(bufnr)
     --- @type vault.Note
     local note = selection.value
     vault_actions.close(bufnr)
@@ -61,9 +48,8 @@ function vault_actions.note.edit(bufnr)
 end
 
 --- Preview note with config.options.popups.preview
---- @param bufnr integer
 function vault_actions.note.preview(bufnr)
-    local _, selection, _ = get_picker_selection(bufnr)
+    local _, selection, _ = utils.get_picker_selection(bufnr)
     local note = selection.value
     vault_actions.close(bufnr)
     note:preview()
@@ -201,15 +187,13 @@ local batch_rename = function(_, selections)
 end
 
 --- Rename notes
---- @param bufnr integer
 function vault_actions.note.rename(bufnr)
-    local picker, _, selections = get_picker_selection(bufnr)
+    local _, _, selections = utils.get_picker_selection(bufnr)
     batch_rename(bufnr, selections)
 end
 
 --[[ --- Delete notes
 --- TODO: Implement this
---- @param bufnr integer
 function vault_actions.note.delete(bufnr)
     local _, _, selections = get_picker_selection(bufnr)
     --- @type vault.Note
@@ -219,6 +203,7 @@ function vault_actions.note.delete(bufnr)
     -- note:delete()
 end ]]
 
+--- @type table<string, fun(bufnr?: number, selections?: table<vault.TelescopeEntry>): nil>
 vault_actions.tag = {}
 
 -- --- @param vault.FilterOpts
@@ -227,7 +212,7 @@ vault_actions.tag = {}
 --     --- @type vault.Tag
 --     local tag = selection.value
 --     vault_actions.close(bufnr)
---     vault_pickers.notes(
+--     telescope._extensions.vault.pickers.notes(
 --         nil,
 --         require("vault.notes")():filter({
 --             search_term = "tags",
@@ -258,39 +243,35 @@ local function merge(_, selections, new_name)
 end
 
 --- Merge selected tags in to one tag
---- @param bufnr integer
 function vault_actions.tag.merge(bufnr)
-    local _, _, selections = get_picker_selection(bufnr)
+    local _, _, selections = utils.get_picker_selection(bufnr)
     if next(selections) == nil then
         return
     end
     --- @type vault.Tag
     local tag = selections[1].value
-    --- @type vault.Tag.data.name
+    --- @type vault.Tag.Data.name
     local new_tag_name = vim.fn.input("Merge to: ", tag.data.name)
     merge(bufnr, selections, new_tag_name)
 end
 
 --- Rename tags
---- @param bufnr integer
 function vault_actions.tag.rename(bufnr)
-    local _, _, selections = get_picker_selection(bufnr)
+    local _, _, selections = utils.get_picker_selection(bufnr)
     batch_rename(bufnr, selections)
 end
 
 --- Edit tag documentation
---- @param bufnr integer
 function vault_actions.tag.edit_documentation(bufnr)
-    local _, selection, _ = get_picker_selection(bufnr)
+    local _, selection, _ = utils.get_picker_selection(bufnr)
     vault_actions.close(bufnr)
     local tag = selection.value
     require("vault.api").edit_tag_documentation(tag.data.name)
 end
 
 --- Open Telescope picker for notes with a specific tag
---- @param bufnr integer
 function vault_actions.tag.enter(bufnr)
-    local _, selection, _ = get_picker_selection(bufnr)
+    local _, selection, _ = utils.get_picker_selection(bufnr)
     vault_actions.close(bufnr)
     --- @type vault.Tag
     local tag = selection.value
@@ -299,23 +280,26 @@ end
 
 vault_actions.property = {}
 
+--- Open Telescope picker for notes with a specific property
 function vault_actions.property.enter(bufnr)
-    local _, selection, _ = get_picker_selection(bufnr)
+    local _, selection, _ = utils.get_picker_selection(bufnr)
     vault_actions.close(bufnr)
     --- @type vault.Property
     local property = selection.value
     require("vault.api").open_picker_property_values(property.data.name)
 end
 
+--- Rename properties
 function vault_actions.property.rename(bufnr)
-    local _, _, selections = get_picker_selection(bufnr)
+    local _, _, selections = utils.get_picker_selection(bufnr)
     batch_rename(bufnr, selections)
 end
 
 vault_actions.property_value = {}
 
 function vault_actions.property_value.enter(bufnr)
-    local picker, selection, _ = get_picker_selection(bufnr)
+    ---@type Picker
+    local picker, selection, _ = utils.get_picker_selection(bufnr)
     vault_actions.close(bufnr)
     --- @type vault.Property.Value
     local value = selection.value
@@ -326,15 +310,15 @@ end
 vault_actions.directory = {}
 
 function vault_actions.directory.enter(bufnr)
-    local _, selection, _ = get_picker_selection(bufnr)
+    local _, selection, _ = utils.get_picker_selection(bufnr)
     vault_actions.close(bufnr)
-    --- @type vault.Directory
-    local directory = selection.value
-    require("vault.api").open_picker_notes_in_directory(directory)
+    --- @type vault.Dir
+    local dir = selection.value
+    require("vault.api").open_picker_notes_in_directory(dir)
 end
 
 vault_actions.directory.rename = function(bufnr)
-    local _, _, selections = get_picker_selection(bufnr)
+    local _, _, selections = utils.get_picker_selection(bufnr)
     -- batch_rename(bufnr, selections)
     vim.notify("vault_actions.directory.rename is not implemented yet")
 end
@@ -354,7 +338,7 @@ vault_actions.invert = function()
         return
     end
     local notes = require("vault.notes")():filter(filter:invert())
-    require("vault.pickers").notes({ notes = notes }):find()
+    require("telescope._extensions.vault.pickers").notes({ notes = notes }):find()
 end ]]
 
 return vault_actions

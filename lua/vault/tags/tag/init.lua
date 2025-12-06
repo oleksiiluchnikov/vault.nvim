@@ -48,12 +48,12 @@ function TagData:init(this)
     -- self.count = this.count or #self.sources
 end
 
---- Fetch the data if it is not already cached.
+--- Scann the data if it is not already cached.
 ---
 --- @param key string -- `VaultTag.Data` key
 --- @return any
 function TagData:__index(key)
-    --- @type fun(self: vault.Tag.data): any -- A function that fetches the data for the given key.
+    --- @type fun(self: vault.Tag.data): any -- A function that scannes the data for the given key.
     local func = data[key]
     if func then
         local value = func(self)

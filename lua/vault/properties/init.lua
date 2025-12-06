@@ -1,7 +1,7 @@
 local state = require("vault.core.state")
 local utils = require("vault.utils")
 local Filter = require("vault.filter")
-local fetcher = require("vault.fetcher")
+local scanner = require("vault.scanner")
 local Collection = require("vault.core.collection")
 
 --- @alias vault.Properties.map table<string, vault.Property>
@@ -15,10 +15,10 @@ local Collection = require("vault.core.collection")
 --- @field list fun(self: vault.Properties): vault.Properties.list
 local Properties = Collection:extend("VaultProperties")
 
---- Initializes the vault.Properties object by fetching all properties from the vault.
+--- Initializes the vault.Properties object by scanning all properties from the vault.
 --- Sets the properties map and registers the properties globally.
 function Properties:init()
-    self.map = fetcher.properties()
+    self.map = scanner.properties()
     state.set_global_key("properties", self)
 end
 

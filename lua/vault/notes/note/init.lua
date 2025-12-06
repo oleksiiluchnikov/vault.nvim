@@ -1,5 +1,5 @@
 local Object = require("vault.core.object")
-local fetcher = require("vault.fetcher")
+local scanner = require("vault.scanner")
 
 local utils = require("vault.utils")
 --- @type vault.Config|vault.Config.options
@@ -15,14 +15,12 @@ local NoteData = Object("VaultNoteData")
 --- @param this vault.Note.Data
 function NoteData:init(this)
     this = this or {}
-    for k, _ in pairs(this) do
+    for k, v in pairs(this) do
         if not data[k] then
             error(
                 "Invalid key: " .. vim.inspect(k) .. ". Valid keys: " .. vim.inspect(metadata.keys)
             )
         end
-    end
-    for k, v in pairs(this) do
         self[k] = v
     end
     self.slug = this.slug or utils.path_to_slug(this.path)
@@ -47,8 +45,125 @@ function NoteData:__index(key)
     return self[key]
 end
 
---- Create a new note if it does not exist.
----
+--[[
+================================================================================
+VaultNote                                                              *vault.Note*
+================================================================================
+
+A powerful abstraction for working with markdown notes in your vault.
+
+DESCRIPTION                                                   *vault.Note-description*
+
+VaultNote provides a comprehensive API for managing markdown notes, including
+metadata handling, file operations, content manipulation, and preview capabilities.
+
+FEATURES                                                       *vault.Note-features*
+
+  • Full metadata management (frontmatter)
+  • File operations (create, move, rename, delete)
+  • Content manipulation (search, replace, update)
+  • Bidirectional link management
+  • Note preview integration
+  • Obsidian compatibility
+
+USAGE                                                           *vault.Note-usage*
+
+Basic initialization: >lua
+    -- Create from path
+    local note = require("vault.notes.note")("/path/to/note.md")
+
+    -- Create from data table
+    local note = require("vault.notes.note")({
+      path = "/path/to/note.md",
+      title = "My Note"
+    })
+<
+
+Common operations: >lua
+    -- Read note content
+    print(note.data.content)
+
+    -- Update content
+    note:update_content("old text", "new text")
+
+    -- Move/rename note
+    note:move("new/path/note.md")
+
+    -- Open in editor
+    note:edit()
+
+    -- Preview with Glow
+    note:preview()
+<
+
+METHODS                                                       *vault.Note-methods*
+
+                                                              *vault.Note.init()*
+init({path})
+    Initialize a new note from path or data table.
+    Parameters: ~
+        {path}  string|table Path to note or data table
+
+                                                              *vault.Note.write()*
+write({path}, {force})
+    Write note content to disk.
+    Parameters: ~
+        {path}   string  Optional path to write to
+        {force}  boolean Force write if file exists
+
+                                                               *vault.Note.edit()*
+edit({path})
+    Open note in Neovim buffer.
+    Parameters: ~
+        {path}  string Optional path to edit
+
+                                                            *vault.Note.preview()*
+preview()
+    Preview note using configured previewer (default: Glow)
+
+                                                               *vault.Note.move()*
+move({new_path}, {force}, {verbose})
+    Move/rename note and update all references.
+    Parameters: ~
+        {new_path}  string  New path for the note
+        {force}     boolean Force move if target exists
+        {verbose}   boolean Show detailed notifications
+
+See also:
+    |vault.Filter|       Note filtering and queries
+    |vault.Tags|         Tag management
+    |vault.metadata|     Note metadata handling
+
+EXAMPLES                                                     *vault.Note-examples*
+
+Create and write a new note: >lua
+    local note = require("vault.notes.note")({
+      path = "journal/2024-02-12.md",
+      title = "Daily Note",
+      tags = {"journal", "daily"}
+    })
+    note:write()
+<
+
+Update note content and links: >lua
+    -- Replace text
+    note:update_content("old link", "new link")
+
+    -- Move note to new location
+    note:move("archive/old-note.md")
+<
+
+Working with metadata: >lua
+    -- Check if note has specific tags
+    if note:has("tags", {"important", "todo"}) then
+      -- Do something
+    end
+
+    -- Access metadata
+    print(note.data.title)
+    print(note.data.created)
+<
+]]
 --- @class vault.Note: vault.Object
 --- @field data vault.Note.Data - The Data of the note.Data.
 local Note = Object("VaultNote")
@@ -136,7 +251,7 @@ function Note:write(path, force)
     if config.options.check_duplicate_basename == true or force == false then
         local new_stem = vim.fn.fnamemodify(path, ":t:r")
         --- @type table<string, table<string, string>>
-        local paths = fetcher.paths()
+        local paths = scanner.paths()
         for _, t in pairs(paths) do
             local stem = vim.fn.fnamemodify(t.path, ":t:r")
             if utils.match(stem, new_stem, "exact", false) == true then
@@ -460,8 +575,26 @@ function Note:move(new_path, force, verbose)
     refresh_buffers(paths_to_refresh)
 end
 
---- This will rename the note file and update the note data, and connected notes.
---- @param slug vault.slug
+--- Rename note using a new slug.
+---
+--- Renames the note file using a new slug while maintaining
+--- all references and updating connected notes.
+---
+--- Parameters: ~
+---   • {slug} New slug for the note
+---
+--- Examples: >lua
+---   -- Rename using slug
+---   note:rename("new-note-name")
+---
+---   -- Rename with path components
+---   note:rename("folder/new-note")
+--- <
+---
+--- See also:
+---   • |vault.Note.move()|   More flexible move/rename
+---
+--- @param slug vault.slug New note slug
 function Note:rename(slug)
     if type(slug) ~= "string" then
         error("Invalid new name: " .. vim.inspect(slug))
@@ -472,10 +605,30 @@ function Note:rename(slug)
     self:move(new_path)
 end
 
---- Update content of the note
---- @param search_string string
---- @param replace_string string
---- @param lnums? vault.source.lnums
+--- Update note content by replacing text.
+---
+--- Performs search and replace operations on note content.
+--- Can target specific line numbers or update all occurrences.
+---
+--- Parameters: ~
+---   • {search_string} Text to find
+---   • {replace_string} Replacement text
+---   • {lnums} (optional) Specific line numbers to update
+---
+--- Examples: >lua
+---   -- Replace all occurrences
+---   note:update_content("old text", "new text")
+---
+---   -- Replace at specific lines
+---   note:update_content("old", "new", {
+---     { lnum = 1, col = 1, end_col = 4 },
+---     { lnum = 5, col = 2, end_col = 5 }
+---   })
+--- <
+---
+--- @param search_string string Text to find
+--- @param replace_string string Replacement text
+--- @param lnums? vault.source.lnums Line numbers to update
 function Note:update_content(search_string, replace_string, lnums)
     if type(search_string) ~= "string" then
         return
@@ -519,8 +672,25 @@ function Note:update_content(search_string, replace_string, lnums)
     return self
 end
 
---- Overwrite note content
---- @param content string
+--- Overwrite entire note content.
+---
+--- Replaces the entire content of the note with new text.
+--- Handles file operations safely using libuv.
+---
+--- Parameters: ~
+---   • {content} New content for the note
+---
+--- Examples: >lua
+---   -- Replace note content
+---   note:overwrite("# New Title\n\nNew content here")
+---
+---   -- Clear note content
+---   note:overwrite("")
+--- <
+---
+--- Note: This operation cannot be undone!
+---
+--- @param content string New note content
 function Note:overwrite(content)
     ---@diagnostic disable-next-line: undefined-field
     local fd = vim.uv.fs_open(self.data.path, "w", 438)
@@ -533,9 +703,24 @@ function Note:overwrite(content)
     vim.uv.fs_close(fd)
 end
 
---- Get list of available metohods
---- @return string[]
-function Note:methods()
+--- Get list of available note methods.
+---
+--- Returns a list of all available methods on the Note class.
+--- Useful for introspection and debugging.
+---
+--- Returns: ~
+---   • Array of method names
+---
+--- Examples: >lua
+---   -- Get all methods
+---   local methods = note:_methods()
+---
+---   -- Print available methods
+---   vim.print(note:_methods())
+--- <
+---
+--- @return string[] Method names
+function Note:_methods()
     local methods = {}
     for k, _ in pairs(self.__meta) do
         table.insert(methods, k)

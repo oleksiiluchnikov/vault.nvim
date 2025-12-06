@@ -137,7 +137,7 @@ describe("VaultNotes", function()
     --     end)
     -- end)
 
-    describe("VaultNotes:fetch_note_by()", function()
+    describe("VaultNotes:scann_note_by()", function()
         it("should return a `VaultNote` with `exact` `VaultNote.data.stem`", function()
             local notes = Notes()
             local random_note = notes:get_random()
@@ -145,7 +145,7 @@ describe("VaultNotes", function()
             local query = random_note.data.stem
             local match_opt = "exact"
             local case_sensitive = false
-            local note = notes:fetch_note_by(key, query, match_opt, case_sensitive)
+            local note = notes:scann_note_by(key, query, match_opt, case_sensitive)
             if note == nil then
                 error("note is nil")
             end
@@ -153,14 +153,14 @@ describe("VaultNotes", function()
         end)
     end)
 
-    describe("VaultNotes:fetch_note_by_slug()", function()
+    describe("VaultNotes:scann_note_by_slug()", function()
         it("should return a `VaultNote` with `exact` `VaultNote.data.slug`", function()
             local notes = Notes()
             local random_note = notes:get_random()
             local query = random_note.data.slug
             local match_opt = "exact"
             local case_sensitive = false
-            local note = notes:fetch_note_by_slug(query, match_opt, case_sensitive)
+            local note = notes:scann_note_by_slug(query, match_opt, case_sensitive)
             if note == nil then
                 error("note is nil")
             end
@@ -169,14 +169,14 @@ describe("VaultNotes", function()
         end)
     end)
 
-    describe("VaultNotes:fetch_note_by_path()", function()
+    describe("VaultNotes:scann_note_by_path()", function()
         it("should return a `VaultNote` with `exact` `VaultNote.data.path`", function()
             local notes = Notes()
             local random_note = notes:get_random()
             local query = random_note.data.path
             local match_opt = "exact"
             local case_sensitive = false
-            local note = notes:fetch_note_by_path(query, match_opt, case_sensitive)
+            local note = notes:scann_note_by_path(query, match_opt, case_sensitive)
             if note == nil then
                 error("note is nil")
             end
@@ -184,14 +184,14 @@ describe("VaultNotes", function()
         end)
     end)
 
-    describe("VaultNotes:fetch_note_by_relpath()", function()
+    describe("VaultNotes:scann_note_by_relpath()", function()
         it("should return a `VaultNote` with `exact` `string`", function()
             local notes = Notes()
             local random_note = notes:get_random()
             local query = random_note.data.relpath
             local match_opt = "exact"
             local case_sensitive = false
-            local note = notes:fetch_note_by_relpath(query, match_opt, case_sensitive)
+            local note = notes:scann_note_by_relpath(query, match_opt, case_sensitive)
             if note == nil then
                 error("note is nil")
             end

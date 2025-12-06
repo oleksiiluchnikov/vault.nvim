@@ -45,7 +45,7 @@ function PropertyValueData:init(this)
     self.count = this.count or 1
 end
 
---- Fetch the data if it is not already cached.
+--- Scann the data if it is not already cached.
 ---
 --- @param key string -- `VaultPropertyValue.Data` key
 --- @return any

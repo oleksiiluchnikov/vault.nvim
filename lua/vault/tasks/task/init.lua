@@ -13,20 +13,26 @@ local TaskData = Object("VaultTaskData")
 
 --- @param this vault.Task.Data.partial
 function TaskData:init(this)
-    self.line = this.line
-    self.tags = this.tags or this.line:gmatch("%s*#(.-)%s*") or {}
+    if not this then
+        error(error_formatter.MISSING_PARAMETER("this"), 2)
+    end
+
+    self.line = this.line or ""
+    self.tags = this.tags or (self.line ~= "" and self.line:gmatch("%s*#(.-)%s*")) or {}
     self.sources = this.sources or {}
     self.is_nested = this.is_nested or false
     self.wikilinks = this.wikilinks or {}
     --- TODO: Implement subtasks
 
     -- Extract status and description
-    self.status = this.line:match("- %[(.)%]") or " "
+    self.status = (self.line ~= "" and self.line:match("- %[(.)%]")) or " "
 
     -- Parse wikilinks
-    for wikilink in this.line:gmatch("%[%[(.-)%]%]") do
-        -- table.insert(self.wikilinks, wikilink)
-        vim.tbl_deep_extend("force", self.wikilinks, { wikilink })
+    if self.line ~= "" then
+        for wikilink in self.line:gmatch("%[%[(.-)%]%]") do
+            -- table.insert(self.wikilinks, wikilink)
+            vim.tbl_deep_extend("force", self.wikilinks, { wikilink })
+        end
     end
 
     -- Parse metadata fields
@@ -42,14 +48,17 @@ function TaskData:init(this)
     }
 
     for _, field in ipairs(metadata_fields) do
-        self[field] = this[field] or this.line:match("%[" .. field .. "::%s*(.-)%s*%]") or ""
+        self[field] = this[field]
+            or (self.line ~= "" and self.line:match("%[" .. field .. "::%s*(.-)%s*%]"))
+            or ""
     end
 
     -- self.description = this.line:gsub("^%s*-%s*%[.%]%s*", ""):match("^(.-)%s*%[%a+::") or this.line
     -- description is the line without the status, tags, and metadata
     -- self.description = this.line:gsub("^%s*-%s*%[.%]%s*", ""):match("^(.-)%s*%[%a+::") or this.line
-    self.description = this.line:gsub("- %[.-%]", ""):match("^(.-)%[%a+::"):gsub("\n", "")
+    self.content = this.line:gsub("- %[.-%]", ""):match("^(.-)%[%a+::"):gsub("\n", "")
         or this.line
+        or ""
 
     -- Calculate source statistics
     self.count = 0

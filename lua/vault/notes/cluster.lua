@@ -14,7 +14,7 @@ local Notes = require("vault.notes")
 --- On :reset_depth() it will reset the cluster to the initial state.
 --- @field notes vault.Notes|vault.Notes.Group -- The notes object which is the source of the cluster.
 --- @field note vault.Note -- The note which is the center of the cluster.
---- @field depth number -- How deep we should go to fetch the cluster.
+--- @field depth number -- How deep we should go to scann the cluster.
 --- @field map vault.Notes.map
 --- @diagnostic disable-next-line: undefined-field
 local NotesCluster = Notes:extend("VaultNotesCluster")
@@ -39,7 +39,7 @@ function NotesCluster:init(notes, note, depth)
     self._map = {}
 
     -- self:increase_depth()
-    self:fetch_cluster()
+    self:scann_cluster()
 end
 
 --- Increase the depth of the cluster.
@@ -48,7 +48,7 @@ end
 function NotesCluster:increase_depth()
     self.depth = self.depth + 1
     -- self:reset()
-    self:fetch_cluster()
+    self:scann_cluster()
     return self
 end
 
@@ -58,7 +58,7 @@ end
 function NotesCluster:decrease_depth()
     self.depth = self.depth - 1
     -- self:reset()
-    self:fetch_cluster()
+    self:scann_cluster()
     return self
 end
 
@@ -68,21 +68,21 @@ end
 function NotesCluster:reset_depth()
     self.depth = 0
     -- self:reset()
-    self:fetch_cluster()
+    self:scann_cluster()
     return self
 end
 
---- Fetch cluster of notes.
+--- Scann cluster of notes.
 ---
 --- @return vault.Notes.Cluster
-function NotesCluster:fetch_cluster()
+function NotesCluster:scann_cluster()
     local notes = self.notes
-    --- Fetch cluster recursively.
+    --- Scann cluster recursively.
     ---
     --- @param note vault.Note
     --- @param depth number
     --- @return nil
-    local function fetch_cluster_recursively(note, depth)
+    local function scann_cluster_recursively(note, depth)
         -- depth = depth - 1
         if not note or not depth then
             -- error(error_formatter.missing_parameter("note or depth"))
@@ -102,7 +102,7 @@ function NotesCluster:fetch_cluster()
 
             self.map[target_note.data.slug] = target_note
             if depth > 0 then
-                fetch_cluster_recursively(target_note, depth - 1)
+                scann_cluster_recursively(target_note, depth - 1)
             end
         end
 
@@ -136,7 +136,7 @@ function NotesCluster:fetch_cluster()
         end
     end
 
-    fetch_cluster_recursively(self.note, self.depth)
+    scann_cluster_recursively(self.note, self.depth)
 
     state.set_global_key("notes.cluster", self)
     return self

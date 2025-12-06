@@ -4,7 +4,7 @@ function Layouts.mini()
     return {
         layout_strategy = "vertical",
         layout_config = {
-            height = 0.9,
+            height = 0.3,
             width = 0.3,
             prompt_position = "top",
         },

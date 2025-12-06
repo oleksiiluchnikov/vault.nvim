@@ -150,12 +150,12 @@ function Filter:init(opts, search_term)
         end
         self.opts[k].exclude = opt.exclude or {}
 
-        -- Verify that `include` and `exclude` both have at least one value
-        if next(self.opts[k].include) == nil and next(self.opts[k].exclude) == nil then
-            error(
-                "invalid argument: must have at least one include or exclude: " .. vim.inspect(opt)
-            )
-        end
+        -- -- Verify that `include` and `exclude` both have at least one value
+        -- if next(self.opts[k].include) == nil and next(self.opts[k].exclude) == nil then
+        --     error(
+        --         "invalid argument: must have at least one include or exclude: " .. vim.inspect(opt)
+        --     )
+        -- end
 
         -- Validate `match_opt`
         if opt.match_opt and type(opt.match_opt) ~= "string" then
