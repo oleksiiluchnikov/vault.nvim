@@ -1,68 +1,118 @@
 local utils = require("vault.utils")
 local Error = require("vault.utils.error")
 local state = require("vault.core.state")
-local fetcher = require("vault.fetcher")
+local scanner = require("vault.scanner")
 local Collection = require("vault.core.collection")
 local Filter = require("vault.filter")
 local Tags = require("vault.tags")
 local Note = require("vault.notes.note")
 local VaultNotesStats = require("vault.notes.stats")
 
---- @alias vault.Notes.map table<vault.slug, vault.Note> # Map of unique note identifiers to Note objects
---- @alias VaultNotes.groups.map table<vault.slug, vault.Notes.Group> # Map of filtered note groups
---- @alias VaultNotes.Data.slugs.list vault.slug[] # List of note identifiers
-
 --[[
 ================================================================================
-🗒️ VaultNotes - Your Note Hub
+VaultNotes
 ================================================================================
 
-The mystical container of all your markdown notes! This powerful object is your
-gateway to organizing, filtering, and discovering connections in your vault.
+A powerful abstraction for managing and organizing vault notes.
 
-Features:
-  * 📚 Stores all notes and their metadata
-  * 🔍 Advanced filtering and searching
-  * 🔗 Tracks connections between notes
-  * 🏷️  Manages tags and properties
-  * 📊 Provides insights and statistics
+Main features:
+• Note metadata and content management
+• Advanced filtering and searching
+• Link tracking and graph analysis
+• Tag and property organization
+• Stats and insights
 
-Example:
-```lua
--- Create a new vault
-local notes = require("vault.notes")()
+Examples: >lua
+    -- Initialize notes
+    local notes = require("vault.notes")()
 
--- Load some notes and filter by tag
-notes:load():filter({ search_term = "tags", include = { "project" } })
+    -- Load and filter by tag
+    notes:load():filter({
+      search_term = "tags",
+      include = {"project"}
+    })
 
--- Find orphaned notes (no connections)
-local lonely_notes = notes:orphans()
-```
+    -- Get orphaned notes
+    local orphans = notes:orphans()
+<
 
-See also: |vault.Note|, |vault.Filter|, |vault.Tags|
+See also:
+• |vault.Note|
+• |vault.Filter|
+• |vault.Tags|
 ]]
-
 --- @class vault.Notes: vault.Collection
---- @field private _map vault.Notes.map # Read-only reference map of all notes - DO NOT MODIFY! 🚫
---- @field public map vault.Notes.map # Dynamic note collection that updates with operations
---- @field public groups VaultNotes.groups.map # Organized note groups
---- @field public all vault.Notes # Reference to initial unfiltered notes
---- @field private tags vault.Tags # Tag management system
+--- Read-only reference map of all notes - DO NOT MODIFY! 🚫
+--- @field private _map vault.Notes.map
+--- Dynamic note collection that updates with operations
+--- @field public map vault.Notes.map
+--- Organized note groups
+--- @field public groups VaultNotes.groups.map
+--- Reference to initial unfiltered notes
+--- @field public all vault.Notes
+--- Tag management system
+--- @field private tags vault.Tags
 ---
---- @field public current fun(self: vault.Notes): vault.Notes.Group # Get current working set
---- @field public linked fun(self: vault.Notes): vault.Notes.Group # Notes with connections
---- @field public orphans fun(self: vault.Notes): vault.Notes.Group # Notes without links
---- @field public leaves fun(self: vault.Notes): vault.Notes.Group # End-point notes
---- @field public wikilinks fun(self: vault.Notes): vault.Wikilinks # Wiki-style links
---- @field public count fun(self: vault.Notes): number # Number of notes in current set
+--- Wiki-style links
+--- @field public wikilinks fun(self: vault.Notes): vault.Wikilinks
+--- Number of notes in current set
+--- @field public count fun(self: vault.Notes): number
 ---
---- @field public duplicates fun(self: vault.Notes): {[string]: {[string]: string}} # Find duplicate notes
---- @field public with fun(self: vault.Notes, key: string, query: string, match_opt: string, case_sensitive: boolean): vault.Notes.Group # Smart filtering
---- @field public filter fun(self: vault.Notes, opts: vault.Filter.option, value: string, match_opt: string, case_sensitive: boolean): vault.Notes.Group # Filter notes
---- @field public to_group fun(self: vault.Notes): vault.Notes.Group # Convert to note group
---- @field public to_cluster fun(self: vault.Notes, note: vault.Note, depth: integer): vault.Notes.Cluster # Create note cluster
---- @field public load fun(self: vault.Notes): vault.Notes # Load notes from filesystem
---- @field public wikilinks fun(self: vault.Notes): vault.Wikilinks # Get all wiki-style links
+--- Find duplicate notes
+--- @field public duplicates fun(self: vault.Notes): {[string]: {[string]: string}}
+--- Smart filtering
+--- @field public with fun(self: vault.Notes, key: string, query: string, match_opt: string, case_sensitive: boolean): vault.Notes.Group
+--- Filter notes
+--- @field public filter fun(self: vault.Notes, opts: vault.Filter.option, value: string, match_opt: string, case_sensitive: boolean): vault.Notes.Group
+--- Convert to note group
+--- @field public to_group fun(self: vault.Notes): vault.Notes.Group
+--- Create note cluster
+--- @field public to_cluster fun(self: vault.Notes, note: vault.Note, depth: integer): vault.Notes.Cluster
+--- Load notes from filesystem
+--- @field public load fun(self: vault.Notes): vault.Notes
+--- Get all wiki-style links
+--- @field public wikilinks fun(self: vault.Notes): vault.Wikilinks
+---
+--- Get current working set
+--- @field public current fun(self: vault.Notes): vault.Notes.Group
+--- Notes with connections
+--- @field public linked fun(self: vault.Notes): vault.Notes.Group
+--- Notes without links
+--- @field public orphans fun(self: vault.Notes): vault.Notes.Group
+--- End-point notes
+--- @field public leaves fun(self: vault.Notes): vault.Notes.Group
+--- Notes with connections
+--- @field public internals fun(self: vault.Notes): vault.Notes.Group
+--- Notes with resolved links
+--- @field public with_outlinks_resolved_only fun(self: vault.Notes): vault.Notes.Group
+--- Notes with unresolved links
+--- @field public with_outlinks_unresolved fun(self: vault.Notes): vault.Notes.Group
+--- Notes with mismatched title and stem
+--- @field public with_title_mismatched fun(self: vault.Notes, lowercase: boolean): vault.Notes.Group
+--- Notes without properties
+--- @field public without_properties fun(self: vault.Notes, properties: table<string, boolean>): vault.Notes.Group
+--- Notes without tags
+--- @field public without_tags fun(self: vault.Notes, tags: table<string, boolean>): vault.Notes.Group
+--- Notes with duplicate titles
+--- @field public duplicates fun(self: vault.Notes): vault.Notes.Group
+--- Notes with tags
+--- @field public filter_by_tags fun(self: vault.Notes, tags: table<string, boolean>): vault.Notes.Group
+--- Reset notes to initial state
+--- @field public reset fun(self: vault.Notes): vault.Notes
+--- Add a note to the collection
+--- @field public push fun(self: vault.Notes, note: vault.Note): nil
+--- Add a note to the collection
+--- @field public push_all fun(self: vault.Notes, notes: table<string, vault.Note>): nil
+--- Delete note by key
+--- @field public delete_note_by_key fun(self: vault.Notes, key: string, query: string, match_opt: string, case_sensitive: boolean): nil
+--- Get values by key
+--- @field public get_values_by_key fun(self: vault.Notes, key: string, query: string, match_opt: string, case_sensitive: boolean): table<string, vault.Note>
+--- Get random notes
+--- @field public get_random fun(self: vault.Notes, count: number): table<string, vault.Note>
+--- Get values by key
+--- @field public values_map_by_key fun(self: vault.Notes, key: string, query: string, match_opt: string, case_sensitive: boolean): table<string, table<string, vault.Note>>
+--- Get list of notes
+--- @field public list fun(self: vault.Notes): table<string, vault.Note>
 
 --- @class vault.Notes: vault.Object
 local Notes = Collection:extend("VaultNotes")
@@ -77,19 +127,21 @@ local Notes = Collection:extend("VaultNotes")
 function Notes:init()
     state.clear_all()
 
+    --- @alias vault.Notes.map table<vault.slug, vault.Note> # Map of unique note identifiers to Note objects
     self.map = {}
     self._map = {}
 
     self:load()
 
     self._map = self.map
-    --- @type VaultNotes.groups.map
+
+    --- @alias VaultNotes.groups.map table<vault.slug, vault.Notes.Group> # Map of filtered note groups
     self.groups = {}
 
     state.set_global_key("notes", self)
 end
 
---- Loads notes by fetching paths with ripgrep and creating Note objects.
+--- Loads notes by scanning paths with ripgrep and creating Note objects.
 --- Paths that match configured ignore patterns are skipped.
 ---
 --- Example:
@@ -108,7 +160,7 @@ end
 --- @return vault.Notes - Returns self for method chaining
 function Notes:load()
     --- @type table<string, table<string, string>>
-    local paths = fetcher.paths()
+    local paths = scanner.paths()
     for _, data in pairs(paths) do
         self:push(Note(data))
     end
@@ -656,6 +708,10 @@ end
 --- local notes = require("vault.notes")()
 ---
 --- assert(notes.class.name == "VaultNotes")
+--- assert(notes.map["foo/bar].class.name == "VaultNote")
+---
+--- notes:push(require("vault.notes.note")("/Users/johndoe/vault/foo/bar.md"))
+--- assert(notes.map["foo/bar"].data.title == "Foo Bar")
 --- ```
 --- @type vault.Notes|vault.Notes.constructor
 local VaultNotes = Notes

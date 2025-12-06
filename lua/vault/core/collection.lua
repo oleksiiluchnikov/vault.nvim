@@ -172,7 +172,7 @@ end
 ---     return self
 --- end
 ---
---- --- Fetch items that match the given key-value criteria
+--- --- Scann items that match the given key-value criteria
 --- ---
 --- --- @param search_keys string|string[] - The key(s) to search by.
 --- --- @param pattern? string - The search pattern to match.
@@ -235,7 +235,9 @@ end
 function Collection:to_group()
     local Group = state.get_global_key(
         string.format("class.vault.%sGroup", self.class.name:gsub("Vault", "")) -- e.g. "VaultNotes" -> "Notes"
-    ) or require(string.format("vault.%s.group", self.class.name:gsub("Vault", ""):lower()))
+    )
+        or require(string.format("vault.%s.group", self.class.name:gsub("Vault", ""):lower()))
+        or error(string.format("Group class not found for collection '%s'", self.class.name))
     return Group(self)
 end
 
@@ -419,6 +421,28 @@ end
 --- @error "key must be a string" when key parameter is not a string
 --- @error "items table is empty" when items table has no elements
 --- @error "invalid key '{key}'. Available keys: ..." when specified key doesn't exist
+--- Reduce the collection to a single value
+--- @generic T
+--- @param reducer fun(accumulator: T, current: any): T Function to reduce items
+--- @param initial? T Initial value (optional)
+--- @return T|nil The final reduced value, or nil if collection is empty and no initial value
+function Collection:reduce(reducer, initial)
+    local items = self:list()
+    if #items == 0 then
+        return initial
+    end
+
+    local acc = initial or items[1]
+    local start = initial and 1 or 2
+
+    for i = start, #items do
+        acc = reducer(acc, items[i])
+    end
+
+    return acc
+end
+
+--- Get map of values by a specific key.
 function Collection:values_map_by_key(key, opts)
     -- Fast parameter validation
     if type(self.map) ~= "table" then
@@ -474,6 +498,45 @@ end
 function Collection:reset()
     state.clear_all()
     self:init()
+end
+
+--- Filter items by source slug
+--- @param source_slug string The source slug to filter by
+--- @param match_opt? vault.enum.MatchOpts.key Match option for the slug (default: "exact")
+--- @param case_sensitive? boolean Case sensitive match (default: false)
+--- @return vault.CollectionGroup Collection containing only items with matching source
+function Collection:filter_by_source(source_slug, match_opt, case_sensitive)
+    if not source_slug then
+        error(Error.MISSING_PARAMETER("source_slug"))
+    end
+
+    match_opt = match_opt or "exact"
+    case_sensitive = case_sensitive or false
+
+    local filtered = {}
+    local search_slug = case_sensitive and source_slug or source_slug:lower()
+
+    for id, item in pairs(self.map) do
+        if item.data and item.data.sources then
+            local found = false
+
+            for slug, _ in pairs(item.data.sources) do
+                local item_slug = case_sensitive and slug or slug:lower()
+
+                if utils.match(item_slug, search_slug, match_opt) then
+                    found = true
+                    break
+                end
+            end
+
+            if found then
+                filtered[id] = item
+            end
+        end
+    end
+
+    self.map = filtered
+    return self
 end
 
 state.set_global_key("class.vault.Collection", Collection)

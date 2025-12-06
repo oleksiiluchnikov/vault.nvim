@@ -42,6 +42,25 @@
 --- @field features? { cmp: boolean, commands: boolean, blink: boolean } Feature toggles for plugin components. Example: { cmp = true, commands = true, blink = true }
 --- @field frontmatter? table YAML frontmatter configuration. Example: { keys = { tags = "tags" } }
 --- @field check_duplicate_basename? boolean Enable duplicate filename detection. Example: true
+---
+--- @field telescope? table Telescope configuration. Example:
+---   ```lua
+---   {
+---     pickers = {
+---       notes = function(opts)
+---         require("telescope._extensions.vault.pickers.notes")(opts)
+---       end,
+---     },
+---   }
+---   ```
+--- @field telescope.pickers? table Telescope pickers configuration. Example:
+---   ```lua
+---   {
+---     notes = function(opts)
+---       require("telescope._extensions.vault.pickers.notes")(opts)
+---     end,
+---   }
+---   ```
 
 --- The configuration for the vault plugin.
 --- @type vault.Config
@@ -105,6 +124,14 @@ local DEFAULT_OPTIONS = {
     tags = {
         valid = {
             hex = true, -- Hex is a valid tag.
+        },
+        completion = {
+            strategy = "fuzzy", -- The strategy to use for tag completion. Default: "fuzzy"
+        },
+    },
+    properties = {
+        completion = {
+            strategy = "fuzzy", -- The strategy to use for property completion. Default: "fuzzy"
         },
     },
     search_pattern = {
@@ -191,6 +218,17 @@ local DEFAULT_OPTIONS = {
         cmp = true, -- Enable cmp
         commands = true, -- Enable commands
         blink = true, -- blink.cmp inegration
+    },
+    telescope = {
+        pickers = {
+            -- custom = function(opts)
+            --     require("telescope._extensions.vault.pickers.notes")(
+            --         vim.tbl_deep_extend("force", opts or {}, {
+            --             notes = require("vault.notes")():with_outlinks_resolved_only(),
+            --         })
+            --     )
+            -- end,
+        },
     },
 }
 

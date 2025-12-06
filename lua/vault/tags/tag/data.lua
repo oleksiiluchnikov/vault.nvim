@@ -32,13 +32,13 @@ data.documentation = function(tag_data)
     return TagDocumentation(tag_data.name)
 end
 
---- Fetch the children of a tag.
+--- Scann the children of a tag.
 --- @param tag_Data vault.Tag.Data
 --- @return vault.Tag.children
 data.children = function(tag_data)
     local tag_name = tag_data.name
     if not tag_name then
-        error("fetch_children(tag_name) - tag_name is nil", 2)
+        error("scann_children(tag_name) - tag_name is nil", 2)
     end
 
     if tag_name:find("/") == nil then

@@ -14,9 +14,9 @@ function vault.setup(opts)
     if config.options.features.commands == true then
         require("vault.commands")
     end
-    if config.options.features.cmp == true then
-        require("vault.cmp").setup()
-    end
+    -- if config.options.features.cmp == true then
+    --     require("vault.cmp").setup()
+    -- end
 end
 
 --- Check the health of the vault plugin.
@@ -25,7 +25,7 @@ end
 function vault.checkhealth()
     local dependencies = {
         "telescope",
-        "cmp",
+        -- "cmp",
     }
 
     local results = {}

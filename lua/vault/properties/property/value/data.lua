@@ -38,13 +38,13 @@ data.type = function(property_data)
     return property_data.type
 end
 
---- Fetch the values of a property.
+--- Scann the values of a property.
 --- @param property_Data vault.Property.Value.Data
 --- @return vault.PropertyValueChildren
 data.values = function(property_data)
     local property_name = property_data.name
     if not property_name then
-        error("fetch_values(property_name) - property_name is nil", 2)
+        error("scann_values(property_name) - property_name is nil", 2)
     end
     return property_data.values
 end

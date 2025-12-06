@@ -472,16 +472,16 @@ Data.type = function(note_data)
     -- error("Not implemented: " .. vim.inspect(note_data))
 end
 
--- --- Fetch status from the specified path.
+-- --- Scann status from the specified path.
 -- ---
--- --- @parap path string - The path to the note to fetch status from.
+-- --- @parap path string - The path to the note to scann status from.
 -- --- @param content string - The content of the note.
 -- --- @return string? - The status of the note.
--- local function fetch_status(path, content)
+-- local function scann_status(path, content)
 --   if not path then
 --     return nil
 --   end
---   content = content or fetch_content(path)
+--   content = content or scann_content(path)
 --   local status
 --   local pattern = config.options.search_pattern.status or "%s#status/([A-Za-z0-9_-]+)"
 --   local match = content:match(pattern)

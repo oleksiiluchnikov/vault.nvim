@@ -1,5 +1,5 @@
 --- @module "telescope"
-local pickers = require("vault.pickers")
+local pickers = require("telescope._extensions.vault.pickers")
 local M = {}
 
 --- Open the picker with the given tag name
@@ -104,7 +104,6 @@ function M.open_picker_notes_with_property_value(property_name, value_name)
         local note = require("vault.notes.note")(path)
         notes:push(note)
     end
-    -- vault_pickers.notes(opts)
     pickers
         .notes({
             notes = notes,
@@ -175,7 +174,7 @@ function M.open_picker_notes_with_empty_property_value(property_name, value_name
         local note = require("vault.notes.note")(path)
         notes:push(note)
     end
-    -- vault_pickers.notes(opts)
+    -- telescope._extensions.vault.pickers.notes(opts)
     pickers
         .notes({
             notes = notes,
@@ -216,5 +215,19 @@ function M.open_picker_notes_without_frontmatter()
         })
         :find()
 end
+
+-- lua require('telescope._extensions.vault.pickers.lines')({lines = require('vault.lines')():filter("content", "^- [A-Za-z]", "regex", false)}):find()
+--- Open the picker with lines that starts with "- "
+function M.open_picker_lines_starting_with_dash()
+    pickers
+        .lines({
+            lines = require("vault.lines")()
+                :filter_by_source("journal", "startswith", false)
+                :filter("content", "^- [A-Za-z0-9]", "regex", false),
+        })
+        :find()
+end
+
+M.open_picker_lines_starting_with_dash()
 
 return M

@@ -4,7 +4,7 @@ local state = require("vault.core.state")
 --- @type vault.Config|vault.Config.options
 local config = require("vault.config")
 local Wikilink = require("vault.wikilinks.wikilink")
-local fetcher = require("vault.fetcher")
+local scanner = require("vault.scanner")
 local Collection = require("vault.core.collection")
 
 local Job = require("plenary.job")
@@ -52,7 +52,7 @@ function Wikilinks:init(notes)
     self.map = {}
 
     if not notes then
-        self.map = fetcher.wikilinks()
+        self.map = scanner.wikilinks()
     else
         -- Collect wikilinks from notes
         for slug, note in pairs(notes.map) do

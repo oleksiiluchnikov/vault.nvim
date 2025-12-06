@@ -25,7 +25,7 @@ function PropertyData:init(this)
     end
 end
 
---- Fetch the data if it is not already cached.
+--- Scann the data if it is not already cached.
 --- @param key string -- `VaultProperty.Data` key
 --- @return any
 function PropertyData:__index(key)

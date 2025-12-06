@@ -1,4 +1,4 @@
-local vault_actions = require("vault.pickers.actions")
+local vault_actions = require("telescope._extensions.vault.actions")
 local M = {}
 
 --- @param map vault.Picker.map
@@ -119,4 +119,5 @@ M.directories = function(_, map)
 
     return true
 end
+
 return M
