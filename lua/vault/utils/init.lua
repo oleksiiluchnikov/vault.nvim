@@ -75,6 +75,16 @@ function utils.path_to_basename(path)
     return vim.fn.fnamemodify(path, ":t")
 end
 
+--- Format an absolute path to a dirname.
+--- @param path vault.path
+--- @return string
+function utils.path_to_dirname(path)
+    if type(path) ~= "string" then
+        error("path must be a string, got " .. type(path))
+    end
+    return vim.fn.fnamemodify(path, ":h")
+end
+
 -- relpath
 --- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 

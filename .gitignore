@@ -1,11 +1,69 @@
-tt.*
-.tests
-doc/tags
-debug
-.repro
-foo.*
-*.log
-data
-.luarc.json
+# Rust target directory
+/target/
+
+# Rust build artifacts
+**/*.rlib
+**/*.rmeta
+**/*.d
+
+# Neovim build artifacts
+lua/vault_core.so
+
+# Mac / OS X
 .DS_Store
-_scratch.lua
+.DS_Store?
+.AppleDouble
+.LSOverride
+Icon?
+
+# Thumbnails
+._*
+ehthumbs.db
+Thumbs.db
+
+# Editors / IDEs
+.vscode/
+.vscode-test/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# Vim/Neovim swap/backup/undo
+*.swp
+*.swo
+*~
+Session.vim
+.nvimlog
+.swap
+.undodir/
+
+# Generic logs
+*.log
+
+# Build / temp directories
+/dist/
+/build/
+/out/
+.tmp/
+.temp/
+
+# Test / coverage artifacts
+coverage/
+.nyc_output/
+*.lcov
+
+# Tooling caches
+.cache/
+.mypy_cache/
+.pytest_cache/
+.tox/
+
+# Local / secret configs
+.env
+.env.*
+*.local.*
+*.secret.*
+
+# Git local-only files
+.gitignore_local
+.gitmodules_local

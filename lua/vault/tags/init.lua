@@ -2,7 +2,9 @@ local Collection = require("vault.core.collection")
 local state = require("vault.core.state")
 local utils = require("vault.utils")
 local Filter = require("vault.filter")
-local scanner = require("vault.scanner")
+local function scanner()
+    return require("vault.scanner")
+end
 
 -- Aliases
 --- @alias vault.Tags.map table<string, vault.Tag> - Map of tags.
@@ -24,7 +26,7 @@ local Tags = Collection:extend("VaultTags")
 --- Sets the tags map and registers the tags globally.
 --- @return nil
 function Tags:init()
-    self.map = scanner.tags()
+    self.map = scanner().tags()
     state.set_global_key("tags", self)
 end
 

@@ -20,20 +20,20 @@ function TaskData:init(this)
     self.line = this.line or ""
     self.tags = this.tags or (self.line ~= "" and self.line:gmatch("%s*#(.-)%s*")) or {}
     self.sources = this.sources or {}
-    self.is_nested = this.is_nested or false
-    self.wikilinks = this.wikilinks or {}
+    self.is_nested = self.is_nested or false
+    self.wikilinks = self.wikilinks or {}
     --- TODO: Implement subtasks
 
     -- Extract status and description
     self.status = (self.line ~= "" and self.line:match("- %[(.)%]")) or " "
 
     -- Parse wikilinks
-    if self.line ~= "" then
+    if type(self.line) == "string" and self.line ~= "" then
         for wikilink in self.line:gmatch("%[%[(.-)%]%]") do
-            -- table.insert(self.wikilinks, wikilink)
-            vim.tbl_deep_extend("force", self.wikilinks, { wikilink })
+            table.insert(self.wikilinks, wikilink)
         end
     end
+
 
     -- Parse metadata fields
     local metadata_fields = {
@@ -56,9 +56,14 @@ function TaskData:init(this)
     -- self.description = this.line:gsub("^%s*-%s*%[.%]%s*", ""):match("^(.-)%s*%[%a+::") or this.line
     -- description is the line without the status, tags, and metadata
     -- self.description = this.line:gsub("^%s*-%s*%[.%]%s*", ""):match("^(.-)%s*%[%a+::") or this.line
-    self.content = this.line:gsub("- %[.-%]", ""):match("^(.-)%[%a+::"):gsub("\n", "")
-        or this.line
-        or ""
+    if type(this.line) == "string" and this.line ~= "" then
+        local stripped = this.line:gsub("- %[%.-%]", "")
+        local content = stripped:match("^(.-)%[%a+::") or stripped
+        self.content = content:gsub("\n", "")
+    else
+        self.content = ""
+    end
+
 
     -- Calculate source statistics
     self.count = 0
@@ -72,6 +77,7 @@ function TaskData:init(this)
         end
     end
 end
+
 
 --- @class vault.Task: vault.Object
 --- @field data vault.Task.Data - The Data of the task.
@@ -160,12 +166,17 @@ end
 --- @param slug vault.slug
 --- @return vault.Task
 function Task:add_slug(slug)
+    if not self.data.sources then
+        self.data.sources = {}
+    end
     if not self.data.sources[slug] then
-        -- FIXME: Should add the |vault.Source| to the |vault.Task.data.sources| table, not the |boolean| value.
-        self.data.sources[slug] = true
+        -- Initialize an empty table of occurrences for this slug.
+        self.data.sources[slug] = {}
+        self.data.count = (self.data.count or 0) + 1
     end
     return self
 end
+
 
 --- @alias vault.Task.constructor fun(this: vault.Task|table|string): vault.Task
 --- @type vault.Task.constructor|vault.Task

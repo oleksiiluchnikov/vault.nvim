@@ -27,23 +27,23 @@ ensure_dependency("nvim-lua/plenary.nvim", "plenary.nvim")
 ensure_dependency("MunifTanjim/nui.nvim", "nui.nvim") -- If you're using nui.nvim
 
 -- Add the plugin to the runtimepath
+-- Ensure plugin_root is defined (fallback to cwd) so tests don't accidentally
+-- fall back to loading the user's real Neovim config (~/.config/nvim/init.lua)
+if plugin_root == nil then
+    plugin_root = vim.fn.getcwd()
+end
 vim.opt.runtimepath:prepend(plugin_root)
 
 -- Set up package path for lua modules
 package.path = plugin_root .. "/lua/?.lua;" .. package.path
 package.path = plugin_root .. "/lua/?/init.lua;" .. package.path
 
--- Load test dependencies
-require("plenary.busted")
 
--- Set up luassert and its spy/stub functionality
 local luassert = require("luassert")
-local spy = require("luassert.spy")
-local stub = require("luassert.stub")
 
--- Register spy/stub with assert
-luassert:register("spy", spy.new)
-luassert:register("stub", stub.new)
+require("plenary.busted")
+require("luaassert.spy")
+require("luaassert.stub")
 
 -- Make assert available globally
 _G.assert = luassert

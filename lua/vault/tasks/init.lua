@@ -1,5 +1,9 @@
 local state = require("vault.core.state")
-local scanner = require("vault.scanner")
+
+local function scanner()
+    return require("vault.scanner")
+end
+
 local Collection = require("vault.core.collection")
 
 -- Aliases
@@ -22,7 +26,7 @@ local Tasks = Collection:extend("VaultTasks")
 --- Sets the tasks map and registers the tasks globally.
 --- @return nil
 function Tasks:init()
-    self.map = scanner.tasks()
+    self.map = scanner().tasks()
     state.set_global_key("tasks", self)
 end
 

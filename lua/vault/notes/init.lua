@@ -1,7 +1,12 @@
 local utils = require("vault.utils")
 local Error = require("vault.utils.error")
+
 local state = require("vault.core.state")
-local scanner = require("vault.scanner")
+
+local function scanner()
+    return require("vault.scanner")
+end
+
 local Collection = require("vault.core.collection")
 local Filter = require("vault.filter")
 local Tags = require("vault.tags")
@@ -160,7 +165,7 @@ end
 --- @return vault.Notes - Returns self for method chaining
 function Notes:load()
     --- @type table<string, table<string, string>>
-    local paths = scanner.paths()
+    local paths = scanner().paths()
     for _, data in pairs(paths) do
         self:push(Note(data))
     end

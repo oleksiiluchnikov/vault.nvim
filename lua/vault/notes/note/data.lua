@@ -80,14 +80,28 @@ local utils = require("vault.utils")
 --- @field type? vault.Note.Data.type - The type of the note.
 --- @field status? vault.Note.Data.status - The status of the note.
 --- @field stats table<string, any> - The stats of the note.
+--- @field rust_links
 
 local Data = {}
+
+--- @param note_Data vault.Note.Data
+--- @return integer
+Data.mtime = function(note_data)
+    return vim.fn.getftime(note_data.path)
+end
+
+--- @param note_Data vault.Note.Data
+--- @return integer
+Data.ctime = function(note_data)
+    -- Fallback to mtime as ctime is not reliably available across platforms in Lua
+    return vim.fn.getftime(note_data.path)
+end
 
 --- @param note_Data vault.Note.Data
 --- @return vault.path
 Data.path = function(note_data)
     local relpath = note_data.relpath
-    local path = utils.relpath_to_path(path)
+    local path = utils.relpath_to_path(relpath)
     return path
 end
 
@@ -158,8 +172,8 @@ Data.body = function(note_data)
     local content = note_data.content
     local frontmatter = note_data.frontmatter
     local body = content
-    if frontmatter then
-        body = content:sub(#frontmatter.raw + 1) -- TODO: check if it works
+    if frontmatter and frontmatter.raw then
+        body = content:sub(#frontmatter.raw + 1)
     end
     return body
 end
@@ -334,93 +348,13 @@ end
 Data.keys = function(note_data)
     local keys = {}
 
-    -- local frontmatter = note_data.frontmatter
-    -- for k, v in pairs(frontmatter.data) do
-    --     keys[k] = v
-    -- end
-    local body_example = [=[
-    ---
-    title: Note
-    created: 2021-01-01
-    modified: 2021-01-01
-    class: note
-    ---
-    # Heading 1
-    title:: Note
-    created:: 2021-01-01
-
-    another:: field, this is not a key. yet-another:: field
-    ]=
-    ]=]
-
-    local result_examle = {
-        [2] = {
-            {
-                start = 1,
-                key = "title",
-                value = "Note",
-                ["end"] = 11,
-            },
-        },
-        [3] = {
-            {
-                start = 1,
-                key = "created",
-                value = "2021-01-01",
-                ["end"] = 11,
-            },
-        },
-        [4] = {
-            {
-                start = 1,
-                key = "modified",
-                value = "2021-01-01",
-                ["end"] = 11,
-            },
-        },
-        [5] = {
-            {
-                start = 1,
-                key = "class",
-                value = "note",
-                ["end"] = 11,
-            },
-        },
-        [7] = {
-            {
-                start = 1,
-                key = "title",
-                value = "Note",
-                ["end"] = 11,
-            },
-        },
-        [8] = {
-            {
-                start = 1,
-                key = "created",
-                value = "2021-01-01",
-                ["end"] = 11,
-            },
-        },
-        [10] = {
-            {
-                start = 1,
-                key = "another",
-                value = "field, this is not a key. yet-another:: field",
-                ["end"] = 11,
-            },
-            {
-                start = 1,
-                key = "yet-another",
-                value = "field",
-                ["end"] = 11,
-            },
-        },
-    }
-
-    local body = body_example
+    local body = note_data.content
+    if not body then
+        return {}
+    end
 
     local inline_field_pattern = "([A-Za-z%-%_]+)::%s*([^,%s%.]+)"
+
     local lines = vim.split(body, "\n")
     for line_number, line in ipairs(lines) do
         for key, value in line:gmatch(inline_field_pattern) do
@@ -503,5 +437,18 @@ end
 Data.stats = function(note_data)
     error("Not implemented: " .. vim.inspect(note_data))
 end
+
+Data.rust_links = function(note_data)
+    error("Not implemented: " .. vim.inspect(note_data))
+end
+
+Data.rust_tags = function(note_data)
+    error("Not implemented: " .. vim.inspect(note_data))
+end
+
+Data.rust_frontmatter = function() end
+Data.frontmatter_raw = function() end
+
+Data.rust_path = function() end
 
 return Data

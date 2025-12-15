@@ -1,5 +1,7 @@
 local Object = require("vault.core.object")
-local scanner = require("vault.scanner")
+local function scanner()
+    return require("vault.scanner")
+end
 
 --- @alias vault.Field.map table<string, vault.Field>
 
@@ -16,7 +18,7 @@ local Fields = Object("VaultFields")
 ---
 --- @return nil
 function Fields:init()
-    self.map = scanner.fields()
+    self.map = scanner().fields()
 end
 
 --- Get a map of keys to fields.

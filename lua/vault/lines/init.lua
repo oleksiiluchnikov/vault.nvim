@@ -1,5 +1,9 @@
 local state = require("vault.core.state")
-local scanner = require("vault.scanner")
+
+local function scanner()
+    return require("vault.scanner")
+end
+
 local Collection = require("vault.core.collection")
 
 -- Aliases
@@ -22,7 +26,7 @@ local Lines = Collection:extend("VaultLines")
 --- Sets the lines map and registers the lines globally.
 --- @return nil
 function Lines:init()
-    self.map = scanner.lines()
+    self.map = scanner().lines()
     state.set_global_key("lines", self)
 end
 

@@ -26,3 +26,15 @@ clean:
 	cargo clean
 	rm -f $(TARGET)
 
+
+
+.PHONY: test
+
+# Run all plenary tests using the minimal init file to avoid loading the user's
+# real Neovim config (~/.config/nvim/init.lua). This ensures tests run in a
+# hermetic environment with only the dependencies set up in tests/minimal_init.lua.
+# Usage: make test
+
+test:
+	@echo "Running tests with tests/minimal_init.lua"
+	@nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests" -c qa

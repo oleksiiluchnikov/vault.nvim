@@ -14,7 +14,7 @@ local TagData = Object("VaultTagData")
 --- @param this vault.Tag.Data.name|vault.Tag.Data.partial
 function TagData:init(this)
     if not this then
-        error(error_formatter.missing_parameter("this"), 2)
+        error(error_formatter.MISSING_PARAMETER("this"), 2)
     end
     -- -- Validate keys
     -- for k, _ in pairs(this) do
@@ -80,14 +80,14 @@ local Tag = Object("VaultTag")
 --- @param this vault.Tag.Data.name|vault.Tag.Data.partial
 function Tag:init(this)
     if not this then
-        error(error_formatter.missing_parameter("this"), 2)
+        error(error_formatter.MISSING_PARAMETER("this"), 2)
     end
     if type(this) == "string" then
         this = { name = this }
     end
 
     if not this.name then
-        error(error_formatter.missing_parameter("name"), 2)
+        error(error_formatter.MISSING_PARAMETER("name"), 2)
     end
 
     self.data = TagData(this)
