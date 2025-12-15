@@ -1,6 +1,7 @@
 --[[
 
 
+
 --]]
 --- @class telescope_popup_options.vault.Notes: telescope_popup_options
 --- @field notes? vault.Notes
@@ -37,24 +38,33 @@ return function(opts)
     local prompt_title = opts.sort_by
 
     --- @type integer
-    local ui_height = vim.api.nvim_list_uis()[1].height
-
-    local steps = math.min(ui_height, vim.tbl_count(results))
-    --- @type Gradient|nil
-    local colors = Gradient.from_stops(steps, "Boolean", "Comment", "Normal", "String")
-    if type(colors) ~= "table" then
-        error(Error.COMMAND_EXECUTION_ERROR("Gradient.from_stops", vim.inspect(colors)))
+    local ui_height = vim.o.lines
+    if #vim.api.nvim_list_uis() > 0 then
+        ui_height = vim.api.nvim_list_uis()[1].height
     end
 
-    -- TODO: Make sure that hl_name will clean up after
+    local steps = math.min(ui_height, vim.tbl_count(results))
+
+    -- Gradient-based highlighting
     local hl_name = "VaultNoteContent"
-    for i, color in ipairs(colors) do
-        vim.api.nvim_set_hl(0, hl_name .. tostring(i), { fg = color })
+    local colors = nil
+    local ok, maybe_colors = pcall(function()
+        return Gradient.from_stops(steps, "Boolean", "Comment", "Normal", "String")
+    end)
+    if ok and type(maybe_colors) == "table" then
+        colors = maybe_colors
+        for i, color in ipairs(colors) do
+            pcall(vim.api.nvim_set_hl, 0, hl_name .. tostring(i), { fg = color })
+        end
+    else
+        -- If gradient failed, keep colors = nil and fallback to standard groups
+        colors = nil
     end
 
     --- @type string
     local col_2 = ""
     local col_2_maxwidth = 0
+
     for _, note in ipairs(results) do
         local relpath = note.data.relpath
         if utils.match(relpath, "/", "contains", false) then
@@ -73,12 +83,18 @@ return function(opts)
 
         --- --
         local content = note.data.content or ""
-        local content_chars_count = #content
-        local index = math.min(math.floor(content_chars_count / 16), steps)
-        if index == 0 then
-            index = 1
+        -- Gradient index calculation (fallbacks to default group)
+        if colors then
+            local content_chars_count = #content
+            local index = math.min(math.floor(content_chars_count / 16), steps)
+            if index == 0 then
+                index = 1
+            end
+            col_1_hl_name = hl_name .. tostring(index)
+        else
+            col_1_hl_name = "TelescopeResultsNormal"
         end
-        col_1_hl_name = hl_name .. tostring(index)
+
 
         --- --
         -- Display dir before note name
@@ -125,7 +141,7 @@ return function(opts)
     local entry_maker = function(note)
         return {
             value = note,
-            ordinal = note.data.path .. " " .. note.data.content,
+            ordinal = note.data.path .. " " .. (note.data.content or ""),
             display = make_display,
             filename = note.data.path,
         }
@@ -137,7 +153,6 @@ return function(opts)
         end)
     elseif opts.sort_by == "ctime" then
         table.sort(results, function(a, b)
-            -- FIXME: Need to be implemented
             local a_ctime = vim.fn.getftime(a.data.path)
             local b_ctime = vim.fn.getftime(b.data.path)
             return a_ctime < b_ctime
@@ -148,6 +163,7 @@ return function(opts)
             local b_mtime = vim.fn.getftime(b.data.path)
             return a_mtime < b_mtime
         end)
+
     elseif opts.sort_by == "slug" then
         table.sort(results, function(a, b)
             return a.data.slug < b.data.slug
@@ -163,6 +179,7 @@ return function(opts)
         entry_maker = entry_maker,
     })
 
+    -- interactive in-line filter callback (supports trailing / pattern and negative prefix -)
     local on_input_filter_cb = function(prompt)
         local picker = vault_state.get_global_key("picker")
         local is_negative = false
@@ -240,13 +257,42 @@ return function(opts)
         }
     end
 
+    -- Attach mappings with cleanup for highlight groups to avoid leakage
+    local attach_mappings = function(prompt_bufnr, map)
+        -- Ensure original mappings are preserved if provided
+        if type(vault_mappings.notes) == "function" then
+            local ok, res = pcall(vault_mappings.notes, prompt_bufnr, map)
+            if not ok then
+                -- ignore mapping errors
+            end
+        end
+
+        -- Cleanup highlights when picker buffer is closed
+        local function cleanup()
+            if colors then
+                for i = 1, #colors do
+                    pcall(vim.api.nvim_set_hl, 0, hl_name .. tostring(i), {})
+                end
+            end
+        end
+
+        -- Register BufWipeout autocmd for the prompt buffer to cleanup highlights
+        pcall(vim.api.nvim_create_autocmd, "BufWipeout", {
+            buffer = prompt_bufnr,
+            once = true,
+            callback = cleanup,
+        })
+
+        return true
+    end
+
     local picker_opts = {
         prompt_title = prompt_title,
         finder = finder,
         sorter = sorters.get_fzy_sorter(),
         previewer = vault_previewers.notes or nil,
-        attach_mappings = vault_mappings.notes or nil,
-        on_input_filter_cb = on_input_filter_cb, -- TODO: Move to separate module?
+        attach_mappings = attach_mappings,
+        on_input_filter_cb = on_input_filter_cb,
     }
     local picker = pickers.new(vault_layouts.notes(), picker_opts)
 

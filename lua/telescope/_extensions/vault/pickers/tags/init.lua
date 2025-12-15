@@ -32,35 +32,45 @@ return function(opts)
         return a.data.count > b.data.count
     end)
 
-    local steps = math.min(vim.api.nvim_list_uis()[1].height, vim.tbl_count(tags_list))
-    --- @type Gradient|nil
-    local colors = Gradient.from_stops(steps, "Comment", "Normal", "String")
-    if type(colors) ~= "table" then
-        -- error(
-        --     error_msg.COMMAND_EXECUTION_ERROR("Gradient.from_stops", "table", vim.inspect(colors))
-        -- )
-        -- error("Gradient.from_stops", "table", vim.inspect(colors))
-        error("Gradient.from_stops")
+    -- Determine UI height safely
+    local ui_height = vim.o.lines
+    if #vim.api.nvim_list_uis() > 0 then
+        ui_height = vim.api.nvim_list_uis()[1].height
     end
+
+    local steps = math.min(ui_height, vim.tbl_count(tags_list))
+
+    -- Gradient setup with safe fallback
     local hl_name = "VaultTag"
-    for i, color in ipairs(colors) do
-        vim.api.nvim_set_hl(0, hl_name .. tostring(i), { fg = color })
+    local colors = nil
+    local ok, maybe_colors = pcall(function()
+        return Gradient.from_stops(steps, "Comment", "Normal", "String")
+    end)
+    if ok and type(maybe_colors) == "table" then
+        colors = maybe_colors
+        for i, color in ipairs(colors) do
+            pcall(vim.api.nvim_set_hl, 0, hl_name .. tostring(i), { fg = color })
+        end
     end
 
     --- @param entry vault.TelescopeEntry
     local make_display = function(entry)
         --- @type vault.Tag
         local tag = entry.value
-        local sources_count = tag.data.count
+        local sources_count = tag.data.count or 0
 
         --- --
         local col_1 = tag.data.name
         local col_1_width = 29
-        local i = math.min(math.floor(sources_count / 2), steps)
-        if i == 0 then
-            i = 1
+
+        local col_1_hl_name = "TelescopeResultsNormal"
+        if colors then
+            local i = math.min(math.floor(sources_count / 2), steps)
+            if i == 0 then
+                i = 1
+            end
+            col_1_hl_name = hl_name .. tostring(i)
         end
-        local col_1_hl_name = hl_name .. tostring(i)
         --- --
 
         local col_2 = tostring(sources_count)
@@ -177,12 +187,39 @@ return function(opts)
         }
     end
 
+    -- Attach mappings with highlight cleanup
+    local attach_mappings = function(prompt_bufnr, map)
+        -- Ensure original mappings are preserved if provided
+        if type(vault_mappings.tags) == "function" then
+            local ok, res = pcall(vault_mappings.tags, prompt_bufnr, map)
+            if not ok then
+                -- ignore mapping errors
+            end
+        end
+
+        local function cleanup()
+            if colors then
+                for i = 1, #colors do
+                    pcall(vim.api.nvim_set_hl, 0, hl_name .. tostring(i), {})
+                end
+            end
+        end
+
+        pcall(vim.api.nvim_create_autocmd, "BufWipeout", {
+            buffer = prompt_bufnr,
+            once = true,
+            callback = cleanup,
+        })
+
+        return true
+    end
+
     local picker_opts = {
         prompt_title = "tags",
         finder = finder,
         sorter = sorters.get_fzy_sorter(),
         previewer = vault_previewers.tags,
-        attach_mappings = vault_mappings.tags,
+        attach_mappings = attach_mappings,
         on_input_filter_cb = on_input_filter_cb,
     }
     local picker = pickers.new(vault_layouts.tags(), picker_opts)

@@ -1,12 +1,10 @@
 local vault = {}
 
 --- Setup `vault.nvim` plugin.
---- ```lua
---- require("vault").setup()
---- ```
 --- @param opts? vault.Config.options
 function vault.setup(opts)
     opts = opts or {}
+
     --- @type vault.Config
     local config = require("vault.config")
     config.setup(opts)
@@ -14,9 +12,32 @@ function vault.setup(opts)
     if config.options.features.commands == true then
         require("vault.commands")
     end
-    -- if config.options.features.cmp == true then
-    --     require("vault.cmp").setup()
-    -- end
+
+    -- Initialize file watcher if enabled
+    if config.options.features.watcher ~= false then
+        local Watcher = require("vault.watcher")
+        local watcher = Watcher()
+
+        -- Start watching on VimEnter to avoid startup delays
+        vim.api.nvim_create_autocmd("VimEnter", {
+            callback = function()
+                vim.defer_fn(function()
+                    watcher:start()
+                end, 1000) -- Delay 1s to avoid startup impact
+            end,
+            once = true,
+        })
+
+        -- Cleanup on exit
+        vim.api.nvim_create_autocmd("VimLeavePre", {
+            callback = function()
+                watcher:cleanup()
+            end,
+        })
+
+        -- Store globally for manual control
+        require("vault.core.state").set_global_key("watcher", watcher)
+    end
 end
 
 --- Check the health of the vault plugin.

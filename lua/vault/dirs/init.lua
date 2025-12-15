@@ -1,5 +1,7 @@
 local state = require("vault.core.state")
-local scanner = require("vault.scanner")
+local function scanner()
+    return require("vault.scanner")
+end
 local Collection = require("vault.core.collection")
 
 -- Aliases
@@ -22,7 +24,7 @@ local Dirs = Collection:extend("VaultDirs")
 --- Sets the dirs map and registers the dirs globally.
 --- @return nil
 function Dirs:init()
-    self.map = scanner.dirs()
+    self.map = scanner().dirs()
     state.set_global_key("dirs", self)
 end
 

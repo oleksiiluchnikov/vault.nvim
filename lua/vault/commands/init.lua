@@ -317,10 +317,17 @@ function callbacks.rename(args)
         return
     end
     local new_path = require("vault.utils").slug_to_path(new_slug)
-    note:move(new_path)
+    
+    local ok, err = pcall(function() note:move(new_path) end)
+    if not ok then
+        vim.notify("Failed to move note: " .. tostring(err), vim.log.levels.ERROR)
+        return
+    end
+
     vim.cmd("bdelete!")
     note:edit()
 end
+
 
 --- vault.NoteInlinks
 --- Opens a picker with the notes where current note is mentioned
@@ -419,10 +426,30 @@ end
 --- Create a new note from the selected text, and replace the selected text with a link to the new note
 --- @param args vim.api.keyset.create_user_command.command_args
 function callbacks.note_from_selected_text(args)
-    -- --- @type vault.Note
-    -- local current_note = require("vault.notes.note")(vim.fn.expand("%:p"))
-    --- @type string[]
-    local lines = vim.api.nvim_buf_get_lines(0, args.line1 - 1, args.line2, false)
+    local start_pos = vim.api.nvim_buf_get_mark(0, "<")
+    local end_pos = vim.api.nvim_buf_get_mark(0, ">")
+    
+    -- Validate marks
+    if start_pos[1] == 0 or end_pos[1] == 0 then
+        vim.notify("No selection found", vim.log.levels.WARN)
+        return
+    end
+
+    -- Adjust for 0-based indexing for API calls
+    local row1, col1 = start_pos[1] - 1, start_pos[2]
+    local row2, col2 = end_pos[1] - 1, end_pos[2]
+    
+    -- Handle visual line mode or block mode if necessary, but assuming characterwise for now
+    -- In visual line mode, col1 is 0 and col2 is 2147483647
+    if col2 == 2147483647 then
+        local line_content = vim.api.nvim_buf_get_lines(0, row2, row2 + 1, false)[1]
+        col2 = #line_content
+    else
+        -- Include the last character
+        col2 = col2 + 1
+    end
+
+    local lines = vim.api.nvim_buf_get_text(0, row1, col1, row2, col2, {})
     if next(lines) == nil then
         vim.notify("Invalid text")
         return
@@ -435,6 +462,7 @@ function callbacks.note_from_selected_text(args)
         return
     end
 
+    -- Optional: Make UUID optional via config? For now keeping it but maybe user wants control
     --- @type number
     local uuid = require("vault.utils").generate_uuid()
     new_note_slug = uuid .. " " .. new_note_slug
@@ -448,18 +476,20 @@ function callbacks.note_from_selected_text(args)
 
     --- @type vault.Wikilink.Data.raw
     local link = "[[" .. new_note_slug .. "]]"
-    --TODO: Implement possibilit to add the link inside the line
-    vim.api.nvim_buf_set_lines(0, args.line1 - 1, args.line2, false, { link })
+    
+    -- Replace text with link
+    vim.api.nvim_buf_set_text(0, row1, col1, row2, col2, { link })
 
     local new_note_content = table.concat(lines, "\n")
-    local new_note = require("vault.notes.note")(new_note_path)
-    new_note.data.content = new_note_content
-    new_note:write()
+    local note = require("vault.notes.note")(new_note_path)
+    note.data.content = new_note_content
+    note:write()
     -- renew the note to update marksman cache
     if vim.fn.executable("marksman") == 1 then
         vim.cmd("LspRestart marksman")
     end
 end
+
 
 --- vault.NoteProperties
 --- Opens a picker with the properties of the note
@@ -832,6 +862,15 @@ local M = {
     },
     ["VaultNotesCluster"] = {
         callback = function(args)
+            local path = vim.fn.expand("%")
+            -- Check if we are even in the vault note buffer
+            if type(path) ~= "string" then
+                return
+            end
+            -- if root dir is nil or empty, return early
+
+            -- Are we even in the vault?
+
             local input = args.args
 
             if input == "" or input == nil then

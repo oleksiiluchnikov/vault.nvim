@@ -1,5 +1,7 @@
 local Object = require("vault.core.object")
-local scanner = require("vault.scanner")
+local function scanner()
+    return require("vault.scanner")
+end
 
 local utils = require("vault.utils")
 --- @type vault.Config|vault.Config.options
@@ -251,7 +253,7 @@ function Note:write(path, force)
     if config.options.check_duplicate_basename == true or force == false then
         local new_stem = vim.fn.fnamemodify(path, ":t:r")
         --- @type table<string, table<string, string>>
-        local paths = scanner.paths()
+        local paths = scanner().paths()
         for _, t in pairs(paths) do
             local stem = vim.fn.fnamemodify(t.path, ":t:r")
             if utils.match(stem, new_stem, "exact", false) == true then
@@ -561,11 +563,22 @@ function Note:move(new_path, force, verbose)
         end
     end
 
-    vim.fn.rename(self.data.path, new_path)
+    local ok = vim.fn.rename(self.data.path, new_path)
+    if ok ~= 0 then
+        error("Failed to rename file: " .. self.data.path .. " -> " .. new_path)
+        return false
+    end
 
     -- Update note data
+
     self.data.path = new_path
     self.data.slug = utils.path_to_slug(new_path)
+
+    local old_path = self.data.path
+    local watcher = require("vault.core.state").get_global_key("watcher")
+    if watcher and watcher.handle_rename then
+        watcher:handle_rename(old_path, new_path)
+    end
 
     ---@type vault.path[]
     local paths_to_refresh = {
@@ -636,7 +649,7 @@ function Note:update_content(search_string, replace_string, lnums)
     if type(replace_string) ~= "string" then
         return
     end
-    local lines = vim.split(self.data.content, "\n")
+    local lines = vim.split(self.data.content or "", "\n")
     if next(lines) == nil then
         return
     end
@@ -644,17 +657,54 @@ function Note:update_content(search_string, replace_string, lnums)
     -- TODO: handle multiple matches in whole file
     if lnums then
         for _, occurence in pairs(lnums) do
-            local line = lines[occurence.lnum]
-            if line and utils.match(line, search_string, "contains", false) == true then
-                -- local escaped_search_string = vim.pesc(search_string)
-                -- lines[occurence.lnum] = line:gsub(escaped_search_string, replace_string)
-                local start_col = occurence.col
-                local end_col = occurence.end_col
-                local new_line = line:sub(1, start_col - 1)
-                    .. replace_string
-                    .. line:sub(end_col + 1)
-                lines[occurence.lnum] = new_line
+            -- support different lnum indexing (0-based or 1-based)
+            local lnum = occurence.lnum
+            if not lnum then
+                goto continue_occ
             end
+            if not lines[lnum] and lines[lnum + 1] then
+                lnum = lnum + 1
+            end
+            local line = lines[lnum]
+            if not line then
+                goto continue_occ
+            end
+
+            if utils.match(line, search_string, "contains", false) == true then
+                local start_col = occurence.col or occurence.start_col or occurence.start
+                local end_col = occurence.end_col or occurence.finish or occurence["end"]
+
+                if not start_col or not end_col then
+                    goto continue_occ
+                end
+
+                start_col = tonumber(start_col)
+                end_col = tonumber(end_col)
+                if not start_col or not end_col then
+                    goto continue_occ
+                end
+
+                local original_sub = line:sub(start_col, end_col)
+
+                -- try to extract captures from the original substring using the search pattern
+                local found_start, found_end, captures = original_sub:find(search_string)
+
+                local replacement_processed = replace_string
+
+                if found_start then
+                    -- expand %1..%9 in replacement_processed using captures
+                    replacement_processed = replacement_processed:gsub("%%(%d)", function(d)
+                        return tostring(captures[tonumber(d)] or "")
+                    end)
+                end
+
+                local new_line = line:sub(1, start_col - 1)
+                    .. replacement_processed
+                    .. line:sub(end_col + 1)
+                lines[lnum] = new_line
+            end
+
+            ::continue_occ::
         end
     else
         for i, line in pairs(lines) do
@@ -668,6 +718,11 @@ function Note:update_content(search_string, replace_string, lnums)
     -- write the new content to the file
     local new_content = table.concat(lines, "\n")
     self:overwrite(new_content)
+
+    -- refresh buffer if open so changes show up immediately
+    if refresh_buffers then
+        pcall(refresh_buffers, { self.data.path })
+    end
 
     return self
 end

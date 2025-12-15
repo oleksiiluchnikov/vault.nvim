@@ -1,6 +1,8 @@
 local Object = require("vault.core.object")
 local state = require("vault.core.state")
-local scanner = require("vault.scanner")
+local function scanner()
+    return require("vault.scanner")
+end
 
 --- @alias vault.Wikilink.Data.partial string A partial wikilink that might not contain full markdown syntax
 
@@ -95,7 +97,7 @@ function WikilinkData:init(this)
         self.target = this.target
     else
         --- @type vault.Notes.data.slugs
-        local slugs = state.get_global_key("cache.notes.slugs") or scanner.slugs()
+        local slugs = state.get_global_key("cache.notes.slugs") or scanner().slugs()
         if slugs[self.slug] then
             self.target = self.slug
         end

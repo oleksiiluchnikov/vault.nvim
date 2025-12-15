@@ -213,12 +213,6 @@ local DEFAULT_OPTIONS = {
         },
     },
     previewer = "glow", -- The previewer to use. Default: "glow"
-    -- Features to enable
-    features = {
-        cmp = true, -- Enable cmp
-        commands = true, -- Enable commands
-        blink = true, -- blink.cmp inegration
-    },
     telescope = {
         pickers = {
             -- custom = function(opts)
@@ -229,6 +223,22 @@ local DEFAULT_OPTIONS = {
             --     )
             -- end,
         },
+    },
+
+    features = {
+        cmp = true,
+        commands = true,
+        blink = true,
+        watcher = true, -- NEW: Enable file watcher
+    },
+
+    watcher = {
+        enabled = true,
+        debounce_ms = 500, -- Debounce delay for batch processing
+        auto_update_links = true, -- Automatically update wikilinks
+        notify_on_rename = true, -- Show notifications for renames
+        watch_external = true, -- Watch for external file changes
+        async_rename = true, -- Use async background processing for renames
     },
 }
 

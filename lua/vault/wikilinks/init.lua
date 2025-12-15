@@ -4,7 +4,11 @@ local state = require("vault.core.state")
 --- @type vault.Config|vault.Config.options
 local config = require("vault.config")
 local Wikilink = require("vault.wikilinks.wikilink")
-local scanner = require("vault.scanner")
+
+local function scanner()
+    return require("vault.scanner")
+end
+
 local Collection = require("vault.core.collection")
 
 local Job = require("plenary.job")
@@ -52,7 +56,7 @@ function Wikilinks:init(notes)
     self.map = {}
 
     if not notes then
-        self.map = scanner.wikilinks()
+        self.map = scanner().wikilinks()
     else
         -- Collect wikilinks from notes
         for slug, note in pairs(notes.map) do
@@ -118,13 +122,15 @@ function Wikilinks:by_target(slug, match_opt, case_sensitive)
 
     match_opt = match_opt or "exact"
     case_sensitive = case_sensitive or false
+    -- P(self.map[slug])
+    -- error("asd")
 
     local wikilinks = {}
-    for slug, wikilink in pairs(self.map) do
+    for target_slug, wikilink in pairs(self.map) do
         -- if wikilink.target == target then
         --   table.insert(wikilinks, wikilink)
         -- end
-        if utils.match(wikilink.data.target, slug, match_opt, case_sensitive) then
+        if utils.match(target_slug, slug, match_opt, case_sensitive) then
             wikilinks[slug] = wikilink
         end
     end

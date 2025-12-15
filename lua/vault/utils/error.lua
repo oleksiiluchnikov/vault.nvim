@@ -23,6 +23,18 @@
 ---| '"NOT_EXECUTABLE"' # File not executable
 ---| '"INVALID_NAME"' # Invalid resource name
 ---| '"IS_EMPTY"' # Resource is empty
+---| '"NETWORK_ERROR"' # Network-related failure
+---| '"TIMEOUT"' # Operation timed out
+---| '"AUTHENTICATION_FAILED"' # Invalid credentials
+---| '"PERMISSION_DENIED"' # Insufficient permissions
+---| '"RATE_LIMITED"' # Hit a rate limit
+---| '"CONFLICT"' # Resource conflict
+---| '"DEPENDENCY_ERROR"' # External dependency failure
+---| '"PARSING_ERROR"' # Failed to parse data
+---| '"SERIALIZATION_ERROR"' # Failed to serialize data
+---| '"UNSUPPORTED_OPERATION"' # Operation is not supported
+---| '"UNKNOWN"' # Fallback for unknown errors
+
 
 --- @class vault.ErrorConfig
 --- @field prefix string # Error message prefix
@@ -117,7 +129,21 @@ Error.codes = {
     NOT_EXECUTABLE = 1500,
     INVALID_NAME = 1600,
     IS_EMPTY = 1700,
+
+    -- Extended Errors (1800+)
+    NETWORK_ERROR = 1800,
+    TIMEOUT = 1810,
+    AUTHENTICATION_FAILED = 1820,
+    PERMISSION_DENIED = 1830,
+    RATE_LIMITED = 1840,
+    CONFLICT = 1850,
+    DEPENDENCY_ERROR = 1860,
+    PARSING_ERROR = 1870,
+    SERIALIZATION_ERROR = 1880,
+    UNSUPPORTED_OPERATION = 1890,
+    UNKNOWN = 1999,
 }
+
 
 --- --- Pre-compiled error templates for performance
 --- --- @type table<vault.ErrorCode, string>
@@ -158,8 +184,20 @@ Error._templates = {
     [1500] = "[Vault.nvim][E1500] Not executable `%s`",
     [1600] = "[Vault.nvim][E1600] Invalid name `%s`",
     [1700] = "[Vault.nvim][E1700] Is empty `%s`",
-    UNKNOWN_ERROR = "[Vault.nvim][E999] Unknown error `%s",
+    [1800] = "[Vault.nvim][E1800] Network error `%s`",
+    [1810] = "[Vault.nvim][E1810] Timeout `%s`",
+    [1820] = "[Vault.nvim][E1820] Authentication failed `%s`",
+    [1830] = "[Vault.nvim][E1830] Permission denied `%s`",
+    [1840] = "[Vault.nvim][E1840] Rate limited `%s`",
+    [1850] = "[Vault.nvim][E1850] Conflict `%s`",
+    [1860] = "[Vault.nvim][E1860] Dependency error `%s`",
+    [1870] = "[Vault.nvim][E1870] Parsing error `%s`",
+    [1880] = "[Vault.nvim][E1880] Serialization error `%s`",
+    [1890] = "[Vault.nvim][E1890] Unsupported operation `%s`",
+    [1999] = "[Vault.nvim][E1999] Unknown error `%s`",
+    UNKNOWN_ERROR = "[Vault.nvim][E999] Unknown error `%s`",
 }
+
 
 --- Initialize error templates for faster formatting
 local function init_templates()
@@ -300,11 +338,37 @@ for code, _ in pairs(Error.codes) do
         return Error.new(code, value, suggestion)
     end
 end
+
 for code, func in pairs(error_constructors) do
     Error[code] = func
 end
+
+-- -- Add lowercase / camelCase helpers, e.g. error.missing_parameter("this")
+-- local function add_alias(name, target)
+--     Error[name] = function(value, suggestion)
+--         return Error[target](value, suggestion)
+--     end
+-- end
+--
+-- add_alias("missing_parameter", "MISSING_PARAMETER")
+-- add_alias("invalid_parameter", "INVALID_PARAMETER")
+-- add_alias("invalid_type", "INVALID_TYPE")
+-- add_alias("invalid_value", "INVALID_VALUE")
+-- add_alias("file_not_found", "FILE_NOT_FOUND")
+-- add_alias("command_execution_error", "COMMAND_EXECUTION_ERROR")
+-- add_alias("configuration_error", "CONFIGURATION_ERROR")
+-- add_alias("api_usage_error", "API_USAGE_ERROR")
+-- add_alias("invalid_file", "INVALID_FILE")
+-- add_alias("already_exists", "ALREADY_EXISTS")
+-- add_alias("not_exists", "NOT_EXISTS")
+-- add_alias("not_readable", "NOT_READABLE")
+-- add_alias("not_writable", "NOT_WRITABLE")
+-- add_alias("not_executable", "NOT_EXECUTABLE")
+-- add_alias("invalid_name", "INVALID_NAME")
+-- add_alias("is_empty", "IS_EMPTY")
 
 -- Initialize on module load
 init_templates()
 
 return Error
+
