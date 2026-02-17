@@ -323,6 +323,29 @@ vault_actions.directory.rename = function(bufnr)
     vim.notify("vault_actions.directory.rename is not implemented yet")
 end
 
+--- @type table<string, fun(bufnr?: number, selections?: table<vault.TelescopeEntry>): nil>
+vault_actions.base = {}
+
+--- Open Telescope picker for notes matched by a specific base
+function vault_actions.base.enter(bufnr)
+    local _, selection, _ = utils.get_picker_selection(bufnr)
+    vault_actions.close(bufnr)
+    --- @type vault.Base
+    local base = selection.value
+    require("vault.api").open_picker_base_notes(base.data.name)
+end
+
+--- Open the .base file for editing
+function vault_actions.base.edit(bufnr)
+    local _, selection, _ = utils.get_picker_selection(bufnr)
+    vault_actions.close(bufnr)
+    --- @type vault.Base
+    local base = selection.value
+    if base.data.path and base.data.path ~= "" then
+        vim.cmd("edit " .. vim.fn.fnameescape(base.data.path))
+    end
+end
+
 --[[
 -- TODO: Idea is to ivert telescope picker like following logic:
 --  I we have picker that recent filtor was with notes with tag "foo" and we want to invert it to achive notes without tag "foo"

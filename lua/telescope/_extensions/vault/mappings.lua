@@ -120,4 +120,25 @@ M.directories = function(_, map)
     return true
 end
 
+--- @param map vault.Picker.map
+M.bases = function(_, map)
+    map("i", "<C-c>", vault_actions.close)
+    map("n", "<C-c>", vault_actions.close)
+
+    map("i", "<CR>", vault_actions.base.enter)
+    map("n", "<CR>", vault_actions.base.enter)
+
+    map("i", "<C-s>", vault_actions.resort)
+    map("n", "<C-s>", vault_actions.resort)
+
+    -- select all entries in the picker
+    map("i", "<C-a>", require("telescope.actions").select_all)
+    map("n", "<C-a>", require("telescope.actions").select_all)
+
+    map("i", "<C-d>", require("telescope.actions").drop_all)
+    map("n", "<C-d>", require("telescope.actions").drop_all)
+
+    return true
+end
+
 return M

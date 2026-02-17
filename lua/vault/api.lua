@@ -225,4 +225,30 @@ function M.open_picker_lines_starting_with_dash()
         :find()
 end
 
+--- Open the picker with all bases (Level 1)
+--- @return nil
+function M.open_picker_bases()
+    pickers.bases():find()
+end
+
+--- Open the picker with matched notes for a specific base (Level 2)
+--- @param base_name string
+--- @return nil
+function M.open_picker_base_notes(base_name)
+    if not base_name then
+        error("No base name provided")
+    end
+    local bases = require("vault.bases")()
+    local base = bases:get(base_name)
+    if not base then
+        vim.notify("[vault] Base not found: " .. tostring(base_name), vim.log.levels.ERROR)
+        return
+    end
+    local base_notes_picker = require("telescope._extensions.vault.pickers.bases.notes")
+    local picker = base_notes_picker({ base = base })
+    if picker then
+        picker:find()
+    end
+end
+
 return M

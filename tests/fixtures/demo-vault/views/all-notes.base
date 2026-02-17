@@ -1,0 +1,7 @@
+views:
+  - type: table
+    name: "All Notes"
+    order:
+      - file.name
+      - file.folder
+      - file.ext

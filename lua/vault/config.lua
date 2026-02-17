@@ -244,6 +244,11 @@ local DEFAULT_OPTIONS = {
         -- Frontmatter key to update on rename (e.g. `slug`). If nil, no frontmatter changes are made.
         frontmatter_key = "slug",
     },
+
+    bases = {
+        ext = ".base", -- File extension for base files
+        dirs = nil, -- Specific directories to scan for .base files (nil = scan entire vault)
+    },
 }
 
 --- Expand the root directory path.
