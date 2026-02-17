@@ -14,7 +14,7 @@ function vault.setup(opts)
     end
 
     -- Initialize file watcher if enabled
-    if config.options.features.watcher ~= false then
+    if config.options.features.watcher == true then
         local Watcher = require("vault.watcher")
         local watcher = Watcher()
 

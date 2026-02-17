@@ -296,4 +296,111 @@ function utils.generate_uuid()
     return tonumber(os.date("%Y%m%d%H%M")) -- YYYYMMDDHHMM (202301011924)
 end
 
+-- Safe glob helpers: expand simple brace-lists like "**/*.{md,markdown}"
+-- into multiple simple globs and dedupe results. We do NOT monkeypatch
+-- global vim functions; callers should use these helpers when constructing
+-- patterns that might contain brace-lists.
+local function split_brace(pattern)
+    local brace = pattern:match("%{([^}]+)%}")
+    if not brace then
+        return nil
+    end
+    local parts = {}
+    for token in string.gmatch(brace, "[^,]+") do
+        parts[#parts + 1] = token
+    end
+    local before, after = pattern:match("^(.-)%{.+%}(.-)$")
+    return before, parts, after
+end
+
+local function dedupe_append(tbl, seen, val)
+    if not seen[val] then
+        tbl[#tbl + 1] = val
+        seen[val] = true
+    end
+end
+
+--- Safe wrapper around vim.fn.glob that expands a single brace-list.
+--- @param pattern string
+--- @param list boolean
+--- @param nosort boolean
+function utils.safe_glob(pattern, list, nosort)
+    if type(pattern) ~= "string" then
+        return vim.fn.glob(pattern, list, nosort)
+    end
+    local before, parts, after = split_brace(pattern)
+    if not parts then
+        return vim.fn.glob(pattern, list, nosort)
+    end
+
+    if list then
+        local results = {}
+        local seen = {}
+        for _, part in ipairs(parts) do
+            local p = before .. part .. after
+            local res = vim.fn.glob(p, true, nosort)
+            if type(res) == "table" then
+                for _, f in ipairs(res) do
+                    dedupe_append(results, seen, f)
+                end
+            end
+        end
+        return results
+    else
+        for _, part in ipairs(parts) do
+            local p = before .. part .. after
+            local res = vim.fn.glob(p, false, nosort)
+            if type(res) == "string" and res ~= "" then
+                return res
+            end
+        end
+        return ""
+    end
+end
+
+--- Safe wrapper around vim.fn.globpath that expands a single brace-list.
+--- @param path string
+--- @param pattern string
+--- @param list boolean
+--- @param nosort boolean
+function utils.safe_globpath(path, pattern, list, nosort)
+    if type(pattern) ~= "string" then
+        return vim.fn.globpath(path, pattern, list, nosort)
+    end
+    local before, parts, after = split_brace(pattern)
+    if not parts then
+        return vim.fn.globpath(path, pattern, list, nosort)
+    end
+
+    if list then
+        local results = {}
+        local seen = {}
+        for _, part in ipairs(parts) do
+            local p = before .. part .. after
+            local res = vim.fn.globpath(path, p, true, nosort)
+            if type(res) == "table" then
+                for _, f in ipairs(res) do
+                    dedupe_append(results, seen, f)
+                end
+            end
+        end
+        return results
+    else
+        for _, part in ipairs(parts) do
+            local p = before .. part .. after
+            local res = vim.fn.globpath(path, p, false, nosort)
+            if type(res) == "string" and res ~= "" then
+                return res
+            end
+        end
+        return ""
+    end
+end
+
+--- Export split helper for tests
+function utils._split_brace_for_tests(pattern)
+    return split_brace(pattern)
+end
+
 return utils
+

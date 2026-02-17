@@ -108,7 +108,7 @@ end
 --- Default configuration options
 --- @type vault.Config.options
 local DEFAULT_OPTIONS = {
-    root = nil,
+    root = "~/knowledge",
     dirs = nil,
     ignore = {
         ".git/*",
@@ -229,16 +229,20 @@ local DEFAULT_OPTIONS = {
         cmp = true,
         commands = true,
         blink = true,
-        watcher = true, -- NEW: Enable file watcher
+        watcher = false, -- NEW: Enable file watcher
     },
 
     watcher = {
-        enabled = true,
+        enabled = false,
         debounce_ms = 500, -- Debounce delay for batch processing
         auto_update_links = true, -- Automatically update wikilinks
         notify_on_rename = true, -- Show notifications for renames
         watch_external = true, -- Watch for external file changes
         async_rename = true, -- Use async background processing for renames
+        -- When true, ask the user for confirmation before applying link updates
+        prompt_on_rename = false,
+        -- Frontmatter key to update on rename (e.g. `slug`). If nil, no frontmatter changes are made.
+        frontmatter_key = "slug",
     },
 }
 
@@ -267,22 +271,81 @@ end
 ---
 --- @param dirs? table - The directories to expand.
 --- @return table? - The expanded directories.
+local function split_path(p)
+    local parts = {}
+    for part in string.gmatch(p or "", "[^/]+") do
+        parts[#parts + 1] = part
+    end
+    return parts
+end
+
+local function resolve_case_sensitive_path(base, rel)
+    if rel == nil or rel == "" then
+        return base
+    end
+    local current = base
+    for _, comp in ipairs(split_path(rel)) do
+        local found = nil
+        local ok, entries = pcall(vim.fn.readdir, current)
+        if ok and type(entries) == "table" then
+            for _, entry in ipairs(entries) do
+                if entry:lower() == comp:lower() then
+                    found = entry
+                    break
+                end
+            end
+        end
+        if found then
+            current = current .. "/" .. found
+        else
+            current = current .. "/" .. comp
+        end
+    end
+    return current
+end
+
 local function expand_dirs(root, dirs)
     if dirs == nil then
         return nil
     end
-    -- Expand the directories.
+
     for key, dir in pairs(dirs) do
         if type(dir) == "string" then
+            local candidate = nil
+
             if dir:find(root, 1, true) == 1 then
-                dirs[key] = vim.fn.expand(dir)
+                -- dir already contains root; prefer exact expanded path first
+                candidate = vim.fn.expand(dir)
+                if vim.fn.isdirectory(candidate) == 0 then
+                    -- fall back to case-insensitive resolution of the relative part
+                    local rel = dir:sub(#root + 2)
+                    candidate = resolve_case_sensitive_path(root, rel)
+                    if vim.fn.isdirectory(candidate) == 0 then
+                        -- final fallback: use the unexpanded concatenation
+                        candidate = root .. "/" .. rel
+                    end
+                end
             else
-                dirs[key] = vim.fn.expand(root .. "/" .. dir)
+                -- prefer exact expanded path with given case first
+                candidate = vim.fn.expand(root .. "/" .. dir)
+                if vim.fn.isdirectory(candidate) == 0 then
+                    -- try case-insensitive resolution preserving actual filesystem case
+                    local ci = resolve_case_sensitive_path(root, dir)
+                    if vim.fn.isdirectory(ci) == 1 then
+                        candidate = ci
+                    else
+                        -- fallback to expanded path (even if non-existent)
+                        candidate = vim.fn.expand(root .. "/" .. dir)
+                    end
+                end
             end
+
+            dirs[key] = candidate
         elseif type(dir) == "table" then
             dirs[key] = expand_dirs(root, dir)
         end
     end
+
     return dirs
 end
 
@@ -310,7 +373,11 @@ local function validate_config(options)
     if not options.root then
         vim.notify("No root directory specified. Attempting to use demo vault", vim.log.levels.INFO)
         local demo_vault_root = get_demo_vault_root()
-        error("TODO: implement get_demo_vault_root()")
+        if demo_vault_root then
+            options.root = demo_vault_root
+        else
+            return false, "root directory must be specified"
+        end
     end
 
     if type(options.root) ~= "string" then
@@ -330,18 +397,24 @@ function Config.setup(options)
         vim.notify("Reinitializing vault.nvim configuration", vim.log.levels.INFO)
     end
 
-    options = vim.tbl_deep_extend("force", Config.get_defaults(), options or {})
+    local defaults = Config.get_defaults()
+    local user_options = options or {}
+    local merged = vim.tbl_deep_extend("force", defaults, user_options)
 
-    local is_valid, err = validate_config(options)
+    local is_valid, err = validate_config(merged)
     if not is_valid then
         error("Invalid configuration: " .. err)
     end
 
-    options.root = expand_root(options.root)
-    options.dirs = expand_dirs(options.root, options.dirs)
+    -- Only expand the root if user provided a custom root explicitly
+    if user_options.root ~= nil then
+        merged.root = expand_root(merged.root)
+    end
 
-    --- @cast options vault.Config.options
-    Config.options = options
+    merged.dirs = expand_dirs(merged.root, merged.dirs)
+
+    --- @cast merged vault.Config.options
+    Config.options = merged
     Config.is_initialized = true
 end
 

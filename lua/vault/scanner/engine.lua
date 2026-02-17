@@ -11,8 +11,11 @@ local Engine = {}
 function Engine.scan()
     local core = require("vault_core")
     local root = vim.fn.expand(config.options.root) -- Expands and normalizes the root path.
-    return core.scan(root) -- Delegates the scanning operation to the core module.
-end
+    local ignores = config.options.ignore or {} -- Get ignores from config
+    error(vim.inspect(ignores))
 
+    -- Pass both arguments to match the Rust signature
+    return core.scan(root, ignores)
+end
 
 return Engine

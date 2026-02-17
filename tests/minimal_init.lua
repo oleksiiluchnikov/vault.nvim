@@ -1,114 +1,92 @@
--- Disable loading of personal config
+-- tests/minimal_init.lua
+
+-- 1. ISOLATION
+-- Prevent loading user's personal config
+vim.env.NVIM_APPNAME = "nvim-test"
 vim.opt.runtimepath:remove(vim.fn.expand("~/.config/nvim"))
-vim.opt.packpath:remove(vim.fn.expand("~/.config/nvim"))
+vim.opt.packpath:remove(vim.fn.expand("~/.local/share/nvim/site"))
 
--- Get the plugin root directory
-local plugin_root = vim.fn.getcwd()
+-- 2. DEPENDENCY MANAGEMENT
+-- Define a local directory for test dependencies
+local root_cwd = vim.fn.getcwd()
+local test_dir = root_cwd .. "/.tests"
+local pack_dir = test_dir .. "/site/pack/deps/start"
 
--- Function to download and set up dependencies
-local function ensure_dependency(repo, directory)
-    local install_path = vim.fn.stdpath("data") .. "/site/pack/deps/start/" .. directory
-    if vim.fn.empty(vim.fn.glob(install_path)) > 0 then
-        print("Downloading " .. repo .. " to " .. install_path)
-        vim.fn.system({
-            "git",
-            "clone",
-            "--depth",
-            "1",
-            "https://github.com/" .. repo .. ".git",
-            install_path,
-        })
+-- Ensure directory exists
+vim.fn.mkdir(pack_dir, "p")
+vim.opt.packpath = test_dir .. "/site"
+
+local function ensure_plugin(repo)
+    local name = vim.fn.fnamemodify(repo, ":t")
+    local install_path = pack_dir .. "/" .. name
+    if vim.fn.isdirectory(install_path) == 0 then
+        print("Installing " .. repo .. "...")
+        vim.fn.system({ "git", "clone", "--depth=1", "https://github.com/" .. repo, install_path })
     end
-    vim.opt.runtimepath:prepend(install_path)
+    vim.opt.runtimepath:append(install_path)
 end
 
--- Install required dependencies
-ensure_dependency("nvim-lua/plenary.nvim", "plenary.nvim")
-ensure_dependency("MunifTanjim/nui.nvim", "nui.nvim") -- If you're using nui.nvim
+-- Install required plugins
+ensure_plugin("nvim-lua/plenary.nvim")
+ensure_plugin("nvim-telescope/telescope.nvim")
+ensure_plugin("MunifTanjim/nui.nvim")
+ensure_plugin("hrsh7th/nvim-cmp")
+-- Custom dependencies found in your code
+ensure_plugin("oleksiiluchnikov/gradient.nvim")
+ensure_plugin("oleksiiluchnikov/dates.nvim")
 
--- Add the plugin to the runtimepath
--- Ensure plugin_root is defined (fallback to cwd) so tests don't accidentally
--- fall back to loading the user's real Neovim config (~/.config/nvim/init.lua)
-if plugin_root == nil then
-    plugin_root = vim.fn.getcwd()
-end
-vim.opt.runtimepath:prepend(plugin_root)
+-- Add current plugin to runtimepath
+vim.opt.runtimepath:prepend(root_cwd)
 
--- Set up package path for lua modules
-package.path = plugin_root .. "/lua/?.lua;" .. package.path
-package.path = plugin_root .. "/lua/?/init.lua;" .. package.path
-
-
-local luassert = require("luassert")
-
-require("plenary.busted")
-require("luaassert.spy")
-require("luaassert.stub")
-
--- Make assert available globally
-_G.assert = luassert
-
--- Configure Neovim settings for testing
+-- 3. CONFIGURATION
 vim.opt.swapfile = false
-vim.opt.backup = false
-vim.opt.writebackup = false
-vim.opt.hidden = true
 vim.opt.termguicolors = true
-vim.opt.showmode = false
-vim.opt.laststatus = 2
+vim.o.hidden = true
 
--- Create a test configuration
-local test_config = {
-    vault_dir = vim.fn.getcwd() .. "/tests/fixtures/vault",
-    notes = {
-        extension = ".md",
+-- Make assertions available globally for convenience
+_G.assert = require("luassert")
+
+-- 4. SETUP VAULT WITH FIXTURES
+local fixture_root = root_cwd .. "/tests/fixtures/demo-vault"
+
+-- Ensure the fixture directory actually exists to prevent crashes
+if vim.fn.isdirectory(fixture_root) == 0 then
+    vim.notify("Warning: Demo vault not found at " .. fixture_root, vim.log.levels.WARN)
+    vim.fn.mkdir(fixture_root, "p")
+end
+
+require("vault").setup({
+    root = fixture_root,
+    ext = ".md",
+
+    -- Disable features that might cause async noise during tests
+    features = {
+        cmp = false, -- Enable if testing completions specifically
+        commands = true,
+        watcher = false, -- Watchers rely on uv loop, can be flaky in simple tests
     },
-    templates = {
-        subdir = "templates",
-        date_format = "%Y-%m-%d",
-        time_format = "%H:%M",
+
+    tags = {
+        valid = { hex = true },
     },
-    mappings = {
-        -- Add your default mappings here
-    },
-}
 
--- Initialize the plugin with test configuration
-require("vault").setup(test_config)
+    -- Ensure we don't write to standard cache paths during test
+    search_tool = "rg",
+})
 
--- Create helper functions for tests
-_G.t = {
-    -- Helper function to create a test buffer with content
-    create_test_buffer = function(content)
-        local buf = vim.api.nvim_create_buf(true, true)
-        vim.api.nvim_buf_set_lines(buf, 0, -1, true, vim.split(content or "", "\n"))
-        return buf
-    end,
+-- 5. TEST HELPERS
+_G.t = {}
 
-    -- Helper function to clean up test buffers
-    clean_buffer = function(buf)
-        if buf and vim.api.nvim_buf_is_valid(buf) then
-            vim.api.nvim_buf_delete(buf, { force = true })
-        end
-    end,
+-- Helper to read file content for assertions
+function _G.t.read_file(path)
+    local p = fixture_root .. "/" .. path
+    if vim.fn.filereadable(p) == 0 then
+        return nil
+    end
+    return vim.fn.readfile(p)
+end
 
-    -- Helper to create test files
-    create_test_file = function(path, content)
-        local full_path = test_config.vault_dir .. "/" .. path
-        vim.fn.mkdir(vim.fn.fnamemodify(full_path, ":h"), "p")
-        local file = io.open(full_path, "w")
-        if file then
-            file:write(content or "")
-            file:close()
-        end
-    end,
-
-    -- Helper to clean up test files
-    clean_test_file = function(path)
-        local full_path = test_config.vault_dir .. "/" .. path
-        os.remove(full_path)
-    end,
-}
-
--- Ensure test vault directory exists
-vim.fn.mkdir(test_config.vault_dir, "p")
+-- Helper to get absolute path in demo vault
+function _G.t.path(relpath)
+    return fixture_root .. "/" .. relpath
+end

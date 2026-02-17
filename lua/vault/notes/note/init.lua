@@ -398,224 +398,35 @@ end
 --- ```lua
 --- require("vault.notes")():get_random():open_in_obsidian()
 --- ```
---- @param path string - The path to the note to open.
+--- @param path? string - Optional path to the note to open (defaults to current note).
 function Note:open_in_obsidian(path)
-    -- if type(path) ~= "string" then
-    --     error("Invalid path: " .. vim.inspect(path))
-    -- end
-    path = path or self.data.path
-    local function percent_encode(str)
-        return str:gsub("([^%w])", function(c)
-            return string.format("%%%02X", string.byte(c))
-        end)
+    local root = config.options.root
+    if not root then
+        error("Vault root is not configured")
     end
 
-    local url = "obsidian://open?vault="
-        .. percent_encode(vim.fn.fnamemodify(config.options.root, ":t"))
-        .. "&file="
-        .. percent_encode(utils.path_to_relpath(path))
+    local vault_name = vim.fn.fnamemodify(root, ":t")
+    local note_path = path or self.data.path
 
-    vim.fn.jobstart({ "open", url }, { detach = true })
-end
+    -- Ensure we have a relative path from the vault root for Obsidian's 'file' parameter
+    local rel_path = utils.path_to_relpath(note_path)
 
---- Compare two values of a note keys.
----
---- @param key_a string - The key to compare.
---- @param key_b string - The key to compare.
-function Note:compare_values_of(key_a, key_b)
-    if not metadata.is_valid(key_a) then
-        error(
-            "Invalid key: " .. vim.inspect(key_a) .. ". Valid keys: " .. vim.inspect(metadata.keys)
-        )
+    local obsidian_url = string.format(
+        "obsidian://open?vault=%s&file=%s",
+        vim.uri_encode(vault_name, "rfc2396"),
+        vim.uri_encode(rel_path, "rfc2396")
+    )
+
+    local opener = vim.fn.has("mac") == 1 and "open"
+        or (vim.fn.has("win32") == 1 and "start" or "xdg-open")
+
+    local success, err = pcall(function()
+        vim.fn.system({ opener, obsidian_url })
+    end)
+
+    if not success then
+        vim.notify("Failed to open Obsidian: " .. tostring(err), vim.log.levels.ERROR)
     end
-    if not metadata.is_valid(key_b) then
-        error(
-            "Invalid key: " .. vim.inspect(key_b) .. ". Valid keys: " .. vim.inspect(metadata.keys)
-        )
-    end
-
-    if type(key_a) ~= "string" or type(key_b) ~= "string" then
-        return false
-    end
-
-    if self[key_a] == nil or self[key_b] == nil then
-        return false
-    end
-
-    if self[key_a] == self[key_b] then
-        return true
-    end
-
-    return false
-end
-
-local function refresh_buffers(paths)
-    for _, path in ipairs(paths) do
-        local bufnr = vim.fn.bufnr(path)
-        if bufnr > 0 then
-            vim.api.nvim_buf_call(bufnr, function()
-                vim.cmd("e")
-            end)
-        end
-    end
-end
-
---- Handle existing note stem
---- @param new_path vault.path
---- @return vault.slug
-local function handle_existing_note_stem(new_path)
-    --- @type vault.Notes
-    local notes = state.get_global_key("notes") or require("vault.notes")()
-    notes:init()
-    local new_stem = utils.path_to_stem(new_path)
-    local new_slug = utils.path_to_slug(new_path)
-    local is_stem_exists = notes:has("stem", new_stem)
-
-    if is_stem_exists == true then
-        new_slug = vim.fn.input("New slug: ")
-    end
-    return new_slug
-end
-
--- Create parent directories if they don't exist
---- @param path vault.path
---- @return nil
-local function create_parent_directories(path)
-    local new_path_dir = vim.fn.fnamemodify(path, ":p:h")
-    vim.fn.mkdir(new_path_dir, "p")
-    -- TODO: notify if the directory doesn't exist and created
-end
-
---- Rename(Move) a note and update connected notes.
----
---- Goals:
---- 1. Updates file path and name on disk
---- 2. Updates note data and metadata
---- 3. Updates references in connected notes (inlinks/outlinks)
---- 4. Refreshes Neovim buffers to reflect changes
---- 5. Shows move notifications if verbose enabled
---- 6. Handles existing note stem
---- 7. Creates parent directories if they don't exist
----
---- @param new_path vault.path - The new path to move the note to.
---- @param force? boolean - Whether to force rename even if the note with the same stem already exists.
---- @param verbose? boolean - Whether to print a notification when the connected notes are updated.
---- @return boolean
-function Note:move(new_path, force, verbose)
-    if self.data.path == new_path then
-        vim.notify("Same path: " .. vim.inspect(new_path))
-        return false
-    end
-    force = force or false
-    verbose = verbose or true
-
-    if new_path == "" then
-        error("Invalid path: " .. vim.inspect(new_path))
-        return false
-    end
-
-    create_parent_directories(new_path)
-
-    --- @type vault.slug[]
-    local inlinks = vim.tbl_keys(self.data.inlinks)
-    -- local has_inlinks = next(inlinks) ~= nil
-    --
-
-    local paths_to_update = {}
-    if next(inlinks) ~= nil then
-        -- local paths_to_update = vim.tbl_map(function()
-        --     return utils.slug_to_path(path)
-        -- end, inlinks)
-        for slug, _ in pairs(inlinks) do
-            paths_to_update[utils.slug_to_path(slug)] = true
-        end
-
-        local prev_wikilink = self.data.slug
-        local new_wikilink = utils.path_to_slug(new_path)
-        local message = ""
-        if verbose then
-            message = prev_wikilink .. " -> " .. new_wikilink .. " in " .. self.data.slug
-        end
-        -- Update connected notes
-        for path, _ in pairs(paths_to_update) do
-            local note = Note(path)
-            note:update_content(prev_wikilink, new_wikilink)
-            if verbose then
-                message = message
-                    .. "\n"
-                    .. prev_wikilink
-                    .. " -> "
-                    .. new_wikilink
-                    .. " in "
-                    .. note.data.slug
-            end
-        end
-        if verbose then
-            vim.notify("", vim.log.levels.INFO, {
-                title = "Vault",
-                on_open = function(win)
-                    local buf = vim.api.nvim_win_get_buf(win)
-                    vim.api.nvim_set_option_value("filetype", "markdown", { buf = buf })
-                    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { message })
-                end,
-                timeout = 100,
-            })
-        end
-    end
-
-    local ok = vim.fn.rename(self.data.path, new_path)
-    if ok ~= 0 then
-        error("Failed to rename file: " .. self.data.path .. " -> " .. new_path)
-        return false
-    end
-
-    -- Update note data
-
-    self.data.path = new_path
-    self.data.slug = utils.path_to_slug(new_path)
-
-    local old_path = self.data.path
-    local watcher = require("vault.core.state").get_global_key("watcher")
-    if watcher and watcher.handle_rename then
-        watcher:handle_rename(old_path, new_path)
-    end
-
-    ---@type vault.path[]
-    local paths_to_refresh = {
-        self.data.path,
-    }
-    paths_to_refresh = vim.list_extend(paths_to_refresh, vim.deepcopy(paths_to_update) or {}) -- TODO: check if this is needed
-    refresh_buffers(paths_to_refresh)
-end
-
---- Rename note using a new slug.
----
---- Renames the note file using a new slug while maintaining
---- all references and updating connected notes.
----
---- Parameters: ~
----   • {slug} New slug for the note
----
---- Examples: >lua
----   -- Rename using slug
----   note:rename("new-note-name")
----
----   -- Rename with path components
----   note:rename("folder/new-note")
---- <
----
---- See also:
----   • |vault.Note.move()|   More flexible move/rename
----
---- @param slug vault.slug New note slug
-function Note:rename(slug)
-    if type(slug) ~= "string" then
-        error("Invalid new name: " .. vim.inspect(slug))
-    end
-
-    local new_path = utils.slug_to_path(slug)
-
-    self:move(new_path)
 end
 
 --- Update note content by replacing text.
@@ -674,7 +485,10 @@ function Note:update_content(search_string, replace_string, lnums)
                 local start_col = occurence.col or occurence.start_col or occurence.start
                 local end_col = occurence.end_col or occurence.finish or occurence["end"]
 
+                -- If we don't have precise column info, fall back to replacing all occurrences on the line
                 if not start_col or not end_col then
+                    local escaped_search_string = vim.pesc(search_string)
+                    lines[lnum] = line:gsub(escaped_search_string, replace_string)
                     goto continue_occ
                 end
 
@@ -759,38 +573,19 @@ function Note:overwrite(content)
 end
 
 --- Get list of available note methods.
----
---- Returns a list of all available methods on the Note class.
---- Useful for introspection and debugging.
----
---- Returns: ~
----   • Array of method names
----
---- Examples: >lua
----   -- Get all methods
----   local methods = note:_methods()
----
----   -- Print available methods
----   vim.print(note:_methods())
---- <
----
---- @return string[] Method names
-function Note:_methods()
+--- @return string[]
+function Note:get_methods()
     local methods = {}
-    for k, _ in pairs(self.__meta) do
-        table.insert(methods, k)
+    for k, v in pairs(Note) do
+        if type(v) == "function" then
+            table.insert(methods, k)
+        end
     end
     return methods
 end
 
---- @alias vault.Note.constructor fun(this: vault.Note|string): vault.Note
 --- @type vault.Note|vault.Note.constructor
 local VaultNote = Note
 
 state.set_global_key("class.vault.Note", VaultNote)
-
---- @alias vault.Note.Data.constructor fun(this: vault.Note.Data|vault.EntryInfo): vault.Note.Data -- [[@as VaultNote.Data.constructor]]
---- @type vault.Note.Data.constructor|vault.Note.Data
-local VaultNoteData = NoteData
-state.set_global_key("class.vault.NoteData", VaultNoteData)
-return VaultNote -- [[@as VaultNote.constructor]]
+return VaultNote

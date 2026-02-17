@@ -160,7 +160,7 @@ function M.note(_, line, _)
     if #fargs == 1 then
         return {}
     elseif #fargs == 2 then
-        return require("vault.notes.note"):_methods()
+        return require("vault.notes.note"):get_methods()
     elseif #fargs == 3 then
         -- TODO: Decide what to return
         -- return args for the method?

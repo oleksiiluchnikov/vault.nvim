@@ -131,12 +131,14 @@ function Wikilinks:by_target(slug, match_opt, case_sensitive)
         --   table.insert(wikilinks, wikilink)
         -- end
         if utils.match(target_slug, slug, match_opt, case_sensitive) then
-            wikilinks[slug] = wikilink
+            -- Use the map key from the collection (target_slug) so callers get the correct mapping
+            wikilinks[target_slug] = wikilink
         end
     end
 
     return wikilinks
 end
+
 
 --- @return vault.Wikilinks.map
 function Wikilinks:embeds()

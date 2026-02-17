@@ -13,18 +13,47 @@ local PropertyValue = require("vault.properties.property.value")
 
 local Scanner = {}
 
-function Scanner.paths()
-    local core = require("vault_core")
+--- Helper to determine root and ignore patterns based on options
+--- @param opts? { ignore: boolean|string[] }
+--- @return string root, string[] ignores
+local function get_scan_args(opts)
+    opts = opts or {}
     local root = vim.fn.expand(config.options.root)
-    local map = core.paths(root)
-    state.set_global_key("cache.notes.paths", map)
+    local ignores
+
+    if opts.ignore == false then
+        -- User explicitly requested NO ignores (e.g. for a "find all" command)
+        ignores = {}
+    elseif type(opts.ignore) == "table" then
+        -- User provided specific custom ignores for this scan
+        ignores = opts.ignore
+    else
+        -- Default: Use the global config
+        ignores = config.options.ignore or {}
+    end
+
+    return root, ignores
+end
+
+function Scanner.paths(opts)
+    local core = require("vault_core")
+    local root, ignores = get_scan_args(opts)
+
+    -- 2. Performance: Rust scan
+    local map = core.paths(root, ignores)
+
+    -- 3. Cache Miss: Only save to cache if we used standard defaults
+    if not opts then
+        state.set_global_key("cache.notes.paths", map)
+    end
+
     return map
 end
 
 function Scanner.slugs()
     local core = require("vault_core")
-    local root = vim.fn.expand(config.options.root)
-    local slugs = core.slugs(root)
+    local root, ignores = get_scan_args()
+    local slugs = core.slugs(root, ignores)
     state.set_global_key("cache.notes.slugs", slugs)
     return slugs
 end
