@@ -52,6 +52,9 @@ coverage/
 .nyc_output/
 *.lcov
 
+# Test dependencies (auto-cloned by minimal_init.lua)
+.tests/
+
 # Tooling caches
 .cache/
 .mypy_cache/
