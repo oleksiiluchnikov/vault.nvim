@@ -114,6 +114,7 @@ local DEFAULT_OPTIONS = {
         ".git/*",
         ".obsidian/*",
         ".trash/*",
+        "node_modules/*",
     },
     ext = ".md",
     frontmatter = {

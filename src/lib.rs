@@ -127,6 +127,10 @@ impl ParsedNote {
                 continue;
             }
 
+            // Strip inline code spans so we don't extract wikilinks/tags from
+            // backtick-enclosed content (e.g. `[[not a link]]`, `#not-a-tag`).
+            let stripped = strip_inline_code(&line);
+
             // Extract title
             if title.is_none() {
                 if let Some(caps) = RE_H1.captures(&line) {
@@ -144,18 +148,23 @@ impl ParsedNote {
                 });
             }
 
-            // Extract wikilinks
-            for caps in RE_WIKILINK.captures_iter(&line) {
+            // Extract wikilinks (from stripped line to skip inline code)
+            for caps in RE_WIKILINK.captures_iter(&stripped) {
+                let raw_content = &caps[2];
+                // Reject bash-style [[ ... ]] (leading/trailing whitespace)
+                if !is_valid_wikilink_content(raw_content) {
+                    continue;
+                }
                 let embedded = !caps[1].is_empty();
                 wikilinks.push(LinkItem {
                     line: line_num,
-                    target: caps[2].to_string(),
+                    target: raw_content.to_string(),
                     embedded,
                 });
             }
 
-            // Extract tags
-            for caps in RE_TAG.captures_iter(&line) {
+            // Extract tags (from stripped line to skip inline code)
+            for caps in RE_TAG.captures_iter(&stripped) {
                 // Skip tags inside markdown links
                 let tag_with_hash = format!("#{}", &caps[1]);
                 if line.contains(&format!("[{}]", tag_with_hash)) {
@@ -167,8 +176,8 @@ impl ParsedNote {
                 });
             }
 
-            // Extract URLs
-            for caps in RE_URL.captures_iter(&line) {
+            // Extract URLs (from stripped line to skip inline code)
+            for caps in RE_URL.captures_iter(&stripped) {
                 urls.push(ExternalLinkItem {
                     line: line_num,
                     text: caps[1].to_string(),
@@ -176,8 +185,8 @@ impl ParsedNote {
                 });
             }
 
-            // Extract fields
-            for caps in RE_FIELD.captures_iter(&line) {
+            // Extract fields (from stripped line to skip inline code)
+            for caps in RE_FIELD.captures_iter(&stripped) {
                 fields.push(FieldItem {
                     line: line_num,
                     key: caps[1].to_string(),
@@ -322,6 +331,85 @@ fn extract_wikilink_stem(target: &str) -> String {
     // Remove block reference (everything after ^)
     let without_block = without_header.split('^').next().unwrap_or(without_header);
     without_block.trim().to_string()
+}
+
+/// Returns true if the raw wikilink content (the text between `[[` and `]]`)
+/// looks like a valid Obsidian wikilink rather than bash `[[ ... ]]` syntax.
+///
+/// Key heuristic: Obsidian wikilinks never have leading or trailing whitespace
+/// inside the brackets, while bash test expressions always do:
+///   `[[note name]]`       -> valid (no leading/trailing space)
+///   `[[ -d "$path" ]]`    -> invalid (leading space after `[[`)
+fn is_valid_wikilink_content(raw: &str) -> bool {
+    if raw.is_empty() {
+        return false;
+    }
+    // Reject if the raw captured content starts or ends with whitespace.
+    // Bash conditionals: [[ -d "$path" ]] -> captured " -d \"$path\" " has leading space.
+    // Obsidian wikilinks: [[note name]] -> captured "note name" has no leading/trailing space.
+    if raw.starts_with(char::is_whitespace) || raw.ends_with(char::is_whitespace) {
+        return false;
+    }
+    true
+}
+
+/// Strip inline code spans (backtick-enclosed text) from a line by replacing
+/// their content with spaces. This prevents false-positive extraction of
+/// wikilinks, tags, etc. from within inline code.
+///
+/// Handles both single backticks (`code`) and multi-backtick sequences
+/// (`` `code` ``). Preserves line length so character positions remain valid.
+fn strip_inline_code(line: &str) -> String {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut result = line.to_string();
+    let mut i = 0;
+
+    while i < len {
+        if bytes[i] == b'`' {
+            // Count the opening backtick run length
+            let tick_start = i;
+            let mut tick_len = 0;
+            while i < len && bytes[i] == b'`' {
+                tick_len += 1;
+                i += 1;
+            }
+
+            // Find the matching closing backtick run of the same length
+            let content_start = i;
+            let mut found_close = false;
+            while i < len {
+                if bytes[i] == b'`' {
+                    let _close_start = i;
+                    let mut close_len = 0;
+                    while i < len && bytes[i] == b'`' {
+                        close_len += 1;
+                        i += 1;
+                    }
+                    if close_len == tick_len {
+                        // Found matching close — blank out everything from
+                        // opening backticks through closing backticks (inclusive)
+                        let blank: String = " ".repeat(i - tick_start);
+                        result.replace_range(tick_start..i, &blank);
+                        found_close = true;
+                        break;
+                    }
+                    // Not matching length, continue searching
+                } else {
+                    i += 1;
+                }
+            }
+
+            if !found_close {
+                // No matching close found; leave as-is, move past the opening ticks
+                i = content_start;
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    result
 }
 
 // ============================================================================
