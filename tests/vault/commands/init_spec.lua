@@ -177,19 +177,23 @@ describe("Vault command data paths", function()
     end)
 
     describe("Notes()", function()
-        it("should load all 6 fixture notes", function()
+        it("should load all 7 fixture notes", function()
             local notes = Notes()
-            assert.are.equal(6, notes:count())
+            assert.are.equal(7, notes:count())
         end)
     end)
 
     describe("orphans()", function()
-        it("should return 4 orphan notes (no outlinks AND not a wikilink target)", function()
+        it("should return 2 orphan notes (no outlinks AND not a wikilink target)", function()
             local notes = Notes()
             local orphans = notes:orphans()
-            -- Orphans: README.md, Inbox/Untitled.md, Project/My new masterpeace.md, _docs/Project.md
-            -- NOT orphans: test_note.md (has outlinks), test_note_4039790659.md (has outlinks)
-            assert.are.equal(4, #vim.tbl_keys(orphans.map))
+            -- Orphans: Inbox/Untitled.md, _docs/Project.md
+            -- NOT orphans: test_note.md (has outlinks + inlinks from shell_and_code_test),
+            --   test_note_4039790659.md (has outlinks),
+            --   shell_and_code_test.md (has outlinks),
+            --   README.md (has inlinks from shell_and_code_test),
+            --   Project/My new masterpeace.md (has inlinks from shell_and_code_test)
+            assert.are.equal(2, #vim.tbl_keys(orphans.map))
         end)
 
         it("should NOT include notes that have outgoing wikilinks", function()
@@ -206,10 +210,12 @@ describe("Vault command data paths", function()
     end)
 
     describe("linked()", function()
-        it("should return 2 notes that have outlinks (test_note, test_note_4039790659)", function()
+        it("should return 5 notes that have outlinks or inlinks", function()
             local notes = Notes()
             local linked = notes:linked()
-            assert.are.equal(2, #vim.tbl_keys(linked.map))
+            -- shell_and_code_test (outlinks), test_note (outlinks + inlinks),
+            -- test_note_4039790659 (outlinks), README (inlinks), My new masterpeace (inlinks)
+            assert.are.equal(5, #vim.tbl_keys(linked.map))
         end)
 
         it("should only include notes with non-empty outlinks or inlinks", function()
@@ -227,26 +233,30 @@ describe("Vault command data paths", function()
     end)
 
     describe("internals()", function()
-        it("should return 0 notes (no note has BOTH inlinks AND outlinks)", function()
+        it("should return 1 internal note (test_note has BOTH inlinks AND outlinks)", function()
             local notes = Notes()
             local internals = notes:internals()
-            assert.are.equal(0, #vim.tbl_keys(internals.map))
+            -- test_note has outlinks (original) AND inlinks (from shell_and_code_test)
+            assert.are.equal(1, #vim.tbl_keys(internals.map))
         end)
     end)
 
     describe("leaves()", function()
-        it("should return 0 notes (no note is a wikilink target)", function()
+        it("should return 2 leaf notes (wikilink targets with no outlinks)", function()
             local notes = Notes()
             local leaves = notes:leaves()
-            assert.are.equal(0, #vim.tbl_keys(leaves.map))
+            -- README.md (inlinks, no outlinks), Project/My new masterpeace.md (inlinks, no outlinks)
+            assert.are.equal(2, #vim.tbl_keys(leaves.map))
         end)
     end)
 
     describe("with_outlinks_unresolved()", function()
-        it("should return 2 notes (test_note, test_note_4039790659 — all links are dangling)", function()
+        it("should return 3 notes with at least one unresolved outlink", function()
             local notes = Notes()
             local unresolved = notes:with_outlinks_unresolved()
-            assert.are.equal(2, #vim.tbl_keys(unresolved.map))
+            -- test_note (dangling links), test_note_4039790659 (dangling links),
+            -- shell_and_code_test (some outlinks may not resolve by exact slug)
+            assert.are.equal(3, #vim.tbl_keys(unresolved.map))
         end)
 
         it("each returned note should have at least one unresolved wikilink", function()
@@ -586,16 +596,14 @@ describe("Vault note-context commands", function()
     end)
 
     describe(":VaultNoteInlinks", function()
-        it("should return early for test_note.md (no inlinks in fixture)", function()
-            -- test_note.md has no inlinks in the fixture vault.
-            -- The callback checks `next(inlinks) == nil` and returns early
-            -- without opening a picker, so it should complete without error.
+        it("should have inlinks for test_note.md (shell_and_code_test links to it)", function()
+            -- test_note.md now has inlinks from shell_and_code_test.md which contains [[test_note]].
             local Note = require("vault.notes.note")
             local note = Note(test_note_path)
             local inlinks = note.data.inlinks or {}
 
-            -- In the fixture vault, no note links to test_note.md
-            assert.are.equal(0, vim.tbl_count(inlinks), "test_note.md should have no inlinks")
+            -- shell_and_code_test.md links to test_note
+            assert.are.equal(1, vim.tbl_count(inlinks), "test_note.md should have 1 inlink")
         end)
     end)
 
