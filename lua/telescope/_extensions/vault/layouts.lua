@@ -42,4 +42,18 @@ function Layouts.tags()
     }
 end
 
+function Layouts.bases()
+    local bufheight = vim.api.nvim_list_uis()[1].height - 4
+    local bufwidth = vim.api.nvim_list_uis()[1].width - 4
+
+    return {
+        sorting_strategy = "ascending",
+        layout_config = {
+            height = bufheight,
+            width = bufwidth,
+            preview_width = 0.4,
+        },
+    }
+end
+
 return Layouts

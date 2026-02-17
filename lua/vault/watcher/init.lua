@@ -123,6 +123,13 @@ function Watcher:on_event(filename, events)
         return
     end
 
+    -- Check if this is a .base file change
+    local base_ext = (config.options.bases and config.options.bases.ext) or ".base"
+    if full_path:match(vim.pesc(base_ext) .. "$") then
+        self:handle_base_change(full_path)
+        return
+    end
+
     -- Only care about markdown notes
     if not full_path:match(vim.pesc(config.options.ext) .. "$") then
         return
@@ -311,6 +318,22 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug)
 
     return updated
 end
+
+--- Handle a .base file change (created, modified, or deleted).
+--- Invalidates the bases cache so the next access rescans.
+--- @param full_path string absolute path to the changed .base file
+function Watcher:handle_base_change(full_path)
+    -- Invalidate the scanner cache for base files
+    pcall(function()
+        state.set_global_key("cache.bases.raw", nil)
+    end)
+
+    -- Invalidate the Bases collection instance
+    pcall(function()
+        state.set_global_key("bases", nil)
+    end)
+end
+
 
 --- Resolve all wiki-links that point to `old_path` by scanning all notes
 --- and replacing occurrences of [[old_slug...]] with [[new_slug...]].

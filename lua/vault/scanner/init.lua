@@ -185,6 +185,25 @@ function Scanner.dirs(opts)
     return dirs_map
 end
 
+--- Scan for .base files (Obsidian Bases) in the vault.
+--- Returns raw parsed data from the Rust scanner (array of tables).
+--- Each table has: path, relpath, name, filters, formulas, properties, views.
+--- @param opts? { ignore: boolean|string[] }
+--- @return table[] raw_bases
+function Scanner.base_files(opts)
+    local core = require("vault_core")
+    local root, ignores = get_scan_args(opts)
+    local ext = config.options.bases and config.options.bases.ext or ".base"
+    local raw = core.base_files(root, ignores, ext)
+
+    if not opts then
+        state.set_global_key("cache.bases.raw", raw)
+    end
+
+    return raw
+end
+
+
 function Scanner.refresh()
     -- clear cache and state
     state.clear_all()

@@ -1115,6 +1115,33 @@ local M = {
             nargs = 0,
         },
     },
+    ["VaultBases"] = {
+        --- @command :VaultBases [base_name] [[
+        --- Open a picker with all bases or drill into a specific base's matched notes
+        --- @command ]]
+        callback = function(args)
+            local fargs = args.fargs
+            if next(fargs) == nil then
+                require("telescope._extensions.vault.pickers").bases():find()
+                return
+            end
+            local base_name = table.concat(fargs, " ")
+            require("vault.api").open_picker_base_notes(base_name)
+        end,
+        opts = {
+            desc = "Open a picker with Obsidian base database views",
+            nargs = "*",
+            complete = function()
+                local ok, bases = pcall(function()
+                    return require("vault.bases")()
+                end)
+                if ok and bases then
+                    return bases:names()
+                end
+                return {}
+            end,
+        },
+    },
 }
 
 for command, opts in pairs(M) do

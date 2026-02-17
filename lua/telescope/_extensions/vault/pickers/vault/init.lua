@@ -14,6 +14,7 @@ return function(opts)
         { name = "tags", description = "Search and navigate through tags" },
         { name = "links", description = "Find and navigate between linked notes" },
         { name = "wikilinks", description = "Find notes linking to current note" },
+        { name = "bases", description = "Browse Obsidian base database views" },
     }
     -- extend available pickers with vault pickers
     local vault_pickers = require("telescope._extensions.vault.pickers")

@@ -756,6 +756,149 @@ fn build_slugs_set(notes: &[ParsedNote], root: &str) -> HashMap<String, bool> {
         .collect()
 }
 
+// ============================================================================
+// Base File Scanning (.base YAML files for Obsidian Bases)
+// ============================================================================
+
+#[derive(Debug, Serialize)]
+struct BaseFile {
+    path: String,
+    relpath: String,
+    name: String,
+    filters: Option<serde_json::Value>,
+    formulas: Option<serde_json::Value>,
+    properties: Option<serde_json::Value>,
+    views: Option<serde_json::Value>,
+}
+
+/// Convert a serde_yaml::Value to serde_json::Value for mlua serialization.
+fn yaml_to_json(yaml: serde_yaml::Value) -> serde_json::Value {
+    match yaml {
+        serde_yaml::Value::Null => serde_json::Value::Null,
+        serde_yaml::Value::Bool(b) => serde_json::Value::Bool(b),
+        serde_yaml::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                serde_json::Value::Number(i.into())
+            } else if let Some(u) = n.as_u64() {
+                serde_json::Value::Number(u.into())
+            } else if let Some(f) = n.as_f64() {
+                serde_json::Number::from_f64(f)
+                    .map(serde_json::Value::Number)
+                    .unwrap_or(serde_json::Value::Null)
+            } else {
+                serde_json::Value::Null
+            }
+        }
+        serde_yaml::Value::String(s) => serde_json::Value::String(s),
+        serde_yaml::Value::Sequence(seq) => {
+            serde_json::Value::Array(seq.into_iter().map(yaml_to_json).collect())
+        }
+        serde_yaml::Value::Mapping(map) => {
+            let mut obj = serde_json::Map::new();
+            for (k, v) in map {
+                let key = match k {
+                    serde_yaml::Value::String(s) => s,
+                    serde_yaml::Value::Number(n) => n.to_string(),
+                    serde_yaml::Value::Bool(b) => b.to_string(),
+                    _ => continue,
+                };
+                obj.insert(key, yaml_to_json(v));
+            }
+            serde_json::Value::Object(obj)
+        }
+        serde_yaml::Value::Tagged(tagged) => yaml_to_json(tagged.value),
+    }
+}
+
+/// Parse a single .base file and return its structured data.
+fn parse_base_file(path: &Path, root: &str) -> Option<BaseFile> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let yaml: serde_yaml::Value = serde_yaml::from_str(&content).ok()?;
+
+    let mapping = yaml.as_mapping()?;
+
+    let filters = mapping
+        .get(&serde_yaml::Value::String("filters".to_string()))
+        .map(|v| yaml_to_json(v.clone()));
+
+    let formulas = mapping
+        .get(&serde_yaml::Value::String("formulas".to_string()))
+        .map(|v| yaml_to_json(v.clone()));
+
+    let properties = mapping
+        .get(&serde_yaml::Value::String("properties".to_string()))
+        .map(|v| yaml_to_json(v.clone()));
+
+    let views = mapping
+        .get(&serde_yaml::Value::String("views".to_string()))
+        .map(|v| yaml_to_json(v.clone()));
+
+    let path_str = path.to_string_lossy().to_string();
+    let relpath = path_to_relpath(&path_str, root);
+    let name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+
+    Some(BaseFile {
+        path: path_str,
+        relpath,
+        name,
+        filters,
+        formulas,
+        properties,
+        views,
+    })
+}
+
+/// Scan the vault directory for .base files and parse them in parallel.
+fn scan_base_files(root: &str, ignore_patterns: Vec<String>, ext: &str) -> Vec<BaseFile> {
+    let root_path = Path::new(root);
+    if !root_path.exists() {
+        return Vec::new();
+    }
+
+    let glob_set = build_ignore_set(ignore_patterns);
+    let root_owned = root.to_string();
+
+    WalkDir::new(root)
+        .into_iter()
+        .filter_entry(move |e| {
+            if is_hidden(e) {
+                return false;
+            }
+            let path = e.path();
+            if let Ok(rel_path) = path.strip_prefix(root) {
+                if glob_set.is_match(rel_path) {
+                    return false;
+                }
+            }
+            true
+        })
+        .par_bridge()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path()
+                .extension()
+                .and_then(|x| x.to_str())
+                .map_or(false, |x| {
+                    let expected = ext.trim_start_matches('.');
+                    x == expected
+                })
+        })
+        .filter_map(|e| parse_base_file(e.path(), &root_owned))
+        .collect()
+}
+
+fn vault_base_files(
+    lua: &Lua,
+    (root, ignores, ext): (String, Vec<String>, String),
+) -> LuaResult<LuaValue> {
+    let bases = scan_base_files(&root, ignores, &ext);
+    lua.to_value(&bases)
+}
+
 // // ============================================================================
 // // Lua Module Exports
 // // ============================================================================
@@ -916,6 +1059,7 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
     )?;
 
     exports.set("scan", lua.create_function(vault_scan_raw)?)?;
+    exports.set("base_files", lua.create_function(vault_base_files)?)?;
 
     Ok(exports)
 }

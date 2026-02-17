@@ -1,0 +1,30 @@
+filters:
+  or:
+    - file.hasTag("active")
+    - and:
+        - 'status == "active"'
+        - not:
+            - file.inFolder("_docs")
+
+formulas:
+  has_content: '!file.name.isEmpty()'
+
+properties:
+  file.name:
+    displayName: "Name"
+  tags:
+    displayName: "Tags"
+  file.folder:
+    displayName: "Folder"
+
+views:
+  - type: table
+    name: "Active Notes"
+    limit: 50
+    filters:
+      and:
+        - 'file.name.contains("test")'
+    order:
+      - file.name
+      - tags
+      - file.folder
