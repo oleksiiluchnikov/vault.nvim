@@ -17,7 +17,7 @@ wikilinked: [[Hello World]]
 ---
 ]=]
 
-local random_note = Notes():filter("frontmatter",):get_random_note()
+local random_note = Notes():filter("frontmatter"):get_random_note()
 local frontmatter = random_note.data.frontmatter
 print(vim.inspect(frontmatter.data))
 

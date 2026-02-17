@@ -1,7 +1,27 @@
 -- spec/vault_spec.lua
 
 describe("vault.nvim", function()
-    local config
+    local root_cwd = vim.fn.getcwd()
+    local fixture_root = root_cwd .. "/tests/fixtures/demo-vault"
+    local config = {
+        root = fixture_root,
+        ext = ".md",
+
+        -- Disable features that might cause async noise during tests
+        features = {
+            cmp = false, -- Enable if testing completions specifically
+            commands = true,
+            watcher = false, -- Watchers rely on uv loop, can be flaky in simple tests
+        },
+
+        tags = {
+            valid = { hex = true },
+        },
+
+        -- Ensure we don't write to standard cache paths during test
+        search_tool = "rg",
+    }
+    require("vault").setup(config)
 
     before_each(function()
         config = require("vault.config")
@@ -28,7 +48,8 @@ describe("vault.nvim", function()
             root = "~/test-vault",
             ext = ".markdown",
         })
-        assert.equals("~/test-vault", config.options.root) -- Before expansion
+        local home_dir = vim.fn.expand("~")
+        assert.equals(home_dir .. "/test-vault", config.options.root)
         assert.equals(".markdown", config.options.ext)
     end)
 

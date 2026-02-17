@@ -317,8 +317,10 @@ function callbacks.rename(args)
         return
     end
     local new_path = require("vault.utils").slug_to_path(new_slug)
-    
-    local ok, err = pcall(function() note:move(new_path) end)
+
+    local ok, err = pcall(function()
+        note:move(new_path)
+    end)
     if not ok then
         vim.notify("Failed to move note: " .. tostring(err), vim.log.levels.ERROR)
         return
@@ -327,7 +329,6 @@ function callbacks.rename(args)
     vim.cmd("bdelete!")
     note:edit()
 end
-
 
 --- vault.NoteInlinks
 --- Opens a picker with the notes where current note is mentioned
@@ -428,7 +429,7 @@ end
 function callbacks.note_from_selected_text(args)
     local start_pos = vim.api.nvim_buf_get_mark(0, "<")
     local end_pos = vim.api.nvim_buf_get_mark(0, ">")
-    
+
     -- Validate marks
     if start_pos[1] == 0 or end_pos[1] == 0 then
         vim.notify("No selection found", vim.log.levels.WARN)
@@ -438,7 +439,7 @@ function callbacks.note_from_selected_text(args)
     -- Adjust for 0-based indexing for API calls
     local row1, col1 = start_pos[1] - 1, start_pos[2]
     local row2, col2 = end_pos[1] - 1, end_pos[2]
-    
+
     -- Handle visual line mode or block mode if necessary, but assuming characterwise for now
     -- In visual line mode, col1 is 0 and col2 is 2147483647
     if col2 == 2147483647 then
@@ -476,7 +477,7 @@ function callbacks.note_from_selected_text(args)
 
     --- @type vault.Wikilink.Data.raw
     local link = "[[" .. new_note_slug .. "]]"
-    
+
     -- Replace text with link
     vim.api.nvim_buf_set_text(0, row1, col1, row2, col2, { link })
 
@@ -489,7 +490,6 @@ function callbacks.note_from_selected_text(args)
         vim.cmd("LspRestart marksman")
     end
 end
-
 
 --- vault.NoteProperties
 --- Opens a picker with the properties of the note
@@ -689,7 +689,7 @@ local M = {
         callback = callbacks.edit_random_note,
         opts = {
             desc = "Open a random note",
-            complete = completions.note_slugs,
+            complete = completions.notes_filter,
             nargs = "*",
         },
     },

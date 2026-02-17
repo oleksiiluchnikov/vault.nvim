@@ -15,7 +15,10 @@ return function(opts)
 
     opts = opts or {}
     opts.notes = opts.notes or require("vault.notes")()
-    for _, note_path in ipairs(vim.fn.globpath(inbox_dir, "**/*" .. config.options.ext, true, true)) do
+    local utils = require("vault.utils")
+    for _, note_path in
+        ipairs(utils.safe_globpath(inbox_dir, "**/*" .. config.options.ext, true, true))
+    do
         opts.notes:push(require("vault.notes.note")(note_path))
     end
 

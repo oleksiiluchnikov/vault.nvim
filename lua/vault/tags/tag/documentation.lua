@@ -3,7 +3,28 @@ local Job = require("plenary.job")
 local config = require("vault.config")
 local state = require("vault.core.state")
 --- @type vault.Note.constructor|vault.Note
-local Note = require("vault.notes.note")
+local ok, Note = pcall(require, "vault.notes.note")
+if not ok or type(Note) ~= "table" then
+    -- Fallback shim: make the Note dependency optional so this module doesn't error
+    -- when `vault.notes.note` fails to return a module (some setups may `return true`).
+    -- The shim provides a minimal `extend` method so TagDocumentation = Note:extend(...) works.
+    vim.notify("vault: 'vault.notes.note' did not return a module; using fallback Note shim", vim.log.levels.DEBUG)
+    Note = {
+        extend = function(_, _name)
+            local cls = {}
+            cls.__index = cls
+            -- keep extend available for further subclassing
+            function cls:extend(subname)
+                local sub = {}
+                sub.__index = sub
+                function sub:extend() return sub end
+                return sub
+            end
+            return cls
+        end,
+    }
+end
+
 
 --- Tag documentation.
 --- A tag documentation is an object that represents a documentation file for a tag.

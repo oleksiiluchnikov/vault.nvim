@@ -166,6 +166,20 @@ end
 function Notes:load()
     --- @type table<string, table<string, string>>
     local paths = scanner().paths()
+    -- Example of paths structure:
+    -- ["Example Note"] = {
+    --   basename = "Example Note",
+    --   frontmatter = {
+    --     categories = "[[Docs]]",
+    --     created = 20251223125059,
+    --     tags = {},
+    --     type = "reference"
+    --   },
+    --   path = "~/knowledge/Example Note.md",
+    --   relpath = "Example Note.md",
+    --   slug = "Example Note",
+    --   title = "20251223125059"
+    -- },
     for _, data in pairs(paths) do
         self:push(Note(data))
     end

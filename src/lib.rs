@@ -1,3 +1,4 @@
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use mlua::prelude::*;
 use once_cell::sync::Lazy;
 use rayon::prelude::*;
@@ -7,7 +8,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
-use walkdir::{DirEntry, WalkDir};
+use walkdir::{DirEntry, WalkDir}; // <--- Add this
 
 fn is_hidden(entry: &DirEntry) -> bool {
     entry
@@ -327,16 +328,57 @@ fn extract_wikilink_stem(target: &str) -> String {
 // Main Scanning and Aggregation Functions
 // ============================================================================
 
-fn scan_all_notes(root: &str) -> Vec<ParsedNote> {
+fn build_ignore_set(patterns: Vec<String>) -> GlobSet {
+    let mut builder = GlobSetBuilder::new();
+    for pat in patterns {
+        // Add the original pattern (e.g. ".git/*")
+        if let Ok(glob) = Glob::new(&pat) {
+            builder.add(glob);
+        }
+
+        // AUTO-FIX: If pattern ends in "/*", also add the directory itself
+        // so we don't even enter it.
+        // ".git/*" -> add ".git"
+        if pat.ends_with("/*") {
+            let dir_pat = &pat[..pat.len() - 2];
+            if let Ok(glob) = Glob::new(dir_pat) {
+                builder.add(glob);
+            }
+        }
+    }
+    builder.build().unwrap_or_else(|_| GlobSet::empty())
+}
+
+fn scan_all_notes(root: &str, ignore_patterns: Vec<String>) -> Vec<ParsedNote> {
     let root_path = Path::new(root);
     if !root_path.exists() {
         return Vec::new();
     }
 
+    // Build the matcher
+    let glob_set = build_ignore_set(ignore_patterns);
+
     WalkDir::new(root)
         .into_iter()
-        .filter_entry(|e| !is_hidden(e))
-        .par_bridge()
+        .filter_entry(move |e| {
+            // 1. Standard hidden file check
+            if is_hidden(e) {
+                return false;
+            }
+
+            // 2. Glob ignore check
+            // We match against the path relative to the root for gitignore-style behavior
+            let path = e.path();
+            if let Ok(rel_path) = path.strip_prefix(root) {
+                // If it matches a glob, we return false (do not process/descend)
+                if glob_set.is_match(rel_path) {
+                    return false;
+                }
+            }
+
+            true
+        })
+        .par_bridge() // Parallelism kicks in after filtering
         .filter_map(|e| e.ok())
         .filter(|e| e.path().extension().map_or(false, |ext| ext == "md"))
         .filter_map(|e| ParsedNote::from_path(e.path()))
@@ -714,77 +756,166 @@ fn build_slugs_set(notes: &[ParsedNote], root: &str) -> HashMap<String, bool> {
         .collect()
 }
 
+// // ============================================================================
+// // Lua Module Exports
+// // ============================================================================
+//
+// fn vault_paths(lua: &Lua, (root, ignores): (String, Vec<String>)) -> LuaResult<LuaValue> {
+//     let notes = scan_all_notes(&root, ignores);
+//     let paths_map = build_paths_map(&notes, &root);
+//     lua.to_value(&paths_map)
+// }
+//
+// fn vault_slugs(lua: &Lua, (root, ignores): (String, Vec<String>)) -> LuaResult<LuaValue> {
+//     let notes = scan_all_notes(&root, ignores);
+//     let slugs_set = build_slugs_set(&notes, &root);
+//     lua.to_value(&slugs_set)
+// }
+//
+// fn vault_tags(lua: &Lua, (root, ignores): (String, Vec<String>)) -> LuaResult<LuaValue> {
+//     let notes = scan_all_notes(&root, ignores);
+//     let tags_map = build_tags_map(&notes, &root);
+//     lua.to_value(&tags_map)
+// }
+//
+// fn vault_wikilinks(lua: &Lua, root: String) -> LuaResult<LuaValue> {
+//     let notes = scan_all_notes(&root);
+//     let wikilinks_map = build_wikilinks_map(&notes, &root);
+//     lua.to_value(&wikilinks_map)
+// }
+//
+// fn vault_tasks(lua: &Lua, root: String) -> LuaResult<LuaValue> {
+//     let notes = scan_all_notes(&root);
+//     let tasks_map = build_tasks_map(&notes, &root);
+//     lua.to_value(&tasks_map)
+// }
+//
+// fn vault_links(lua: &Lua, root: String) -> LuaResult<LuaValue> {
+//     let notes = scan_all_notes(&root);
+//     let links_map = build_links_map(&notes, &root);
+//     lua.to_value(&links_map)
+// }
+//
+// fn vault_fields(lua: &Lua, root: String) -> LuaResult<LuaValue> {
+//     let notes = scan_all_notes(&root);
+//     let fields_map = build_fields_map(&notes, &root);
+//     lua.to_value(&fields_map)
+// }
+//
+// fn vault_properties(lua: &Lua, root: String) -> LuaResult<LuaValue> {
+//     let notes = scan_all_notes(&root);
+//     let properties_map = build_properties_map(&notes, &root);
+//     lua.to_value(&properties_map)
+// }
+//
+// fn vault_dirs(lua: &Lua, root: String) -> LuaResult<LuaValue> {
+//     let notes = scan_all_notes(&root);
+//     let dirs_map = build_dirs_map(&notes, &root);
+//     lua.to_value(&dirs_map)
+// }
 // ============================================================================
 // Lua Module Exports
 // ============================================================================
 
-fn vault_paths(lua: &Lua, root: String) -> LuaResult<LuaValue> {
-    let notes = scan_all_notes(&root);
-    let paths_map = build_paths_map(&notes, &root);
-    lua.to_value(&paths_map)
+/// Generic helper to reduce boilerplate.
+/// It takes Lua args, scans the notes, applies the specific `builder` function,
+/// and converts the result back to Lua.
+fn run_scanner<T, F>(
+    lua: &Lua,
+    (root, ignores): (String, Vec<String>), // Standardize inputs
+    builder: F,
+) -> LuaResult<LuaValue>
+where
+    T: Serialize,
+    F: FnOnce(&[ParsedNote], &str) -> T,
+{
+    // 1. Heavy lifting: Scan the filesystem
+    let notes = scan_all_notes(&root, ignores);
+
+    // 2. Build the specific map/set using the provided function
+    let data = builder(&notes, &root);
+
+    // 3. Serialize to Lua
+    lua.to_value(&data)
 }
 
-fn vault_slugs(lua: &Lua, root: String) -> LuaResult<LuaValue> {
-    let notes = scan_all_notes(&root);
-    let slugs_set = build_slugs_set(&notes, &root);
-    lua.to_value(&slugs_set)
-}
-
-fn vault_tags(lua: &Lua, root: String) -> LuaResult<LuaValue> {
-    let notes = scan_all_notes(&root);
-    let tags_map = build_tags_map(&notes, &root);
-    lua.to_value(&tags_map)
-}
-
-fn vault_wikilinks(lua: &Lua, root: String) -> LuaResult<LuaValue> {
-    let notes = scan_all_notes(&root);
-    let wikilinks_map = build_wikilinks_map(&notes, &root);
-    lua.to_value(&wikilinks_map)
-}
-
-fn vault_tasks(lua: &Lua, root: String) -> LuaResult<LuaValue> {
-    let notes = scan_all_notes(&root);
-    let tasks_map = build_tasks_map(&notes, &root);
-    lua.to_value(&tasks_map)
-}
-
-fn vault_links(lua: &Lua, root: String) -> LuaResult<LuaValue> {
-    let notes = scan_all_notes(&root);
-    let links_map = build_links_map(&notes, &root);
-    lua.to_value(&links_map)
-}
-
-fn vault_fields(lua: &Lua, root: String) -> LuaResult<LuaValue> {
-    let notes = scan_all_notes(&root);
-    let fields_map = build_fields_map(&notes, &root);
-    lua.to_value(&fields_map)
-}
-
-fn vault_properties(lua: &Lua, root: String) -> LuaResult<LuaValue> {
-    let notes = scan_all_notes(&root);
-    let properties_map = build_properties_map(&notes, &root);
-    lua.to_value(&properties_map)
-}
-
-fn vault_dirs(lua: &Lua, root: String) -> LuaResult<LuaValue> {
-    let notes = scan_all_notes(&root);
-    let dirs_map = build_dirs_map(&notes, &root);
-    lua.to_value(&dirs_map)
+// 1. Define this helper function if you haven't already,
+//    or just use a closure in the module definition.
+fn vault_scan_raw(lua: &Lua, (root, ignores): (String, Vec<String>)) -> LuaResult<LuaValue> {
+    let notes = scan_all_notes(&root, ignores);
+    lua.to_value(&notes)
 }
 
 #[mlua::lua_module]
 fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
     let exports = lua.create_table()?;
 
-    exports.set("paths", lua.create_function(vault_paths)?)?;
-    exports.set("slugs", lua.create_function(vault_slugs)?)?;
-    exports.set("tags", lua.create_function(vault_tags)?)?;
-    exports.set("wikilinks", lua.create_function(vault_wikilinks)?)?;
-    exports.set("tasks", lua.create_function(vault_tasks)?)?;
-    exports.set("links", lua.create_function(vault_links)?)?;
-    exports.set("fields", lua.create_function(vault_fields)?)?;
-    exports.set("properties", lua.create_function(vault_properties)?)?;
-    exports.set("dirs", lua.create_function(vault_dirs)?)?;
+    // exports.set("paths", lua.create_function(vault_paths)?)?;
+    // exports.set("slugs", lua.create_function(vault_slugs)?)?;
+    // exports.set("tags", lua.create_function(vault_tags)?)?;
+    // exports.set("wikilinks", lua.create_function(vault_wikilinks)?)?;
+    // exports.set("tasks", lua.create_function(vault_tasks)?)?;
+    // exports.set("links", lua.create_function(vault_links)?)?;
+    // exports.set("fields", lua.create_function(vault_fields)?)?;
+    // exports.set("properties", lua.create_function(vault_properties)?)?;
+    // exports.set("dirs", lua.create_function(vault_dirs)?)?;
+
+    exports.set(
+        "paths",
+        lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
+            run_scanner(lua, (root, ignores), build_paths_map)
+        })?,
+    )?;
+    exports.set(
+        "slugs",
+        lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
+            run_scanner(lua, (root, ignores), build_slugs_set)
+        })?,
+    )?;
+    exports.set(
+        "tags",
+        lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
+            run_scanner(lua, (root, ignores), build_tags_map)
+        })?,
+    )?;
+    exports.set(
+        "wikilinks",
+        lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
+            run_scanner(lua, (root, ignores), build_wikilinks_map)
+        })?,
+    )?;
+    exports.set(
+        "tasks",
+        lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
+            run_scanner(lua, (root, ignores), build_tasks_map)
+        })?,
+    )?;
+    exports.set(
+        "links",
+        lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
+            run_scanner(lua, (root, ignores), build_links_map)
+        })?,
+    )?;
+    exports.set(
+        "fields",
+        lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
+            run_scanner(lua, (root, ignores), build_fields_map)
+        })?,
+    )?;
+    exports.set(
+        "properties",
+        lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
+            run_scanner(lua, (root, ignores), build_properties_map)
+        })?,
+    )?;
+    exports.set(
+        "dirs",
+        lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
+            run_scanner(lua, (root, ignores), build_dirs_map)
+        })?,
+    )?;
+
+    exports.set("scan", lua.create_function(vault_scan_raw)?)?;
 
     Ok(exports)
 }

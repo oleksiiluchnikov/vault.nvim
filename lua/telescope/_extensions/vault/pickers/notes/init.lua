@@ -27,6 +27,7 @@ return function(opts)
     opts = opts or {}
     opts.notes = opts.notes or require("vault.notes")()
     opts.sort_by = opts.sort_by or "mtime"
+    opts.prompt_title = opts.prompt_title or opts.sort_by
 
     --- @type vault.Note[]
     local results = opts.notes:list()
@@ -34,8 +35,6 @@ return function(opts)
         Log.info("No notes found in vault")
         return
     end
-
-    local prompt_title = opts.sort_by
 
     --- @type integer
     local ui_height = vim.o.lines
@@ -94,7 +93,6 @@ return function(opts)
         else
             col_1_hl_name = "TelescopeResultsNormal"
         end
-
 
         --- --
         -- Display dir before note name
@@ -163,7 +161,6 @@ return function(opts)
             local b_mtime = vim.fn.getftime(b.data.path)
             return a_mtime < b_mtime
         end)
-
     elseif opts.sort_by == "slug" then
         table.sort(results, function(a, b)
             return a.data.slug < b.data.slug
@@ -287,7 +284,7 @@ return function(opts)
     end
 
     local picker_opts = {
-        prompt_title = prompt_title,
+        prompt_title = opts.prompt_title,
         finder = finder,
         sorter = sorters.get_fzy_sorter(),
         previewer = vault_previewers.notes or nil,
