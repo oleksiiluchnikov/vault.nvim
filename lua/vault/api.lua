@@ -195,9 +195,6 @@ function M.open_picker_notes_with_empty_content()
         pattern = table.concat(empty_vim_regex_patterns, "|")
         pattern = [[(]] .. pattern .. [[)]]
     end
-    print(pattern)
-    -- error("Pattern: " .. pattern)
-    -- error("Pattern: " .. pattern)
 
     pickers
         .notes({
@@ -227,7 +224,5 @@ function M.open_picker_lines_starting_with_dash()
         })
         :find()
 end
-
-M.open_picker_lines_starting_with_dash()
 
 return M

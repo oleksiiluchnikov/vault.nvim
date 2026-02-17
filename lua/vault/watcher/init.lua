@@ -227,12 +227,14 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug)
     local updated = 0
     local updated_paths = {}
     for path, info in pairs(pending) do
-        local wf = io.open(path, "w")
-        if wf then
-            wf:write(info.new_content)
-            wf:close()
+        local ok_sw, sw_err = pcall(utils.safe_write, path, info.new_content)
+        if ok_sw then
             updated = updated + 1
             updated_paths[path] = true
+        else
+            vim.schedule(function()
+                vim.notify("[vault] safe_write failed: " .. tostring(sw_err), vim.log.levels.WARN)
+            end)
         end
     end
 
@@ -337,13 +339,10 @@ function Watcher:handle_rename(old_path, new_path)
     end
 
     -- Defer processing if oil is active to let it complete its operations
-    -- if self.oil_guard_enabled and package.loaded["oil"] then
-    -- temporary fix
-    local is_ok, oil = pcall(require, "oil")
-    if is_ok then
-        oil.vim.defer_fn(function()
+    if self.oil_guard_enabled and package.loaded["oil"] then
+        vim.defer_fn(function()
             self:_do_rename_update(old_path, new_path, old_slug, new_slug)
-        end, 1000) -- Wait 500ms for oil to finish
+        end, 1000)
         return 0
     end
 

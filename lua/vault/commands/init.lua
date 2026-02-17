@@ -86,6 +86,7 @@ function callbacks.create_new_note(args)
     local fargs = args.fargs
     if next(fargs) == nil then
         require("vault.popups.fleeting_note")()
+        return
     end
 
     local new_slug = table.concat(fargs, " ")
@@ -188,7 +189,7 @@ function callbacks.today()
     if vim.fn.filereadable(path) == 0 then
         vim.notify("Initializing today's journal note")
     end
-    vim.cmd("e " .. path)
+    vim.cmd("e " .. vim.fn.fnameescape(path))
 end
 
 function callbacks.open_properties_picker(args)
@@ -291,7 +292,7 @@ function callbacks.yesterday()
     if vim.fn.filereadable(path) == 0 then
         vim.notify("Initializing yesterday's journal note")
     end
-    vim.cmd("e " .. path)
+    vim.cmd("e " .. vim.fn.fnameescape(path))
 end
 
 --- vault.NoteRename
@@ -577,7 +578,6 @@ local function construct_notes_picker_args(input)
     if vim.tbl_contains(completions.vault_notes_presets(), input[1]) then
         args[1] = input[1]
     end
-    vim.notify(vim.inspect(args))
 
     -- Check if the second argument is a valid key
     if vim.tbl_contains(completions.note_data_keys(), input[2]) then
@@ -904,7 +904,7 @@ local M = {
         --- If oargs then open picker
         --- if arg, and it is a valid relpath, then move to that location
         callback = function()
-            print("use vault.Rename instead")
+            vim.notify("[vault] :VaultMove is deprecated, use :VaultRename instead", vim.log.levels.WARN)
 
             -- local input = args.fargs[1]
             -- local current_path = vim.fn.expand("%:p")

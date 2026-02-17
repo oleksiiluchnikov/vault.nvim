@@ -337,8 +337,9 @@ Data.inlinks = function(note_data)
     return inlinks
 end
 
-Data.dangling_links = function(note_data)
-    error("Not implemented: " .. vim.inspect(note_data))
+Data.dangling_links = function(_note_data)
+    -- TODO: implement dangling link detection
+    return {}
 end
 
 --- @alias vault.Note.Data.keys table<string, vault.lnum> - E.g. { ["title"] = 1, ["created"] = 2 }
@@ -428,22 +429,24 @@ end
 
 --- @param note_Data vault.Note.Data
 --- @return string?
-Data.status = function(note_data)
-    -- local keys = note_data.keys
-    error("Not implemented: " .. vim.inspect(note_data))
-    -- return keys.status
+Data.status = function(_note_data)
+    -- TODO: implement status extraction from frontmatter
+    return nil
 end
 
-Data.stats = function(note_data)
-    error("Not implemented: " .. vim.inspect(note_data))
+Data.stats = function(_note_data)
+    -- TODO: implement note stats
+    return {}
 end
 
-Data.rust_links = function(note_data)
-    error("Not implemented: " .. vim.inspect(note_data))
+Data.rust_links = function(_note_data)
+    -- TODO: wire to Rust scanner
+    return {}
 end
 
-Data.rust_tags = function(note_data)
-    error("Not implemented: " .. vim.inspect(note_data))
+Data.rust_tags = function(_note_data)
+    -- TODO: wire to Rust scanner
+    return {}
 end
 
 Data.rust_frontmatter = function() end

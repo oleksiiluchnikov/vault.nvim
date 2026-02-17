@@ -91,7 +91,6 @@ end
 
 function Button:on_hover()
     self:highlight()
-    print(self.label)
 end
 
 function Button:on_leave()

@@ -7,7 +7,7 @@ function utils.get_selected_files(prompt_bufnr, smart)
     local selected = {}
     local current_picker = action_state.get_current_picker(prompt_bufnr)
     local selections = current_picker:get_multi_selection()
-    P(selections)
+    -- TODO: implement get_selected_files
     -- if smart and vim.tbl_isempty(selections) then
     --     table.insert(selected, action_state.get_selected_entry())
     -- else

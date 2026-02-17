@@ -282,7 +282,7 @@ function Note:edit(path)
         error("File not found: " .. path)
         return
     end
-    vim.cmd("e " .. path)
+    vim.cmd("e " .. vim.fn.fnameescape(path))
 end
 
 --- Preview with Glow.nvim
@@ -384,12 +384,7 @@ function Note:update_inlinks(path)
         local content = f:read("*all")
         f:close()
         content = content:gsub(inlink.link, new_link)
-        f = io.open(inlink.source.data.path, "w")
-        if f == nil then
-            return
-        end
-        f:write(content)
-        f:close()
+        utils.safe_write(inlink.source.data.path, content)
         vim.notify(inlink.link .. " -> " .. new_link)
     end
 end
@@ -561,15 +556,7 @@ end
 ---
 --- @param content string New note content
 function Note:overwrite(content)
-    ---@diagnostic disable-next-line: undefined-field
-    local fd = vim.uv.fs_open(self.data.path, "w", 438)
-    if not fd then
-        error("Could not open file: " .. self.data.path)
-    end
-    ---@diagnostic disable-next-line: undefined-field
-    vim.uv.fs_write(fd, content, 0)
-    ---@diagnostic disable-next-line: undefined-field
-    vim.uv.fs_close(fd)
+    utils.safe_write(self.data.path, content)
 end
 
 --- Get list of available note methods.
