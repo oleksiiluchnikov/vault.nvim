@@ -314,29 +314,19 @@ local function expand_dirs(root, dirs)
             local candidate = nil
 
             if dir:find(root, 1, true) == 1 then
-                -- dir already contains root; prefer exact expanded path first
-                candidate = vim.fn.expand(dir)
+                -- dir already contains root; resolve the relative part to canonical case
+                local rel = dir:sub(#root + 2)
+                candidate = resolve_case_sensitive_path(root, rel)
                 if vim.fn.isdirectory(candidate) == 0 then
-                    -- fall back to case-insensitive resolution of the relative part
-                    local rel = dir:sub(#root + 2)
-                    candidate = resolve_case_sensitive_path(root, rel)
-                    if vim.fn.isdirectory(candidate) == 0 then
-                        -- final fallback: use the unexpanded concatenation
-                        candidate = root .. "/" .. rel
-                    end
+                    -- fallback: use the unexpanded concatenation
+                    candidate = vim.fn.expand(dir)
                 end
             else
-                -- prefer exact expanded path with given case first
-                candidate = vim.fn.expand(root .. "/" .. dir)
+                -- Always resolve to canonical filesystem case (handles case-insensitive macOS)
+                candidate = resolve_case_sensitive_path(root, dir)
                 if vim.fn.isdirectory(candidate) == 0 then
-                    -- try case-insensitive resolution preserving actual filesystem case
-                    local ci = resolve_case_sensitive_path(root, dir)
-                    if vim.fn.isdirectory(ci) == 1 then
-                        candidate = ci
-                    else
-                        -- fallback to expanded path (even if non-existent)
-                        candidate = vim.fn.expand(root .. "/" .. dir)
-                    end
+                    -- fallback to expanded path (even if non-existent)
+                    candidate = vim.fn.expand(root .. "/" .. dir)
                 end
             end
 

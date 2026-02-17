@@ -16,8 +16,8 @@ end
 --- The slug of the link. e.g. [[foo/bar/buzz|alias#heading]] -> foo/bar/buzz
 --- @alias vault.Wikilink.Data.slug string The unique identifier path for the linked note
 
---- The title of the link. e.g. [[foo/bar/buzz|alias#heading]] -> buzz
---- @alias vault.Wikilink.Data.stem string The display name or title extracted from the slug
+--- The stem (tail) of the link. e.g. [[foo/bar/buzz|alias#heading]] -> buzz
+--- @alias vault.Wikilink.Data.stem string The last path component extracted from the slug
 
 --- The number of times the link appears in the note.
 --- @alias vault.Wikilink.Data.count number Frequency count of this link's occurrence
@@ -30,53 +30,110 @@ end
 
 --- @class vault.Wikilink.Data: vault.Object
 --- @description Core data structure representing a wikilink in a vault note
---- @field raw vault.Wikilink.Data.raw The complete original wikilink text
+--- @field raw string The content inside [[ ]] without the brackets
 --- @field embedded boolean Indicates if this is an embedded media link
---- @field slug vault.slug Unique identifier path for the linked note
---- @field stem vault.stem Display name extracted from slug
+--- @field slug vault.slug Unique identifier path for the linked note (same as raw without # and |)
+--- @field stem vault.stem Last path component of the slug (e.g. "buzz" for "foo/bar/buzz")
+--- @field display string Display text: alias if present, otherwise stem
+--- @field heading? string Heading/section reference after #
 --- @field count number Number of occurrences in the note
 --- @field alias vault.Wikilink.Data.alias Optional display text override
 --- @field aliases vault.map Set of all valid display names
---- @field section? vault.Note.Data.heading Optional heading/section reference
+--- @field section? string Legacy alias for heading
 --- @field sources vault.Sources.map References to source notes containing this link
 --- @field target vault.Note The resolved target note object
 --- @field variants vault.map Alternative forms of the link
 --- ```lua
---- assert(wikilink.raw == "[[foo/bar/buzz|alias#heading]]") -- Raw link as it appears in the note
---- assert(wikilink.content== "foo/bar/buzz") -- Content of the link as it appears in the note
---- assert(wikilink.stem == "buzz") -- Tail of the link. Must be unique
---- assert(wikilink.aliases == {["buzz"] = true, ["foo/bar/buzz"] = true, ["alias"] = true}) -- All aliases used with that wikilink
---- assert(wikilink.heading == "heading") -- Heading of the link if it exists
---- assert(wikilink.notes_relpaths == {"bar.md", "foo.md"}) -- All relative paths that has that wikilink
---- assert(wikilink.target == "foo/bar/buzz.md") -- The target of the link if it exists
+--- assert(wikilink.raw == "foo/bar/buzz|alias#heading") -- Content inside [[ ]]
+--- assert(wikilink.slug == "foo/bar/buzz") -- Path part (no # or |)
+--- assert(wikilink.stem == "buzz") -- Last component. Must be unique
+--- assert(wikilink.display == "alias") -- Alias if present, else stem
+--- assert(wikilink.heading == "heading") -- Heading after #
+--- assert(wikilink.aliases == {["buzz"] = true, ["foo/bar/buzz"] = true, ["alias"] = true})
 --- ```
 local WikilinkData = Object("VaultWikilink")
 
---- @param this vault.Wikilink.Data
+
+--- Strip [[ ]] brackets from a wikilink string and return the inner content.
+--- Also handles embedded links (![[...]]).
+--- @param input string
+--- @return string content The content inside brackets
+--- @return boolean embedded Whether this is an embedded link
+local function strip_brackets(input)
+    local embedded = false
+    local s = input
+
+    -- Handle embedded prefix
+    if s:find("^!") then
+        s = s:sub(2)
+        embedded = true
+    end
+
+    -- Strip [[ and ]]
+    if s:sub(1, 2) == "[[" and s:sub(-2) == "]]" then
+        s = s:sub(3, -3)
+    elseif s:sub(1, 2) == "[[" then
+        s = s:sub(3)
+    elseif s:sub(-2) == "]]" then
+        s = s:sub(1, -3)
+    end
+
+    return s, embedded
+end
+
+
+--- Validate that the content inside brackets is a valid wikilink.
+--- @param content string The stripped content (no brackets)
+--- @return boolean
+local function is_valid_content(content)
+    if not content or content == "" then
+        return false
+    end
+    -- Pure | or # with nothing else
+    if content:match("^[#|]+$") then
+        return false
+    end
+    -- Must have at least one non-whitespace character in the slug portion
+    local slug = content:match("^([^#|]*)")
+    if not slug or slug:match("^%s*$") then
+        return false
+    end
+    return true
+end
+
+
+--- @param this vault.Wikilink.Data|{raw: string}
 function WikilinkData:init(this)
     if not this then
-        error("Missing `this` argument: vault.Wikilink.data")
+        error("Invalid wikilink format")
     elseif not this.raw then
-        error("Missing `raw` argument: string")
+        error("Invalid wikilink format")
     end
 
-    if this.raw:find("^!") then
-        this.raw = this.raw:sub(2)
-        this.embedded = true
+    local content, embedded = strip_brackets(this.raw)
+    self.embedded = embedded or this.embedded or false
+
+    -- Validate
+    if not is_valid_content(content) then
+        error("Invalid wikilink format")
     end
 
-    local content = this.raw
-    if this.raw:sub(1, 2) == "[[" or this.raw:sub(-2) == "]]" then
-        content = this.raw:sub(3, -3) -- Remove [[ and ]]
-    end
-    self.slug = content:match([[([^#|]+)]])
+    -- Store raw content (inside brackets, without [[ ]])
+    self.raw = content
+
+    -- Parse components: slug#heading|alias
+    self.slug = content:match("([^#|]+)")
     if not self.slug or self.slug == "" then
-        error("Invalid wikilink: " .. this.raw)
+        error("Invalid wikilink format")
     end
-    self.section = content:match([[#([^|]+)]])
-    self.alias = content:match([[|(.+)$]])
+
+    self.heading = content:match("#([^|]+)")
+    self.section = self.heading -- backward compat
+    self.alias = content:match("|(.+)$")
+
     self.sources = this.sources
     self.stem = self.slug:match("([^/]+)$") or self.slug
+    self.display = self.alias or self.stem
 
     self.aliases = this.aliases or {}
     self.aliases[self.stem] = true
@@ -84,15 +141,15 @@ function WikilinkData:init(this)
         self.aliases[self.alias] = true
     end
 
-    self.count = 1
+    self.count = this.count or 1
 
-    self.variants = {}
+    self.variants = this.variants or {}
     self.variants[self.stem] = true
     if self.stem ~= self.slug then
         self.variants[self.slug] = true
     end
 
-    -- TODO: Let we put the target is the note itself, not the slug of the note
+    -- Resolve target
     if this.target then
         self.target = this.target
     else
@@ -104,20 +161,104 @@ function WikilinkData:init(this)
     end
 end
 
+
 --- @class vault.Wikilink: vault.Object
---- @field Data vault.Wikilink.Data
+--- @field data vault.Wikilink.Data
 local Wikilink = Object("VaultWikilink")
 
---- @param this vault.Wikilink.raw|vault.Wikilink.Data.partial
+
+--- @param this vault.Wikilink.raw|vault.Wikilink.Data.partial|table
 function Wikilink:init(this)
-    if not this then
-        error("Missing `this` argument: vault.Wikilink.data")
+    if not this or (type(this) == "string" and this == "") then
+        error("Invalid wikilink format")
     end
+
     if type(this) == "string" then
-        this = { raw = this }
+        -- Validate that the string looks like a wikilink or raw content
+        local s = this
+        if s:find("^!") then
+            s = s:sub(2)
+        end
+
+        -- Must be [[...]] or raw content
+        local has_open = s:sub(1, 2) == "[["
+        local has_close = s:sub(-2) == "]]"
+
+        if not has_open and not has_close then
+            -- Bare string — could be single brackets or raw wikilink content
+            if s:match("%[") or s:match("%]") then
+                -- Contains mismatched brackets like "[single bracket]"
+                error("Invalid wikilink format")
+            end
+            -- Treat as raw wikilink content (e.g. from parser extracting inner text)
+            this = { raw = s }
+        elseif has_open and not has_close then
+            error("Invalid wikilink format")
+        elseif not has_open and has_close then
+            -- e.g. "extra]]brackets]]" — malformed
+            error("Invalid wikilink format")
+        else
+            -- Normal [[...]] form
+            -- Check for multiple closing brackets: "extra]]brackets]]"
+            local inner = s:sub(3, -3)
+            if inner:find("%]%]") then
+                error("Invalid wikilink format")
+            end
+            this = { raw = s }
+        end
     end
+
     self.data = WikilinkData(this)
 end
+
+
+--- Convert wikilink back to string representation.
+--- @return string
+function Wikilink:__tostring()
+    local result = self.data.slug
+    if self.data.heading then
+        result = result .. "#" .. self.data.heading
+    end
+    if self.data.alias then
+        result = result .. "|" .. self.data.alias
+    end
+    return "[[" .. result .. "]]"
+end
+
+
+--- Check if this wikilink resolves to an existing note in the vault.
+--- @return boolean
+function Wikilink:is_resolved()
+    return self.data.target ~= nil
+end
+
+
+--- Get the parent path of the wikilink slug.
+--- For "parent/child/note" returns "parent/child".
+--- For "note" (no parent) returns nil.
+--- @return string|nil
+function Wikilink:get_parent_path()
+    local parent = self.data.slug:match("(.+)/[^/]+$")
+    return parent
+end
+
+
+--- Extract all valid wikilinks from a block of text.
+--- @param text string The text to search for wikilinks
+--- @return vault.Wikilink[] List of Wikilink objects
+function Wikilink.extract_from_text(text)
+    local results = {}
+    for match in text:gmatch("%[%[(.-)%]%]") do
+        if is_valid_content(match) then
+            local ok, wl = pcall(Wikilink, "[[" .. match .. "]]")
+            if ok then
+                results[#results + 1] = wl
+            end
+        end
+    end
+    return results
+end
+
 
 --- @alias vault.Wikilink.constructor fun(raw_link: vault.Wikilink.Data.raw|vault.Wikilink.Data.partial)
 --- @type vault.Wikilink|vault.Wikilink.constructor

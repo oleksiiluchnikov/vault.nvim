@@ -36,13 +36,28 @@ end
 ---
 --- @param opts vault.Filter.option.tags|vault.Filter.option.tags[] Filter options
 --- @return vault.Tags Updated VaultTags object with filtered tags
-function Tags:filter(opts)
+function Tags:filter(opts, value, match_opt, case_sensitive)
     if not opts then
         error("invalid argument: must be a table: " .. vim.inspect(opts))
     end
 
+    -- Handle simple key/value string filtering (no group module needed)
+    if type(opts) == "string" then
+        local key = opts
+        match_opt = match_opt or "exact"
+        local filtered = {}
+        for id, item in pairs(self.map) do
+            if item.data and item.data[key] then
+                if not value or utils.match(item.data[key], value, match_opt) then
+                    filtered[id] = item
+                end
+            end
+        end
+        self.map = filtered
+        return self
+    end
+
     if not opts.class then
-        -- opts = Filter(opts, "tags").opts
         opts = Filter(opts, "tags").opts
     end
 
