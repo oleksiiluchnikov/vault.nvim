@@ -130,7 +130,13 @@ local Notes = Collection:extend("VaultNotes")
 --- ```
 --- @return nil
 function Notes:init()
-    state.clear_all()
+    -- Only clear note-specific caches, NOT the entire global state.
+    -- state.clear_all() was wiping class registrations, tags, wikilinks, etc.
+    state.set_global_key("notes", nil)
+    state.set_global_key("notes.linked", nil)
+    state.set_global_key("notes.internals", nil)
+    state.set_global_key("notes.leaves", nil)
+    state.set_global_key("notes.orphans", nil)
 
     --- @alias vault.Notes.map table<vault.slug, vault.Note> # Map of unique note identifiers to Note objects
     self.map = {}

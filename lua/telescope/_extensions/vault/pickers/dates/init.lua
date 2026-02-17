@@ -53,7 +53,7 @@ return function(opts)
         local path = selection.value.path
         local content = "# " .. selection.value.name .. "\n"
         actions.close(bufnr)
-        vim.cmd("edit " .. path)
+        vim.cmd("edit " .. vim.fn.fnameescape(path))
         -- If daily note doesn't exist, create it and open it
         if selection.value.exists == false then
             vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(content, "\n"))

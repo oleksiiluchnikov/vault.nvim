@@ -397,6 +397,44 @@ function utils.safe_globpath(path, pattern, list, nosort)
     end
 end
 
+--- Atomically write content to a file.
+--- Writes to a temporary file, fsyncs, then renames over the target.
+--- This prevents data loss if a crash occurs mid-write.
+--- @param path string The absolute path to write to.
+--- @param content string The content to write.
+function utils.safe_write(path, content)
+    if type(path) ~= "string" or path == "" then
+        error("safe_write: path must be a non-empty string")
+    end
+    if type(content) ~= "string" then
+        error("safe_write: content must be a string")
+    end
+
+    local uv = vim.uv or vim.loop
+    local tmp_path = path .. ".tmp"
+
+    local fd, err = uv.fs_open(tmp_path, "w", 438) -- 0666
+    if not fd then
+        error("safe_write: could not open tmp file: " .. tostring(err))
+    end
+
+    local ok_write, write_err = uv.fs_write(fd, content, 0)
+    if not ok_write then
+        uv.fs_close(fd)
+        uv.fs_unlink(tmp_path)
+        error("safe_write: write failed: " .. tostring(write_err))
+    end
+
+    uv.fs_fsync(fd)
+    uv.fs_close(fd)
+
+    local ok_rename, rename_err = uv.fs_rename(tmp_path, path)
+    if not ok_rename then
+        uv.fs_unlink(tmp_path)
+        error("safe_write: rename failed: " .. tostring(rename_err))
+    end
+end
+
 --- Export split helper for tests
 function utils._split_brace_for_tests(pattern)
     return split_brace(pattern)
