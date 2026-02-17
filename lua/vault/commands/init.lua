@@ -8,9 +8,9 @@ function callbacks.toggle_link()
     local line = vim.api.nvim_get_current_line()
     local col = cursor_pos[2] + 1 -- Convert 0-based index to 1-based
 
-    -- More precise regex patterns
-    local url_regex = [=[\v(https?:\/\/)([\w-]+\.)+[\w-]+(\/[\w\-./?%&=+]*)?]=]
-    local md_link_regex = [=[\v\[([^\]]*)\]\(([^)]*)\)]=]
+    -- Lua patterns (NOT Vim regex — string.find() only supports Lua patterns)
+    local url_pattern = "(https?://[%w%-%.]+[%w%-]+[%w]/?[%w%-%._~:/?#%[%]@!%$&'%(%)%*%+,;=]*)"
+    local md_link_pattern = "%[([^%]]*)%]%(([^%)]+)%)"
 
     local function update_line(new_content)
         vim.api.nvim_buf_set_lines(0, cursor_pos[1] - 1, cursor_pos[1], false, { new_content })
@@ -23,20 +23,35 @@ function callbacks.toggle_link()
         return string.format("[%s](%s)", title, url)
     end
 
-    -- Try to find URL under cursor with wider search range
-    local url_start, url_end, url = line:find(url_regex, math.max(1, col - 50))
-    if url_start and col >= url_start and col <= url_end then
-        local new_line = line:sub(1, url_start - 1) .. url_to_markdown(url) .. line:sub(url_end + 1)
-        update_line(new_line)
-        return
+    -- Try to find markdown link under cursor FIRST (more specific match)
+    local search_start = math.max(1, col - 100)
+    local md_start = search_start
+    while md_start do
+        local s, e, title, mdurl = line:find(md_link_pattern, md_start)
+        if not s then
+            break
+        end
+        if col >= s and col <= e then
+            local new_line = line:sub(1, s - 1) .. mdurl .. line:sub(e + 1)
+            update_line(new_line)
+            return
+        end
+        md_start = s + 1
     end
 
-    -- Try to find markdown link under cursor with wider search range
-    local md_start, md_end, title, mdurl = line:find(md_link_regex, math.max(1, col - 50))
-    if md_start and col >= md_start and col <= md_end then
-        local new_line = line:sub(1, md_start - 1) .. mdurl .. line:sub(md_end + 1)
-        update_line(new_line)
-        return
+    -- Try to find bare URL under cursor
+    local url_start = search_start
+    while url_start do
+        local s, e, url = line:find(url_pattern, url_start)
+        if not s then
+            break
+        end
+        if col >= s and col <= e then
+            local new_line = line:sub(1, s - 1) .. url_to_markdown(url) .. line:sub(e + 1)
+            update_line(new_line)
+            return
+        end
+        url_start = s + 1
     end
 
     vim.notify("No URL or Markdown link found under cursor", vim.log.levels.WARN)

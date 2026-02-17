@@ -104,7 +104,7 @@ M.bases = previewers.new_buffer_previewer({
 
         -- Views
         local view_count = base:view_count()
-        if view_count > 0 then
+        if view_count > 0 and type(base.data.views) == "table" then
             table.insert(lines, "## Views (" .. tostring(view_count) .. ")")
             for i, view in ipairs(base.data.views) do
                 local view_name = view.name or view.type or ("view " .. tostring(i))
@@ -115,7 +115,7 @@ M.bases = previewers.new_buffer_previewer({
         end
 
         -- Properties
-        if base.data.properties and next(base.data.properties) then
+        if type(base.data.properties) == "table" and next(base.data.properties) then
             table.insert(lines, "## Properties")
             for key, prop in pairs(base.data.properties) do
                 if type(prop) == "table" and prop.displayName then
@@ -130,6 +130,95 @@ M.bases = previewers.new_buffer_previewer({
         -- File info
         table.insert(lines, "---")
         table.insert(lines, "Path: " .. (base.data.relpath or ""))
+
+        --- @type integer
+        local bufnr = self.state.bufnr
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+        vim.api.nvim_set_option_value("filetype", "markdown", {
+            buf = bufnr,
+            scope = "local",
+        })
+    end,
+})
+
+-- Previewer for wikilinks: resolved shows target file, unresolved lists sources
+M.wikilinks = previewers.new_buffer_previewer({
+    --- @param self table
+    --- @param entry { value: vault.Wikilink }
+    define_preview = function(self, entry)
+        local utils = require("vault.utils")
+        --- @type vault.Wikilink
+        local wikilink = entry.value
+        local data = wikilink.data
+        --- @type string[]
+        local lines = {}
+
+        local target_slug = data and data.target
+        local abs_path = target_slug and utils.slug_to_path(target_slug) or nil
+        local resolved = abs_path and vim.fn.filereadable(abs_path) == 1
+
+        if resolved then
+            -- Show the target note content (like the notes previewer)
+            local ok, file_lines = pcall(vim.fn.readfile, abs_path)
+            if ok and file_lines then
+                lines = file_lines
+            else
+                lines = { "(could not read " .. abs_path .. ")" }
+            end
+        else
+            -- Unresolved: show a synthesized summary of all sources
+            local slug = data and data.slug or "<unknown>"
+            table.insert(lines, "# [[" .. slug .. "]]")
+            table.insert(lines, "")
+            table.insert(lines, "_Unresolved wikilink — note does not exist yet._")
+            table.insert(lines, "")
+
+            local sources = data and data.sources
+            if type(sources) == "table" and next(sources) then
+                local source_count = vim.tbl_count(sources)
+                table.insert(lines, "## Referenced in " .. tostring(source_count) .. " note(s)")
+                table.insert(lines, "")
+
+                for source_slug, lnum_map in pairs(sources) do
+                    local relpath = utils.slug_to_relpath(source_slug)
+                    if type(lnum_map) == "table" then
+                        -- Collect line numbers from the sources map
+                        local lnums = {}
+                        for lnum, _ in pairs(lnum_map) do
+                            if type(lnum) == "number" then
+                                table.insert(lnums, lnum)
+                            end
+                        end
+                        table.sort(lnums)
+                        if #lnums > 0 then
+                            local lnum_strs = {}
+                            for _, n in ipairs(lnums) do
+                                table.insert(lnum_strs, tostring(n))
+                            end
+                            table.insert(
+                                lines,
+                                "- " .. relpath .. " (line " .. table.concat(lnum_strs, ", ") .. ")"
+                            )
+                        else
+                            table.insert(lines, "- " .. relpath)
+                        end
+                    else
+                        table.insert(lines, "- " .. relpath)
+                    end
+                end
+            else
+                table.insert(lines, "_No source references found._")
+            end
+
+            -- Aliases / variants
+            if data and type(data.aliases) == "table" and next(data.aliases) then
+                table.insert(lines, "")
+                table.insert(lines, "## Aliases")
+                for alias, _ in pairs(data.aliases) do
+                    table.insert(lines, "- " .. alias)
+                end
+            end
+        end
 
         --- @type integer
         local bufnr = self.state.bufnr

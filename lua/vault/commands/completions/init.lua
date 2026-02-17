@@ -30,14 +30,17 @@ end
 
 function M.dirs(_, line, _)
     line = line or ""
-    -- line = line:gsub("^%S+%s*", "")
     local fargs = vim.split(line, " ")
-    --- @type vault.slug[]
-    local dirs = require("vault.dirs")():list()
+    local query = fargs[#fargs] or ""
+    --- @type string[]
+    local dir_keys = vim.tbl_keys(require("vault.dirs")().map)
+    if query == "" then
+        return dir_keys
+    end
     local completions = {}
     local utils = require("vault.utils")
-    for _, dir in ipairs(dirs) do
-        if utils.match(dir, line, "fuzzy", false) then
+    for _, dir in ipairs(dir_keys) do
+        if utils.match(dir, query, "fuzzy", false) then
             table.insert(completions, dir)
         end
     end

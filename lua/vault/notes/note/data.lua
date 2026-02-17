@@ -276,7 +276,11 @@ Data.outlinks = function(note_data)
         if raw_link == "" then
             goto continue
         end
-        local wikilink = Wikilink(raw_link)
+        local ok, wikilink = pcall(Wikilink, raw_link)
+        if not ok then
+            -- Skip malformed wikilinks (e.g. mismatched brackets, empty slugs)
+            goto continue
+        end
         local wikilink_data = wikilink.data
 
         if not outlinks[wikilink_data.stem] then

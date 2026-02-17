@@ -36,7 +36,10 @@ function utils.path_to_relpath(path)
     if not root_dir then
         error("`VaultConfig.root` is not set.")
     end
-    path = path:gsub(root_dir .. "/", "")
+    local prefix = root_dir .. "/"
+    if path:sub(1, #prefix) == prefix then
+        return path:sub(#prefix + 1)
+    end
     return path
 end
 

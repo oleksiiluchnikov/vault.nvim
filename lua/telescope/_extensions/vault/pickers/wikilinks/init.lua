@@ -15,7 +15,7 @@ return function(opts)
     local finders = require("telescope.finders")
     local pickers = require("telescope.pickers")
     local sorters = require("telescope.sorters")
-    local previewers = require("telescope.previewers")
+    local vault_previewers = require("telescope._extensions.vault.previewers")
     local VaultWikilinks = require("vault.wikilinks")
     local wikilinks = VaultWikilinks()
     local vault_state = require("vault.core.state")
@@ -60,23 +60,28 @@ return function(opts)
         end
     end
 
-    -- Helper: normalize a path-like value (string or table) into a string or nil
-    local function normalize_path(val)
-        if not val then
-            return nil
+    --- Check whether a wikilink resolves to an existing file.
+    --- wikilink.data.target is a slug (e.g. "my-note"), NOT an absolute path.
+    --- We convert via utils.slug_to_path() to get the real path on disk.
+    --- @param wikilink vault.Wikilink
+    --- @return boolean
+    local function is_resolved(wikilink)
+        local target_slug = wikilink.data and wikilink.data.target
+        if not target_slug or target_slug == "" then
+            return false
         end
-        if type(val) == "string" then
-            return val
+        local abs_path = utils.slug_to_path(target_slug)
+        return vim.fn.filereadable(abs_path) == 1
+    end
+
+    --- Count sources (backlinks) for a wikilink.
+    --- @param wikilink vault.Wikilink
+    --- @return number
+    local function source_count(wikilink)
+        if wikilink.data and type(wikilink.data.sources) == "table" then
+            return vim.tbl_count(wikilink.data.sources)
         end
-        if type(val) == "table" then
-            -- try common cases: first element is a string, or a table with a 'path' key
-            if #val > 0 and type(val[1]) == "string" then
-                return val[1]
-            elseif type(val.path) == "string" then
-                return val.path
-            end
-        end
-        return nil
+        return 0
     end
 
     -- Make the display for each entry
@@ -86,42 +91,27 @@ return function(opts)
         local slug = wikilink.data and wikilink.data.slug or "<unknown>"
         local context = wikilink.data and (wikilink.data.context or wikilink.data.excerpt or "")
             or ""
-        local target_raw = wikilink.data and wikilink.data.target or nil
-        local target = normalize_path(target_raw)
 
-        -- resolved if target exists and file is readable
-        local resolved = false
-        if target and type(target) == "string" and target ~= "" then
-            resolved = vim.fn.filereadable(target) == 1
-        end
+        local resolved = is_resolved(wikilink)
 
         local mark = resolved and "✓" or "○"
         local mark_hl = resolved and "TelescopeResultsDiffAdd" or "TelescopeResultsDiffChange"
 
-        local backlinks_count = 0
-        if wikilink.data and type(wikilink.data.backlinks) == "table" then
-            backlinks_count = #wikilink.data.backlinks
-        elseif type(wikilinks.backlink_count) == "function" then
-            local ok, res = pcall(function()
-                return wikilinks:backlink_count(wikilink)
-            end)
-            if ok and type(res) == "number" then
-                backlinks_count = res
-            end
-        end
+        local backlinks_count = source_count(wikilink)
 
-        local col_1_hl = "TelescopeResultsNormal"
-        if colors then
+        -- Slug highlight: resolved links get a stronger color, unresolved are dimmed
+        local slug_hl = resolved and "TelescopeResultsNormal" or "TelescopeResultsComment"
+        if resolved and colors then
             local chars = #context
             local idx = math.min(math.max(1, math.floor(chars / 16)), steps)
-            col_1_hl = hl_base .. tostring(idx)
+            slug_hl = hl_base .. tostring(idx)
         end
 
         local displayer = entry_display.create({
             separator = " ",
             items = {
-                { width = 2 }, -- mark
-                { width = 4 }, -- backlinks count
+                { width = 2 }, -- mark (resolved/unresolved)
+                { width = 4 }, -- source count
                 { width = slug_max + 2 },
                 { remaining = true },
             },
@@ -130,7 +120,7 @@ return function(opts)
         local display_value = {
             { mark, mark_hl },
             { tostring(backlinks_count), "TelescopeResultsComment" },
-            { slug, col_1_hl },
+            { slug, slug_hl },
             { (context:gsub("\n", " "):sub(1, 120)), "TelescopeResultsComment" },
         }
         return displayer(display_value)
@@ -140,18 +130,17 @@ return function(opts)
         local slug = (entry.data and entry.data.slug) or ""
         local context = (entry.data and (entry.data.context or entry.data.excerpt or "")) or ""
 
-        -- normalize path/target so we only ever set string fields for Telescope helpers
-        local path_field = nil
+        -- Determine filename for Telescope's built-in file-open actions (<C-t>, <C-v>, <C-x>)
         local filename = nil
-        if entry.data then
-            local raw_path = entry.data.path
-            local raw_target = entry.data.target
-            local np = normalize_path(raw_target) or normalize_path(raw_path)
-            if np and type(np) == "string" and np ~= "" then
-                path_field = np
-                -- filename should be the source file if available
-                if type(raw_path) == "string" then
-                    filename = raw_path
+        if is_resolved(entry) then
+            -- Resolved: target file exists, point directly to it
+            filename = utils.slug_to_path(entry.data.target)
+        else
+            -- Unresolved: fall back to the first source note (so Telescope can still open something)
+            if entry.data and type(entry.data.sources) == "table" then
+                local first_source_slug = next(entry.data.sources)
+                if first_source_slug then
+                    filename = utils.slug_to_path(first_source_slug)
                 end
             end
         end
@@ -161,7 +150,6 @@ return function(opts)
             ordinal = slug .. " " .. context,
             display = make_display,
             filename = filename,
-            path = path_field,
         }
     end
 
@@ -174,28 +162,20 @@ return function(opts)
         table.sort(results, function(a, b)
             local a_m = 0
             local b_m = 0
-            if a.data and a.data.path then
-                local ap = normalize_path(a.data.path)
-                if ap then
-                    a_m = vim.fn.getftime(ap)
-                end
+            if a.data and a.data.target then
+                local ap = utils.slug_to_path(a.data.target)
+                a_m = vim.fn.getftime(ap)
             end
-            if b.data and b.data.path then
-                local bp = normalize_path(b.data.path)
-                if bp then
-                    b_m = vim.fn.getftime(bp)
-                end
+            if b.data and b.data.target then
+                local bp = utils.slug_to_path(b.data.target)
+                b_m = vim.fn.getftime(bp)
             end
             return a_m < b_m
         end)
     elseif opts.sort_by == "resolved" then
         table.sort(results, function(a, b)
-            local ta = a.data and a.data.target or nil
-            local tb = b.data and b.data.target or nil
-            local ap = normalize_path(ta)
-            local bp = normalize_path(tb)
-            local ra = (ap and type(ap) == "string" and vim.fn.filereadable(ap) == 1) and 1 or 0
-            local rb = (bp and type(bp) == "string" and vim.fn.filereadable(bp) == 1) and 1 or 0
+            local ra = is_resolved(a) and 1 or 0
+            local rb = is_resolved(b) and 1 or 0
             if ra == rb then
                 return (a.data.slug or "") < (b.data.slug or "")
             end
@@ -210,40 +190,6 @@ return function(opts)
     local finder = finders.new_table({
         results = results,
         entry_maker = entry_maker,
-    })
-
-    -- Previewer: show target file if available, otherwise show the source file and context line
-    local previewer = previewers.vim_buffer_cat.new({
-        get_buffer_by_name = function(_, entry)
-            local bufnr = vim.api.nvim_create_buf(false, true)
-            local lines = {}
-            local ok = false
-            -- -- entry may be telescope entry or raw wikilink
-            -- local wl = (entry and entry.value) and entry.value or entry
-            -- local target_raw = wl and wl.data and wl.data.target or nil
-            -- local target = normalize_path(target_raw)
-            -- if target and target ~= "" then
-            --     ok, lines = pcall(vim.fn.readfile, target)
-            -- end
-            -- if not ok or not lines or #lines == 0 then
-            --     -- Fallback: show the source note and try to highlight where link came from
-            --     local src_raw = wl and wl.data and wl.data.path or nil
-            --     local src = normalize_path(src_raw)
-            --     if type(src) == "string" and src ~= "" then
-            --         pcall(function()
-            --             lines = vim.fn.readfile(src)
-            --         end)
-            --     else
-            --         lines = { "(no preview available)" }
-            --     end
-            -- end
-            -- if type(bufnr) ~= "number" then
-            --     error("bufnr is not a number")
-            -- end
-            -- pcall(vim.api.nvim_buf_set_lines, bufnr, 0, -1, false, lines)
-            -- pcall(vim.api.nvim_buf_set_option, bufnr, "filetype", "markdown")
-            return bufnr
-        end,
     })
 
     -- Interactive filter callback similar to the notes picker (supports trailing / pattern and negative prefix -)
@@ -322,110 +268,30 @@ return function(opts)
         local action_state = require("telescope.actions.state")
 
         actions.select_default:replace(function()
-            -- actions.close(prompt_bufnr)
             local selection = action_state.get_selected_entry()
-            -- P(selection)
-            -- {
-            --   display = <function 1>,
-            --   index = 2,
-            --   ordinal = "2016-08-12 Friday ",
-            --   value = {
-            --     class = {
-            --       __meta = <1>{
-            --         __index = <table 1>,
-            --         __tostring = <function 2>,
-            --         init = <function 3>,
-            --         is_instance_of = <function 4>
-            --       },
-            --       __properties = {
-            --         __tostring = <function 2>,
-            --         init = <function 3>
-            --       },
-            --       name = "VaultWikilink",
-            --       static = <2>{
-            --         extend = <function 5>,
-            --         is_subclass_of = <function 6>,
-            --         new = <function 7>,
-            --         <metatable> = {
-            --           __index = <function 8>
-            --         }
-            --       },
-            --       [<3>{ "<vault.utils.object:subclasses>" }] = {
-            --         <metatable> = {
-            --           __mode = "k"
-            --         }
-            --       },
-            --       <metatable> = {
-            --         __call = <function 9>,
-            --         __index = <table 2>,
-            --         __name = "VaultWikilink",
-            --         __newindex = <function 10>,
-            --         __tostring = <function 11>
-            --       }
-            --     },
-            --     data = {
-            --       aliases = {
-            --         ["2016-08-12 Friday"] = true
-            --       },
-            --       class = {
-            --         __meta = <4>{
-            --           __index = <table 4>,
-            --           __tostring = <function 12>,
-            --           init = <function 13>,
-            --           is_instance_of = <function 4>
-            --         },
-            --         __properties = {
-            --           __tostring = <function 12>,
-            --           init = <function 13>
-            --         },
-            --         name = "VaultWikilink",
-            --         static = <5>{
-            --           extend = <function 14>,
-            --           is_subclass_of = <function 6>,
-            --           new = <function 15>,
-            --           <metatable> = {
-            --             __index = <function 16>
-            --           }
-            --         },
-            --         [<table 3>] = {
-            --           <metatable> = {
-            --             __mode = "k"
-            --           }
-            --         },
-            --         <metatable> = {
-            --           __call = <function 9>,
-            --           __index = <table 5>,
-            --           __name = "VaultWikilink",
-            --           __newindex = <function 10>,
-            --           __tostring = <function 11>
-            --         }
-            --       },
-            --       count = 1,
-            --       embedded = false,
-            --       slug = "2016-08-12 Friday",
-            --       sources = {
-            --         ["drafts/20160812001203 - New Note"] = {
-            --           [18] = {
-            --             end_lnum = 18,
-            --             lnum = 18
-            --           }
-            --         }
-            --       },
-            --       stem = "2016-08-12 Friday",
-            --       variants = {
-            --         ["2016-08-12 Friday"] = true
-            --       },
-            --       <metatable> = <table 4>
-            --     },
-            --     <metatable> = <table 1>
-            --   }
-            -- }
-            local target = require("vault.utils").slug_to_path(selection.value.data.slug)
-            -- print(target)
-            vim.notify("Selected wikilink target: " .. tostring(target), vim.log.levels.INFO)
-            -- if target and target ~= "" then
-            --     vim.cmd("edit " .. vim.fn.fnameescape(target))
-            -- end
+            if not selection or not selection.value then
+                return
+            end
+            local wl = selection.value
+            local slug = wl.data and wl.data.slug or ""
+            if slug == "" then
+                return
+            end
+
+            actions.close(prompt_bufnr)
+
+            if is_resolved(wl) then
+                -- Resolved: open the target file
+                local target = utils.slug_to_path(slug)
+                vim.cmd("edit " .. vim.fn.fnameescape(target))
+            else
+                -- Unresolved: create a new note (same mechanism as :VaultNoteNew)
+                local Note = require("vault.notes.note")
+                local path = utils.slug_to_path(slug)
+                local note = Note(path)
+                note:write(path)
+                note:edit()
+            end
         end)
 
         -- Toggle resolved mark (best-effort, uses wikilinks:toggle_resolved or wikilinks:resolve if available)
@@ -507,7 +373,7 @@ return function(opts)
         prompt_title = "Wikilinks",
         finder = finder,
         sorter = sorters.get_generic_fuzzy_sorter(),
-        -- previewer = previewer,
+        previewer = vault_previewers.wikilinks,
         attach_mappings = attach_mappings,
         on_input_filter_cb = on_input_filter_cb,
         sorting_strategy = "ascending",

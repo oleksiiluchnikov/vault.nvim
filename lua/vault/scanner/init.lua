@@ -87,10 +87,15 @@ function Scanner.wikilinks(opts)
     local wikilinks_map = {}
     for stem, wikilink_data in pairs(raw_wikilinks) do
         -- Create wikilink with minimal data - it will resolve target on access
-        local wl = Wikilink({
+        local ok, wl = pcall(Wikilink, {
             raw = "[[" .. stem .. "]]",
             sources = wikilink_data.sources,
         })
+
+        if not ok then
+            -- Skip malformed wikilinks returned by the Rust scanner
+            goto continue
+        end
 
         -- Copy additional data from Rust
         wl.data.stem = wikilink_data.stem
@@ -98,6 +103,7 @@ function Scanner.wikilinks(opts)
         wl.data.embedded = wikilink_data.embedded
 
         wikilinks_map[stem] = wl
+        ::continue::
     end
 
     return wikilinks_map
