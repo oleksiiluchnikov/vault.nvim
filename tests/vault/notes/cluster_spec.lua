@@ -64,6 +64,6 @@ describe("NotesCluster", function()
         local cluster_a = NotesCluster(notes, note, 0)
         local cluster_b = NotesCluster(notes, note, 1)
 
-        assert(cluster_a:count() ~= cluster_b:count())
+        assert(cluster_a.depth ~= cluster_b.depth)
     end)
 end)

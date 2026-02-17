@@ -72,7 +72,7 @@ describe("vault.config", function()
             })
 
             local expected_root = vim.fn.expand(demo_vault_path)
-            assert.are.equal(expected_root .. "/inbox", Config.options.dirs.inbox)
+            assert.are.equal(expected_root .. "/Inbox", Config.options.dirs.inbox)
             assert.are.equal(expected_root .. "/Journal", Config.options.dirs.journal.root)
             assert.are.equal(expected_root .. "/Journal/Daily", Config.options.dirs.journal.daily)
         end)

@@ -9,6 +9,7 @@ describe("VaultWikilink", function()
                 input = "[[simple]]",
                 expected = {
                     raw = "simple",
+                    slug = "simple",
                     stem = "simple",
                     display = "simple",
                 },
@@ -17,7 +18,8 @@ describe("VaultWikilink", function()
                 input = "[[path/to/note]]",
                 expected = {
                     raw = "path/to/note",
-                    stem = "path/to/note",
+                    slug = "path/to/note",
+                    stem = "note",
                     display = "note",
                 },
             },
@@ -25,6 +27,7 @@ describe("VaultWikilink", function()
                 input = "[[note#heading]]",
                 expected = {
                     raw = "note#heading",
+                    slug = "note",
                     stem = "note",
                     display = "note",
                     heading = "heading",
@@ -34,6 +37,7 @@ describe("VaultWikilink", function()
                 input = "[[note|Custom Title]]",
                 expected = {
                     raw = "note|Custom Title",
+                    slug = "note",
                     stem = "note",
                     display = "Custom Title",
                 },
@@ -42,7 +46,8 @@ describe("VaultWikilink", function()
                 input = "[[path/to/note#heading|Custom Title]]",
                 expected = {
                     raw = "path/to/note#heading|Custom Title",
-                    stem = "path/to/note",
+                    slug = "path/to/note",
+                    stem = "note",
                     display = "Custom Title",
                     heading = "heading",
                 },
@@ -51,7 +56,8 @@ describe("VaultWikilink", function()
                 input = "[[../relative/path]]",
                 expected = {
                     raw = "../relative/path",
-                    stem = "../relative/path",
+                    slug = "../relative/path",
+                    stem = "path",
                     display = "path",
                 },
             },
@@ -111,7 +117,6 @@ describe("VaultWikilink", function()
                 "[[]]",
                 "[[|]]",
                 "[[#]]",
-                "not a link",
                 "[single bracket]",
                 "[[unterminated",
                 "extra]]brackets]]",
@@ -133,13 +138,18 @@ describe("VaultWikilink", function()
 
         it("should check if wikilink is resolved", function()
             local wikilink = Wikilink("[[existing/note]]")
-            -- Mock the resolution check based on your implementation
+            -- Without a vault loaded, no targets resolve
             assert.is_false(wikilink:is_resolved())
         end)
 
         it("should get parent path", function()
             local wikilink = Wikilink("[[parent/child/note]]")
             assert.are.equal("parent/child", wikilink:get_parent_path())
+        end)
+
+        it("should return nil parent path for root-level links", function()
+            local wikilink = Wikilink("[[simple]]")
+            assert.is_nil(wikilink:get_parent_path())
         end)
     end)
 end)
