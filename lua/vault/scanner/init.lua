@@ -58,10 +58,10 @@ function Scanner.slugs()
     return slugs
 end
 
-function Scanner.tags()
+function Scanner.tags(opts)
     local core = require("vault_core")
-    local root = vim.fn.expand(config.options.root)
-    local raw_tags = core.tags(root)
+    local root, ignores = get_scan_args(opts)
+    local raw_tags = core.tags(root, ignores)
 
     -- Convert raw tag data to Tag objects
     local tags_map = {}
@@ -78,10 +78,10 @@ function Scanner.tags()
     return tags_map
 end
 
-function Scanner.wikilinks()
+function Scanner.wikilinks(opts)
     local core = require("vault_core")
-    local root = vim.fn.expand(config.options.root)
-    local raw_wikilinks = core.wikilinks(root)
+    local root, ignores = get_scan_args(opts)
+    local raw_wikilinks = core.wikilinks(root, ignores)
 
     -- Convert raw wikilink data to Wikilink objects
     local wikilinks_map = {}
@@ -103,10 +103,10 @@ function Scanner.wikilinks()
     return wikilinks_map
 end
 
-function Scanner.tasks()
+function Scanner.tasks(opts)
     local core = require("vault_core")
-    local root = vim.fn.expand(config.options.root)
-    local raw_tasks = core.tasks(root)
+    local root, ignores = get_scan_args(opts)
+    local raw_tasks = core.tasks(root, ignores)
 
     -- Convert raw task data to Task objects
     local tasks_map = {}
@@ -122,24 +122,24 @@ function Scanner.tasks()
     return tasks_map
 end
 
-function Scanner.links()
+function Scanner.links(opts)
     local core = require("vault_core")
-    local root = vim.fn.expand(config.options.root)
+    local root, ignores = get_scan_args(opts)
     -- External links are already in simple format, no object wrapping needed
-    return core.links(root)
+    return core.links(root, ignores)
 end
 
-function Scanner.fields()
+function Scanner.fields(opts)
     local core = require("vault_core")
-    local root = vim.fn.expand(config.options.root)
+    local root, ignores = get_scan_args(opts)
     -- Fields are already in the right format (nested map structure)
-    return core.fields(root)
+    return core.fields(root, ignores)
 end
 
-function Scanner.properties()
+function Scanner.properties(opts)
     local core = require("vault_core")
-    local root = vim.fn.expand(config.options.root)
-    local raw_properties = core.properties(root)
+    local root, ignores = get_scan_args(opts)
+    local raw_properties = core.properties(root, ignores)
 
     -- Convert raw property data to Property objects with PropertyValue children
     local properties_map = {}
@@ -166,10 +166,10 @@ function Scanner.properties()
     return properties_map
 end
 
-function Scanner.dirs()
+function Scanner.dirs(opts)
     local core = require("vault_core")
-    local root = vim.fn.expand(config.options.root)
-    local raw_dirs = core.dirs(root)
+    local root, ignores = get_scan_args(opts)
+    local raw_dirs = core.dirs(root, ignores)
 
     -- Convert raw dir data to Dir objects
     local dirs_map = {}

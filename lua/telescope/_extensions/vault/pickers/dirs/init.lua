@@ -10,7 +10,6 @@ return function(opts)
     local finders = require("telescope.finders")
     local sorters = require("telescope.sorters")
     local vault_state = require("vault.core.state")
-    local Gradient = require("gradient")
     local Scanner = require("vault.scanner")
     local pickers = require("telescope.pickers")
     local vault_layouts = require("telescope._extensions.vault.layouts")
@@ -23,18 +22,20 @@ return function(opts)
     end
 
     local steps = math.min(vim.api.nvim_list_uis()[1].height, vim.tbl_count(dirs_list))
-    --- @type Gradient|nil
-    local colors = Gradient.from_stops(steps, "Comment", "Normal", "String")
-    if type(colors) ~= "table" then
-        -- error(
-        --     error_msg.COMMAND_EXECUTION_ERROR("Gradient.from_stops", "table", vim.inspect(colors))
-        -- )
-        -- error("Gradient.from_stops", "table", vim.inspect(colors))
-        error("Gradient.from_stops")
-    end
     local hl_name = dirs.class.name
-    for i, color in ipairs(colors) do
-        vim.api.nvim_set_hl(0, hl_name .. tostring(i), { fg = color })
+    --- @type table|nil
+    local colors = nil
+    do
+        local ok, maybe_colors = pcall(function()
+            local Gradient = require("gradient")
+            return Gradient.from_stops(steps, "Comment", "Normal", "String")
+        end)
+        if ok and type(maybe_colors) == "table" then
+            colors = maybe_colors
+            for i, color in ipairs(colors) do
+                pcall(vim.api.nvim_set_hl, 0, hl_name .. tostring(i), { fg = color })
+            end
+        end
     end
 
     local slugs = Scanner.slugs()
@@ -56,11 +57,14 @@ return function(opts)
         --- --
         local col_1 = directory.data.relpath
         local col_1_width = 29
-        local i = math.min(math.floor(sources_count / 2), steps)
-        if i == 0 then
-            i = 1
+        local col_1_hl_name = "TelescopeResultsNormal"
+        if colors then
+            local i = math.min(math.floor(sources_count / 2), steps)
+            if i == 0 then
+                i = 1
+            end
+            col_1_hl_name = hl_name .. tostring(i)
         end
-        local col_1_hl_name = hl_name .. tostring(i)
         --- --
 
         local col_2 = tostring(sources_count)

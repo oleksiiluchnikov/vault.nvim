@@ -4,7 +4,6 @@
 return function(opts)
     local vault_state = require("vault.core.state")
     local Log = require("plenary.log")
-    local Gradient = require("gradient")
     local Error = require("vault.utils.error")
     local entry_display = require("telescope.pickers.entry_display")
     local finders = require("telescope.finders")
@@ -44,30 +43,38 @@ return function(opts)
         HIGHLIGHT_GROUP = "VaultTask",
     }
 
+    --- Track whether gradient colors were successfully set up
+    local gradient_available = false
+
     --- Setup gradient colors for tasks display
     --- @return boolean success
     local function setup_task_colors()
         if vim.b.vault_task_colors_initialized then
+            gradient_available = true
             return true
         end
 
         local display_config = DISPLAY_CONFIG.COLORS.GRADIENT
-        local colors = Gradient.from_stops(
-            display_config.STEPS,
-            display_config.START,
-            display_config.END,
-            display_config.TYPE
-        )
+        local ok, colors = pcall(function()
+            local Gradient = require("gradient")
+            return Gradient.from_stops(
+                display_config.STEPS,
+                display_config.START,
+                display_config.END,
+                display_config.TYPE
+            )
+        end)
 
-        if type(colors) ~= "table" then
-            error("Failed to generate gradient colors for tasks")
+        if not ok or type(colors) ~= "table" then
+            gradient_available = false
             return false
         end
 
         for i, color in ipairs(colors) do
-            vim.api.nvim_set_hl(0, DISPLAY_CONFIG.HIGHLIGHT_GROUP .. i, { fg = color })
+            pcall(vim.api.nvim_set_hl, 0, DISPLAY_CONFIG.HIGHLIGHT_GROUP .. i, { fg = color })
         end
 
+        gradient_available = true
         vim.b.vault_task_colors_initialized = true
         return true
     end
@@ -116,9 +123,7 @@ return function(opts)
     end
 
     local make_display = function(entry)
-        if not setup_task_colors() then
-            return
-        end
+        setup_task_colors()
 
         local task = entry.value
         local window_width = vim.api.nvim_list_uis()[1].width
@@ -127,12 +132,15 @@ return function(opts)
             or { symbol = "?", hl = "Normal" }
 
         -- Calculate gradient for description
-        local desc_length = #task.data.description
-        local gradient_idx = math.max(
-            1,
-            math.min(math.floor(desc_length / 16), DISPLAY_CONFIG.COLORS.GRADIENT.STEPS)
-        )
-        local desc_hl = DISPLAY_CONFIG.HIGHLIGHT_GROUP .. gradient_idx
+        local desc_hl = "TelescopeResultsNormal"
+        if gradient_available then
+            local desc_length = #task.data.description
+            local gradient_idx = math.max(
+                1,
+                math.min(math.floor(desc_length / 16), DISPLAY_CONFIG.COLORS.GRADIENT.STEPS)
+            )
+            desc_hl = DISPLAY_CONFIG.HIGHLIGHT_GROUP .. gradient_idx
+        end
 
         local displayer = entry_display.create({
             separator = string.rep(" ", DISPLAY_CONFIG.WIDTHS.SEPARATOR),

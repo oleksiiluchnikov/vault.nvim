@@ -17,7 +17,6 @@ return function(opts)
     local pickers = require("telescope.pickers")
     local sorters = require("telescope.sorters")
     local Log = require("plenary.log")
-    local Gradient = require("gradient")
     local Error = require("vault.utils.error")
     local utils = require("vault.utils")
     local vault_previewers = require("telescope._extensions.vault.previewers")
@@ -48,6 +47,7 @@ return function(opts)
     local hl_name = "VaultNoteContent"
     local colors = nil
     local ok, maybe_colors = pcall(function()
+        local Gradient = require("gradient")
         return Gradient.from_stops(steps, "Boolean", "Comment", "Normal", "String")
     end)
     if ok and type(maybe_colors) == "table" then

@@ -12,7 +12,7 @@ local function setup_tmp_vault()
     f1:close()
 
     local f2 = io.open(tmp_vault .. "/note-old.md", "w")
-    f2:write([[---\nslug: note-old\n---\n# Title\nContent]])
+    f2:write("---\nslug: note-old\n---\n# Title\nContent")
     f2:close()
 end
 

@@ -239,60 +239,52 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug)
     end
 
     -- Update frontmatter on the renamed file if configured
-    -- local fm_key = watcher_conf.frontmatter_key
-    -- if fm_key and fm_key ~= "" then
-    --     local f = io.open(new_path, "r")
-    --     if f then
-    --         local content = f:read("*all")
-    --         f:close()
-    --
-    --         -- find YAML frontmatter (---\n ... ---\n)
-    --         local fm_start, fm_end = content:find("^%-%-%-\n.-\n%-%-%-\n")
-    --         if fm_start then
-    --             local fm_block = content:sub(fm_start, fm_end)
-    --             local pattern = "(" .. fm_key .. "%s*:%s*)(.-)(\n)"
-    --             if fm_block:match(fm_key .. "%s*:") then
-    --                 fm_block = fm_block:gsub(pattern, "%1" .. new_slug .. "%3")
-    --             else
-    --                 -- insert key right after opening ---\n
-    --                 fm_block =
-    --                     fm_block:gsub("^(%-%-%-\n)", "%1" .. fm_key .. ": " .. new_slug .. "\n")
-    --             end
-    --             local new_content = content:sub(1, fm_start - 1)
-    --                 .. fm_block
-    --                 .. content:sub(fm_end + 1)
-    --             local wf = io.open(new_path, "w")
-    --             if wf then
-    --                 wf:write(new_content)
-    --                 wf:close()
-    --             end
-    --         else
-    --             -- no frontmatter: add one with key and relpath
-    --             local rel = utils.path_to_relpath(new_path)
-    --             local fm = "---\n"
-    --                 .. fm_key
-    --                 .. ": "
-    --                 .. new_slug
-    --                 .. "\nrelpath: "
-    --                 .. rel
-    --                 .. "\n---\n\n"
-    --             local wf = io.open(new_path, "w")
-    --             if wf then
-    --                 wf:write(fm .. content)
-    --                 wf:close()
-    --             end
-    --         end
-    --     end
-    -- end
+    local fm_key = watcher_conf.frontmatter_key
+    if fm_key and fm_key ~= "" then
+        local f = io.open(new_path, "r")
+        if f then
+            local content = f:read("*all")
+            f:close()
+
+            -- find YAML frontmatter (---\n ... ---\n)
+            local fm_start, fm_end = content:find("^%-%-%-\n.-\n%-%-%-\n")
+            if fm_start then
+                local fm_block = content:sub(fm_start, fm_end)
+                local pattern = "(" .. fm_key .. "%s*:%s*)(.-)(\n)"
+                if fm_block:match(fm_key .. "%s*:") then
+                    fm_block = fm_block:gsub(pattern, "%1" .. new_slug .. "%3")
+                else
+                    -- insert key right after opening ---\n
+                    fm_block =
+                        fm_block:gsub("^(%-%-%-\n)", "%1" .. fm_key .. ": " .. new_slug .. "\n")
+                end
+                local new_content = content:sub(1, fm_start - 1)
+                    .. fm_block
+                    .. content:sub(fm_end + 1)
+                utils.safe_write(new_path, new_content)
+            else
+                -- no frontmatter: add one with key and relpath
+                local rel = utils.path_to_relpath(new_path)
+                local fm = "---\n"
+                    .. fm_key
+                    .. ": "
+                    .. new_slug
+                    .. "\nrelpath: "
+                    .. rel
+                    .. "\n---\n\n"
+                utils.safe_write(new_path, fm .. content)
+            end
+        end
+    end
 
     -- Update open buffers: rename any buffer that pointed to the old path
     for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
         if vim.api.nvim_buf_is_loaded(bufnr) then
             local name = vim.api.nvim_buf_get_name(bufnr)
             if name == old_path then
-                local modified = vim.api.nvim_buf_get_option(bufnr, "modified")
+                local modified = vim.bo[bufnr].modified
                 pcall(vim.api.nvim_buf_set_name, bufnr, new_path)
-                pcall(vim.api.nvim_buf_set_option, bufnr, "modified", modified)
+                vim.bo[bufnr].modified = modified
             end
         end
     end
