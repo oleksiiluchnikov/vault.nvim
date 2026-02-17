@@ -5,7 +5,6 @@ return function(opts)
     local entry_display = require("telescope.pickers.entry_display")
     local vault_state = require("vault.core.state")
     local Log = require("plenary.log")
-    local Gradient = require("gradient")
     local available_pickers = {
         { name = "notes", description = "Browse and search through all notes" },
         { name = "tasks", description = "Search and manage tasks across notes" },

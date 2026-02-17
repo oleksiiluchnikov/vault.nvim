@@ -271,14 +271,14 @@ end
 --- @param args vim.api.keyset.create_user_command.command_args
 --- @return nil
 function callbacks.open_live_grep_picker(args)
-    --TODO: Implement
-    error("Not implemented")
-    if args.range == 0 then
-        require("telescope._extensions.vault.pickers").live_grep({ query = "" }):find()
-        return
-    end
-    local query = table.concat(args.fargs, " ")
-    require("telescope._extensions.vault.pickers").live_grep({ query = query }):find()
+    -- TODO: Implement live_grep picker
+    vim.notify("[vault] VaultGrep is not yet implemented", vim.log.levels.WARN)
+    -- if args.range == 0 then
+    --     require("telescope._extensions.vault.pickers").live_grep({ query = "" }):find()
+    --     return
+    -- end
+    -- local query = table.concat(args.fargs, " ")
+    -- require("telescope._extensions.vault.pickers").live_grep({ query = query }):find()
 end
 
 --- vault.Yesterday

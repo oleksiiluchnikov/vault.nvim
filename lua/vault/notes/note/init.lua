@@ -571,6 +571,75 @@ function Note:get_methods()
     return methods
 end
 
+
+--- Move/rename note to a new path and update all wikilink references.
+---
+--- This performs the filesystem rename, patches all [[wikilinks]] across the vault
+--- that pointed to the old slug, updates the frontmatter if configured, and renames
+--- any open Neovim buffers that pointed to the old path.
+---
+--- @param new_path string New absolute path for the note
+--- @param force? boolean Force move even if target exists (default: false)
+--- @param verbose? boolean Show detailed notifications (default: true)
+function Note:move(new_path, force, verbose)
+    local uv = vim.uv or vim.loop
+
+    if type(new_path) ~= "string" or new_path == "" then
+        error("Note:move() requires a non-empty string path, got " .. type(new_path))
+    end
+
+    local old_path = self.data.path
+    if old_path == new_path then
+        return
+    end
+
+    -- Check source exists
+    if vim.fn.filereadable(old_path) == 0 then
+        error("Note:move() source does not exist: " .. old_path)
+    end
+
+    -- Check target does not already exist (unless force)
+    if not force and vim.fn.filereadable(new_path) == 1 then
+        error("Note:move() target already exists: " .. new_path .. " (use force=true to overwrite)")
+    end
+
+    -- Ensure target directory exists
+    local target_dir = vim.fn.fnamemodify(new_path, ":p:h")
+    if vim.fn.isdirectory(target_dir) == 0 then
+        vim.fn.mkdir(target_dir, "p")
+    end
+
+    -- Perform the filesystem rename
+    local ok, err = uv.fs_rename(old_path, new_path)
+    if not ok then
+        error("Note:move() fs_rename failed: " .. tostring(err))
+    end
+
+    -- Update all wikilink references across the vault via the Watcher
+    local Watcher = require("vault.watcher")
+    local watcher = Watcher()
+    -- Disable prompts for programmatic moves and skip oil guard
+    watcher:disable_oil_guard()
+    local patched = watcher:handle_rename(old_path, new_path)
+
+    -- Update internal data to reflect the new path
+    self.data.path = new_path
+    self.data.slug = utils.path_to_slug(new_path)
+    self.data.relpath = utils.path_to_relpath(new_path)
+
+    if verbose ~= false then
+        vim.notify(
+            string.format(
+                "[vault] Moved note: %s -> %s (%d files patched)",
+                utils.path_to_slug(old_path),
+                self.data.slug,
+                patched or 0
+            ),
+            vim.log.levels.INFO
+        )
+    end
+end
+
 --- @type vault.Note|vault.Note.constructor
 local VaultNote = Note
 

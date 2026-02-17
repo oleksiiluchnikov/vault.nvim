@@ -7,10 +7,11 @@ local config = require("vault.config")
 
 local plugin_path = debug.getinfo(1, "S").source:sub(2):match("(.*/vault.nvim)/.*")
 --- @type vault.Config.options.root
-local demo_vault_path = plugin_path .. "/demo_vault"
+local demo_vault_path = plugin_path .. "/tests/fixtures/demo-vault"
 config.options.root = demo_vault_path
 
-local note = Note(string.format("%s/%s", demo_vault_path, "Project/My awesome neovim plugin.md"))
+local test_path = string.format("%s/%s", demo_vault_path, "Project/My new masterpeace.md")
+local note = Note(test_path)
 
 describe("NotesCluster", function()
     --- @type vault.Notes

@@ -6,7 +6,6 @@ return function(opts)
     local pickers = require("telescope.pickers")
     local sorters = require("telescope.sorters")
     local Log = require("plenary.log")
-    local Gradient = require("gradient")
     local Error = require("vault.utils.error")
     local utils = require("vault.utils")
     local vault_previewers = require("telescope._extensions.vault.previewers")
@@ -21,15 +20,20 @@ return function(opts)
     end
 
     local steps = math.min(64, vim.tbl_count(lines_list))
-    local Gradient = require("gradient")
-    --- @type Gradient|nil
-    local colors = Gradient.from_stops(steps, "Comment", "Normal", "String")
-    if type(colors) ~= "table" then
-        error("Gradient.from_stops")
-    end
     local hl_name = "VaultLine"
-    for i, color in ipairs(colors) do
-        vim.api.nvim_set_hl(0, hl_name .. tostring(i), { fg = color })
+    --- @type table|nil
+    local colors = nil
+    do
+        local ok, maybe_colors = pcall(function()
+            local Gradient = require("gradient")
+            return Gradient.from_stops(steps, "Comment", "Normal", "String")
+        end)
+        if ok and type(maybe_colors) == "table" then
+            colors = maybe_colors
+            for i, color in ipairs(colors) do
+                pcall(vim.api.nvim_set_hl, 0, hl_name .. tostring(i), { fg = color })
+            end
+        end
     end
 
     -- Calculate max widths for various columns
@@ -102,11 +106,14 @@ return function(opts)
         local sources_count = line.data.count
 
         -- Calculate gradient index based on source count
-        local i = math.min(math.floor(sources_count / 2), steps)
-        if i == 0 then
-            i = 1
+        local content_hl = "TelescopeResultsNormal"
+        if colors then
+            local i = math.min(math.floor(sources_count / 2), steps)
+            if i == 0 then
+                i = 1
+            end
+            content_hl = hl_name .. tostring(i)
         end
-        local content_hl = hl_name .. tostring(i)
 
         -- Prepare display columns
         local content = truncate(line.data.content, max_widths.content)
