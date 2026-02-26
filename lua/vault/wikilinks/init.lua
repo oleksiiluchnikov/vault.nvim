@@ -78,26 +78,31 @@ function Wikilinks:init(notes)
     state.set_global_key("wikilinks", self)
 end
 
---- Wikilinks that don't have a target key.
+--- Return a new Wikilinks-like table containing only wikilinks that don't resolve to any note.
+--- Non-destructive — does not mutate the receiver.
 --- @return vault.Wikilinks
 function Wikilinks:unresolved()
-    for wikilink_slug, wikilink in pairs(self.map) do
-        if wikilink.data.target and wikilink.data.target ~= "" then
-            self.map[wikilink_slug] = nil
-        end
-    end
-    return self
-end
-
---- Wikilinks that have a target key.
---- @return vault.Wikilinks
-function Wikilinks:resolved()
+    local filtered = {}
     for wikilink_slug, wikilink in pairs(self.map) do
         if not wikilink.data.target or wikilink.data.target == "" then
-            self.map[wikilink_slug] = nil
+            filtered[wikilink_slug] = wikilink
         end
     end
-    return self
+    -- Return a lightweight copy with filtered map
+    return setmetatable({ map = filtered }, { __index = self })
+end
+
+--- Return a new Wikilinks-like table containing only wikilinks that resolve to an existing note.
+--- Non-destructive — does not mutate the receiver.
+--- @return vault.Wikilinks
+function Wikilinks:resolved()
+    local filtered = {}
+    for wikilink_slug, wikilink in pairs(self.map) do
+        if wikilink.data.target and wikilink.data.target ~= "" then
+            filtered[wikilink_slug] = wikilink
+        end
+    end
+    return setmetatable({ map = filtered }, { __index = self })
 end
 
 --- @return vault.Notes.Data.slugs
