@@ -276,6 +276,29 @@ function Collection:filter(opts, value, match_opt, case_sensitive)
         return self:to_group()
     end
 
+    -- Handle slug-array filtering: filter({ "slug-a", "slug-b", ... })
+    -- Keeps only items whose map key (or data.slug) appears in the list.
+    if vim.islist(opts) and #opts > 0 and type(opts[1]) == "string" then
+        -- Disambiguate from positional Filter args like { "tags", {...}, {}, "startswith", "all" }
+        -- by checking that opts[1] is NOT a known NoteData search_term field.
+        local NoteData = require("vault.notes.note.data")
+        if not NoteData[opts[1]] then
+            local slug_set = {}
+            for _, slug in ipairs(opts) do
+                slug_set[slug] = true
+            end
+            local filtered = {}
+            for id, item in pairs(self.map) do
+                local item_slug = (item.data and item.data.slug) or id
+                if slug_set[item_slug] or slug_set[id] then
+                    filtered[id] = item
+                end
+            end
+            self.map = filtered
+            return self:to_group()
+        end
+    end
+
     -- Handle VaultFilter or filter options table
     if not opts.class or opts.class.name ~= "VaultFilter" then
         opts = Filter(opts).opts

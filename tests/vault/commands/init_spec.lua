@@ -88,58 +88,35 @@ describe("Vault commands", function()
     require("vault.commands")
 
     describe("registration", function()
-        -- Every command that commands/init.lua registers
-        local expected_commands = {
-            -- { name, nargs }
-            { "Vault",                    "*" },
-            { "VaultNote",                "*" },
-            { "VaultNotes",               "*" },
-            { "VaultNoteNew",             "*" },
-            { "VaultRandomNote",          "*" },
-            { "VaultTags",                "*" },
-            { "VaultDates",               "*" },
-            { "VaultToday",               "0" },
-            { "VaultYesterday",           "0" },
-            { "VaultNotesStatus",         "*" },
-            { "VaultFleetingNote",        "*" },
-            { "VaultOrphans",             "0" },
-            { "VaultLinked",              "0" },
-            { "VaultInternals",           "*" },
-            { "VaultLeaves",              "*" },
-            { "VaultDanglingLinks",       "*" },
-            { "VaultOutlinksUnresolved",  "*" },
-            { "VaultOutlinksResolvedOnly","*" },
-            { "VaultWikilinks",           "*" },
-            { "VaultTasks",               "*" },
-            { "VaultNotesCluster",        "*" },
-            { "VaultMove",                "*" },
-            { "VaultGrep",                "*" },
-            { "VaultRename",              "*" },
-            { "VaultNoteInlinks",         "0" },
-            { "VaultNoteOutlinks",        "0" },
-            { "VaultNoteTags",            "*" },
-            { "VaultNoteExtract",         "*" },
-            { "VaultProperties",          "*" },
-            { "VaultNoteProperties",      "*" },
-            { "VaultNotesByDir",          "*" },
-            { "VaultDirs",                "*" },
-            { "VaultToggleLink",          "0" },
-            { "VaultBases",               "*" },
-        }
-
-        -- Fetch once — nvim_get_commands returns all user-defined commands
+        -- Only :Vault is registered now (legacy VaultFoo commands were removed)
         local cmds = vim.api.nvim_get_commands({})
 
-        for _, spec in ipairs(expected_commands) do
-            local name, nargs = spec[1], spec[2]
+        it(":Vault is registered", function()
+            assert.is_not_nil(cmds["Vault"], "Vault should be registered")
+        end)
 
-            it(string.format(":%s is registered", name), function()
-                assert.is_not_nil(cmds[name], name .. " should be registered")
-            end)
+        it(":Vault has nargs=*", function()
+            assert.is_not_nil(cmds["Vault"], "Vault must exist first")
+            assert.are.equal("*", cmds["Vault"].nargs, "Vault nargs mismatch")
+        end)
 
-            it(string.format(":%s has nargs=%s", name, nargs), function()
-                assert.is_not_nil(cmds[name], name .. " must exist first")
-                assert.are.equal(nargs, cmds[name].nargs, name .. " nargs mismatch")
+        -- Legacy commands should NOT be registered
+        local legacy_commands = {
+            "VaultNote", "VaultNotes", "VaultNoteNew", "VaultRandomNote",
+            "VaultTags", "VaultDates", "VaultToday", "VaultYesterday",
+            "VaultNotesStatus", "VaultFleetingNote", "VaultOrphans",
+            "VaultLinked", "VaultInternals", "VaultLeaves",
+            "VaultDanglingLinks", "VaultOutlinksUnresolved",
+            "VaultOutlinksResolvedOnly", "VaultWikilinks", "VaultTasks",
+            "VaultNotesCluster", "VaultMove", "VaultGrep", "VaultRename",
+            "VaultNoteInlinks", "VaultNoteOutlinks", "VaultNoteTags",
+            "VaultNoteExtract", "VaultProperties", "VaultNoteProperties",
+            "VaultNotesByDir", "VaultDirs", "VaultToggleLink", "VaultBases",
+        }
+
+        for _, name in ipairs(legacy_commands) do
+            it(string.format(":%s is NOT registered (removed)", name), function()
+                assert.is_nil(cmds[name], name .. " should NOT be registered (legacy)")
             end)
         end
     end)
@@ -393,7 +370,7 @@ describe("Vault buffer-context commands", function()
     -- Ensure vault is configured for this describe block
     setup_vault()
 
-    describe(":VaultToggleLink", function()
+    describe(":Vault toggle-link", function()
         local bufnr
 
         before_each(function()
@@ -410,10 +387,9 @@ describe("Vault buffer-context commands", function()
         it("should convert a bare URL to a markdown link", function()
             local line = "Check out https://example.com for details"
             vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { line })
-            -- Position cursor on the URL (col is 0-based)
             vim.api.nvim_win_set_cursor(0, { 1, 12 })
 
-            vim.cmd("VaultToggleLink")
+            vim.cmd("Vault toggle-link")
 
             local result = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1]
             assert.is_truthy(
@@ -425,17 +401,15 @@ describe("Vault buffer-context commands", function()
         it("should convert a markdown link back to a bare URL", function()
             local line = "Check out [Example](https://example.com) for details"
             vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { line })
-            -- Position cursor inside the markdown link
             vim.api.nvim_win_set_cursor(0, { 1, 15 })
 
-            vim.cmd("VaultToggleLink")
+            vim.cmd("Vault toggle-link")
 
             local result = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1]
             assert.is_truthy(
                 result:find("https://example.com"),
                 "expected bare URL, got: " .. result
             )
-            -- Should NOT have markdown link syntax anymore
             assert.is_falsy(
                 result:find("%[Example%]"),
                 "markdown link syntax should be removed, got: " .. result
@@ -447,7 +421,7 @@ describe("Vault buffer-context commands", function()
             vim.api.nvim_win_set_cursor(0, { 1, 5 })
 
             local messages = capture_notify(function()
-                vim.cmd("VaultToggleLink")
+                vim.cmd("Vault toggle-link")
             end)
             assert.is_true(#messages > 0, "should have notified")
             assert.is_truthy(
@@ -527,31 +501,7 @@ describe("Vault buffer-context commands", function()
         end)
     end)
 
-    describe(":VaultMove (deprecated)", function()
-        it("should emit a deprecation warning", function()
-            local messages = capture_notify(function()
-                vim.cmd("VaultMove")
-            end)
-            assert.is_true(#messages > 0, "should have notified")
-            assert.is_truthy(
-                messages[1]:find("deprecated"),
-                "expected deprecation warning, got: " .. messages[1]
-            )
-        end)
-    end)
-
-    describe(":VaultGrep (not implemented)", function()
-        it("should emit a not-implemented warning", function()
-            local messages = capture_notify(function()
-                vim.cmd("VaultGrep")
-            end)
-            assert.is_true(#messages > 0, "should have notified")
-            assert.is_truthy(
-                messages[1]:find("not yet implemented"),
-                "expected 'not yet implemented' warning, got: " .. messages[1]
-            )
-        end)
-    end)
+    -- Legacy :VaultMove and :VaultGrep were removed — tested via :Vault subcommands now
 end)
 
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -576,7 +526,7 @@ describe("Vault note-context commands", function()
         pcall(vim.cmd, "bdelete!")
     end)
 
-    describe(":VaultNoteOutlinks", function()
+    describe(":Vault note outlinks", function()
         it("should prepare outlinks data for test_note.md (has outlinks)", function()
             -- test_note.md has 3 wikilinks — the command builds outlinks data
             -- and would open a Telescope picker. We intercept at the pickers level.
@@ -595,7 +545,7 @@ describe("Vault note-context commands", function()
         end)
     end)
 
-    describe(":VaultNoteInlinks", function()
+    describe(":Vault note inlinks", function()
         it("should have inlinks for test_note.md (shell_and_code_test links to it)", function()
             -- test_note.md now has inlinks from shell_and_code_test.md which contains [[test_note]].
             local Note = require("vault.notes.note")
@@ -607,7 +557,7 @@ describe("Vault note-context commands", function()
         end)
     end)
 
-    describe(":VaultNoteTags", function()
+    describe(":Vault note tags", function()
         it("should have tags data on test_note.md", function()
             -- test_note.md has many inline tags.
             -- Test the data preparation path (tags exist on the note).
