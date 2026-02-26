@@ -491,9 +491,9 @@ end
 
 --- ```vim
 --- :vaultNotes <preset> <filter> ...
---- :VaultNotes linked tags <include_tags> <exclude_tags> <match_opt> <match_type>
---- :VaultNotes orphans tags <include_tags> <exclude_tags> <match_opt> <match_type>
---- :VaultNotes tags <include_tags> <exclude_tags> <match_opt> <match_type>
+--- :Vault notes linked tags <include_tags> <exclude_tags> <match_opt> <match_type>
+--- :Vault notes orphans tags <include_tags> <exclude_tags> <match_opt> <match_type>
+--- :Vault notes tags <include_tags> <exclude_tags> <match_opt> <match_type>
 --- ```
 
 --- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- --
@@ -635,7 +635,7 @@ function callbacks.open_properties_picker(args)
     safe_find(pickers.properties({ values = values }), "No properties found")
 end
 
---- @command :VaultYesterday {dates} [[
+--- @command :Vault yesterday [[
 --- Opens a picker with the statuses
 --- @command ]]
 --- @param args vim.api.keyset.create_user_command.command_args
@@ -739,7 +739,7 @@ end
 --- vault.NoteRename
 --- Rename a note title and update all the links to that note
 --- ```vim
---- :VaultNoteRename <new_title>
+--- :Vault note rename <new_title>
 --- ```
 ---
 --- ```lua
@@ -775,7 +775,7 @@ end
 --- vault.NoteInlinks
 --- Opens a picker with the notes where current note is mentioned
 --- ```vim
---- :VaultNoteInlinks
+--- :Vault note inlinks
 --- ```
 ---
 --- ```lua
@@ -806,7 +806,7 @@ end
 --- vault.NoteOutlinks
 --- Opens a picker with the notes that current note links to
 --- ```vim
---- :VaultNoteOutlinks
+--- :Vault note outlinks
 --- ```
 ---
 --- ```lua
@@ -845,7 +845,7 @@ end
 --- vault.NoteTags
 --- Opens a picker with the notes that have the tags
 --- ```vim
---- :VaultNoteTags <range>
+--- :Vault note tags <range>
 --- ```
 ---
 --- ```lua
@@ -963,9 +963,9 @@ end
 --- vault.NoteProperties
 --- Opens a picker with the properties of the note
 --- ```vim
---- :VaultNoteProperties
---- :VaultNoteProperties <property_name>
---- :VaultNoteProperties <property_name> <property_name>
+--- :Vault note properties
+--- :Vault note properties <property_name>
+--- :Vault note properties <property_name> <property_name>
 --- ```
 --- @param args vim.api.keyset.create_user_command.command_args
 --- @return nil
@@ -1142,34 +1142,8 @@ function callbacks.tasks()
     safe_find(pickers.tasks(), "No tasks found")
 end
 
---- Helper to create a deprecation stub that forwards to a :Vault subcommand.
---- The old command still works but shows a one-time deprecation notice.
---- @param old_name string  e.g. "VaultOrphans"
---- @param new_cmd string   e.g. ":Vault notes orphans"
---- @param forward_fn function  the actual callback to run
---- @param opts? table  extra opts (nargs, complete, range, desc)
---- @return table  command definition {callback, opts}
-local function deprecated(old_name, new_cmd, forward_fn, opts)
-    opts = opts or {}
-    local warned = false
-    return {
-        callback = function(args)
-            if not warned then
-                vim.notify(
-                    string.format("[vault] :%s is deprecated, use %s instead", old_name, new_cmd),
-                    vim.log.levels.WARN
-                )
-                warned = true
-            end
-            forward_fn(args)
-        end,
-        opts = vim.tbl_extend("force", { nargs = "*" }, opts),
-    }
-end
-
 -- Commands for the plugin
 local M = {
-    -- ── Primary dispatcher ──────────────────────────────────────────────
     ["Vault"] = {
         callback = callbacks.api,
         opts = {
@@ -1179,82 +1153,6 @@ local M = {
             range = true,
         },
     },
-
-    -- ── Deprecated legacy commands (forward to :Vault subcommands) ──────
-    ["VaultNote"]               = deprecated("VaultNote",               ":Vault note",            callbacks.note,                     { complete = completions.note, nargs = "*" }),
-    ["VaultRandomNote"]         = deprecated("VaultRandomNote",         ":Vault note random",     callbacks.edit_random_note,          { nargs = "*" }),
-    ["VaultNotes"]              = deprecated("VaultNotes",              ":Vault notes",           callbacks.notes,                     { complete = completions.notes_filter, nargs = "*" }),
-    ["VaultTags"]               = deprecated("VaultTags",               ":Vault tags",            callbacks.open_tags_picker,           { complete = completions.tags, nargs = "*" }),
-    ["VaultDates"]              = deprecated("VaultDates",              ":Vault dates",           callbacks.open_dates_picker,          { complete = completions.dates, nargs = "*" }),
-    ["VaultToday"]              = deprecated("VaultToday",              ":Vault today",           callbacks.today,                     { nargs = 0 }),
-    ["VaultYesterday"]          = deprecated("VaultYesterday",          ":Vault yesterday",       callbacks.yesterday,                 { nargs = 0 }),
-    ["VaultNotesStatus"]        = deprecated("VaultNotesStatus",        ":Vault notes status",    callbacks.open_notes_status_picker,   { complete = completions.statuses, nargs = "*" }),
-    ["VaultFleetingNote"]       = deprecated("VaultFleetingNote",       ":Vault fleeting",        callbacks.open_fleeting_note_popup,   { nargs = "*" }),
-    ["VaultOrphans"]            = deprecated("VaultOrphans",            ":Vault notes orphans",   callbacks.open_orphans_picker,        { nargs = 0 }),
-    ["VaultLinked"]             = deprecated("VaultLinked",             ":Vault notes linked",    callbacks.open_linked_picker,         { nargs = 0 }),
-    ["VaultInternals"]          = deprecated("VaultInternals",          ":Vault notes internals", function()
-        safe_find(pickers.notes({ notes = require("vault.notes")():internals() }), "No internal notes found")
-    end, { nargs = "*" }),
-    ["VaultLeaves"]             = deprecated("VaultLeaves",             ":Vault notes leaves",    function()
-        safe_find(pickers.notes({ notes = require("vault.notes")():leaves() }), "No leaf notes found")
-    end, { nargs = "*" }),
-    ["VaultDanglingLinks"]      = deprecated("VaultDanglingLinks",      ":Vault notes dangling",  function()
-        safe_find(pickers.notes({ notes = require("vault.notes")():with_outlinks_unresolved() }), "No dangling links found")
-    end, { nargs = "*" }),
-    ["VaultOutlinksUnresolved"] = deprecated("VaultOutlinksUnresolved", ":Vault notes dangling",  function()
-        safe_find(pickers.notes({ notes = require("vault.notes")():with_outlinks_unresolved() }), "No unresolved outlinks found")
-    end, { nargs = "*" }),
-    ["VaultOutlinksResolvedOnly"] = deprecated("VaultOutlinksResolvedOnly", ":Vault notes resolved", function()
-        safe_find(pickers.notes({ notes = require("vault.notes")():with_outlinks_resolved_only() }), "No notes with all outlinks resolved")
-    end, { nargs = "*" }),
-    ["VaultWikilinks"]          = deprecated("VaultWikilinks",          ":Vault wikilinks",       function() safe_find(pickers.wikilinks(), "No wikilinks found") end, { nargs = "*" }),
-    ["VaultTasks"]              = deprecated("VaultTasks",              ":Vault tasks",           callbacks.tasks,                     { nargs = "*" }),
-    ["VaultNotesCluster"]       = deprecated("VaultNotesCluster",       ":Vault note cluster",    function(args)
-        local input = args.args or ""
-        if input == "" then
-            local path = vim.fn.expand("%")
-            if type(path) == "table" then path = path[1] end
-            input = require("vault.utils").path_to_slug(path)
-        end
-        local notes = require("vault.notes")()
-        local note = notes:filter("slug", input, "exact"):list()[1]
-        if not note then
-            vim.notify("[vault] Note not found: " .. input, vim.log.levels.WARN)
-            return
-        end
-        notes = require("vault.notes")()
-        local cluster = notes:to_cluster(note, 0)
-        local picker = pickers.notes({ notes = cluster })
-        if picker then picker:find() end
-    end, { complete = completions.note_slugs, nargs = "*" }),
-    ["VaultMove"]               = deprecated("VaultMove",               ":Vault note rename",     function() end, { nargs = "*" }),
-    ["VaultGrep"]               = deprecated("VaultGrep",               ":Vault grep",            callbacks.open_live_grep_picker,     { nargs = "*", range = true }),
-    ["VaultRename"]             = deprecated("VaultRename",             ":Vault note rename",     callbacks.rename,                    { nargs = "*" }),
-    ["VaultNoteInlinks"]        = deprecated("VaultNoteInlinks",        ":Vault note inlinks",    callbacks.note_inlinks_picker,        { nargs = 0 }),
-    ["VaultNoteOutlinks"]       = deprecated("VaultNoteOutlinks",       ":Vault note outlinks",   callbacks.note_outlinks_picker,       { nargs = 0 }),
-    ["VaultNoteTags"]           = deprecated("VaultNoteTags",           ":Vault note tags",       callbacks.note_tags_picker,           { nargs = "*", range = true, complete = completions.note_tags }),
-    ["VaultNoteExtract"]        = deprecated("VaultNoteExtract",        ":Vault note extract",    callbacks.note_from_selected_text,    { nargs = "*", range = true, complete = completions.note_slugs }),
-    ["VaultProperties"]         = deprecated("VaultProperties",         ":Vault properties",      function(args)
-        local fargs = args.fargs
-        if next(fargs) == nil then
-            safe_find(pickers.properties(), "No properties found")
-            return
-        end
-        safe_find(pickers.properties({ values = fargs }), "No properties found")
-    end, { nargs = "*", complete = function() return vim.tbl_keys(require("vault.scanner").properties()) end }),
-    ["VaultNoteProperties"]     = deprecated("VaultNoteProperties",     ":Vault note properties", callbacks.open_note_properties_picker, { nargs = "*" }),
-    ["VaultNotesByDir"]         = deprecated("VaultNotesByDir",         ":Vault notes dir",       callbacks.open_note_by_dir_picker,    { nargs = "*", complete = completions.dirs }),
-    ["VaultNoteNew"]            = deprecated("VaultNoteNew",            ":Vault note new",        callbacks.create_new_note,            { nargs = "*", complete = completions.dirs }),
-    ["VaultDirs"]               = deprecated("VaultDirs",               ":Vault dirs",            callbacks.pick_dirs,                  { nargs = "*", complete = completions.dirs }),
-    ["VaultToggleLink"]         = deprecated("VaultToggleLink",         ":Vault toggle-link",     callbacks.toggle_link,                { nargs = 0 }),
-    ["VaultBases"]              = deprecated("VaultBases",              ":Vault bases",           function(args)
-        local fargs = args.fargs
-        if next(fargs) == nil then
-            safe_find(pickers.bases(), "No bases found")
-            return
-        end
-        require("vault.api").open_picker_base_notes(table.concat(fargs, " "))
-    end, { nargs = "*", complete = function() local ok, b = pcall(function() return require("vault.bases")() end); return (ok and b) and b:names() or {} end }),
 }
 
 for command, opts in pairs(M) do
