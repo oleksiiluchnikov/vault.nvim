@@ -62,6 +62,13 @@ local function write_note(path, content, opts)
         content = "# " .. opts.title.text .. "\n" .. content
     end
 
+    -- Check parent directory exists before writing
+    local parent = vim.fn.fnamemodify(path, ":h")
+    if vim.fn.isdirectory(parent) == 0 then
+        vim.notify("Directory does not exist: " .. parent, vim.log.levels.ERROR)
+        return nil
+    end
+
     local lines = vim.split(content, "\n")
     vim.fn.writefile(lines, path)
     if not check_if_note_exists(path) then
@@ -116,7 +123,7 @@ function PopupFleetingNote:init(content, opts)
     local notes_list = notes:list()
     --- @type vault.path
     local inbox_dir = (config.options.dirs and config.options.dirs.inbox)
-        or (config.options.root .. "/inbox")
+        or config.options.root
     local new_note_path = inbox_dir .. "/" .. opts.title.text .. config.options.ext
     --- @type NuiPopup
     local editor_popup = Popup(opts.editor)
