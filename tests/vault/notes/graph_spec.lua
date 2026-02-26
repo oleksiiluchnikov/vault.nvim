@@ -170,11 +170,10 @@ describe("Graph analysis (demo vault)", function()
             local dangling = Notes():with_outlinks_unresolved()
             local count = vim.tbl_count(dangling.map)
             -- test_note (Wiki Link, Nested/Wiki/Link),
-            -- test_note_4039790659 (My awesome neovim plugin),
-            -- shell_and_code_test (bash false-positives from unfenced [[ ]] lines 39-40)
-            -- NOTE: shell_and_code_test has 3 resolved + 2 bash false-positives = mixed
-            assert.are.equal(3, count,
-                "Expected 3 notes with unresolved outlinks, got " .. count)
+            -- test_note_4039790659 (My awesome neovim plugin)
+            -- shell_and_code_test now has 3 resolved + 0 false positives (bash filtered)
+            assert.are.equal(2, count,
+                "Expected 2 notes with unresolved outlinks, got " .. count)
         end)
     end)
 
@@ -182,10 +181,9 @@ describe("Graph analysis (demo vault)", function()
         it("should return notes where ALL outlinks resolve", function()
             local resolved = Notes():with_outlinks_resolved_only()
             local count = vim.tbl_count(resolved.map)
-            -- shell_and_code_test would qualify but has bash false-positive outlinks
-            -- that don't resolve, so 0 notes have ALL outlinks resolved
-            assert.are.equal(0, count,
-                "Expected 0 notes with all outlinks resolved (bash false-positives), got " .. count)
+            -- shell_and_code_test has 3 outlinks, all resolved (bash false-positives now filtered)
+            assert.are.equal(1, count,
+                "Expected 1 note with all outlinks resolved, got " .. count)
         end)
     end)
 
