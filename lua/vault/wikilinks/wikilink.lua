@@ -85,6 +85,40 @@ end
 --- Validate that the content inside brackets is a valid wikilink.
 --- @param content string The stripped content (no brackets)
 --- @return boolean
+--- Check whether a wikilink slug looks like a plausible Obsidian note name.
+--- Real note names are alphanumeric with spaces, hyphens, underscores, dots,
+--- slashes (for paths), and unicode. Code artifacts contain characters like
+--- $, %, (, ), ", ', +, *, {, }, =, ;, >, <, .., etc.
+--- @param slug string
+--- @return boolean
+local function is_valid_slug(slug)
+    if not slug or slug == "" then
+        return false
+    end
+    -- Reject strings with code/shell/regex artifacts
+    -- These characters never appear in real Obsidian note filenames
+    if slug:find("[%$%%%(%)%{%}%+%*=;<>\"'`\\]") then
+        return false
+    end
+    -- Reject Lua string concatenation patterns: " .. "
+    if slug:find("%.%.") then
+        return false
+    end
+    -- Reject strings that are only punctuation/digits/commas (e.g. "0, 0", "...", "%s")
+    if slug:match("^[%d%p%s]+$") then
+        return false
+    end
+    -- Reject pipe-only or hash-only (degenerate)
+    if slug:match("^[#|]+$") then
+        return false
+    end
+    -- Must have at least one letter (unicode or ASCII) — real note names always do
+    if not slug:find("%a") and not slug:find("[\128-\255]") then
+        return false
+    end
+    return true
+end
+
 local function is_valid_content(content)
     if not content or content == "" then
         return false
@@ -101,6 +135,10 @@ local function is_valid_content(content)
     -- Must have at least one non-whitespace character in the slug portion
     local slug = content:match("^([^#|]*)")
     if not slug or slug:match("^%s*$") then
+        return false
+    end
+    -- Validate slug looks like a real note name
+    if not is_valid_slug(slug) then
         return false
     end
     return true
@@ -293,6 +331,11 @@ function Wikilink.extract_from_text(text)
     return results
 end
 
+
+--- Expose slug validation for use by other modules (e.g. scanner filtering).
+--- @param slug string
+--- @return boolean
+Wikilink.is_valid_slug = is_valid_slug
 
 --- @alias vault.Wikilink.constructor fun(raw_link: vault.Wikilink.Data.raw|vault.Wikilink.Data.partial)
 --- @type vault.Wikilink|vault.Wikilink.constructor

@@ -329,14 +329,15 @@ local function build_subcommands()
             end,
             unresolved = {
                 run = function()
-                    local wikilinks = require("vault.wikilinks")(require("vault.notes")())
+                    -- Use the fast Rust scanner path (no args) instead of Lua notes-based parsing
+                    local wikilinks = require("vault.wikilinks")()
                     local unresolved = wikilinks:unresolved()
                     safe_find(pickers.wikilinks({ wikilinks = unresolved }), "No unresolved wikilinks found")
                 end,
             },
             resolved = {
                 run = function()
-                    local wikilinks = require("vault.wikilinks")(require("vault.notes")())
+                    local wikilinks = require("vault.wikilinks")()
                     local resolved = wikilinks:resolved()
                     safe_find(pickers.wikilinks({ wikilinks = resolved }), "No resolved wikilinks found")
                 end,
