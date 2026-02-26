@@ -105,11 +105,12 @@ local function build_subcommands()
             complete = function(prefix)
                 local methods = { "new", "rename", "extract", "inlinks", "outlinks", "tags", "properties", "cluster", "random" }
                 -- Also include Note methods
-                local ok, Note = pcall(require, "vault.notes.note")
-                if ok and Note and Note.get_methods then
-                    local inst = Note(vim.fn.expand("%:p"))
-                    if inst then
-                        local extra = pcall(function()
+                local bufpath = vim.fn.expand("%:p")
+                if bufpath:match("%.md$") then
+                    local ok, Note = pcall(require, "vault.notes.note")
+                    if ok and Note and Note.get_methods then
+                        pcall(function()
+                            local inst = Note(bufpath)
                             for _, m in ipairs(inst:get_methods()) do
                                 if not vim.tbl_contains(methods, m) then
                                     table.insert(methods, m)
