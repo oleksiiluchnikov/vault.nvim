@@ -100,8 +100,9 @@ local function is_valid_slug(slug)
     if slug:find("[%$%%%(%)%{%}%+%*=;<>\"'`\\]") then
         return false
     end
-    -- Reject Lua string concatenation patterns: " .. "
-    if slug:find("%.%.") then
+    -- Reject Lua string concatenation patterns: " .. " (space-dot-dot-space)
+    -- But allow relative paths like "../foo" (dot-dot-slash)
+    if slug:find(" %.%. ") or slug:find('" %.%. ') then
         return false
     end
     -- Reject strings that are only punctuation/digits/commas (e.g. "0, 0", "...", "%s")
@@ -185,6 +186,7 @@ function WikilinkData:init(this)
     end
 
     self.count = this.count or 1
+    self.suggestions = this.suggestions or {}
 
     self.variants = this.variants or {}
     self.variants[self.stem] = true

@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
-use walkdir::{DirEntry, WalkDir}; // <--- Add this
+use strsim::jaro_winkler;
+use walkdir::{DirEntry, WalkDir};
 
 fn is_hidden(entry: &DirEntry) -> bool {
     entry
@@ -255,11 +256,19 @@ struct TagData {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct SuggestionCandidate {
+    slug: String,
+    score: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct WikilinkData {
     stem: String,
     count: usize,
     embedded: bool,
     sources: HashMap<String, HashMap<usize, SourceOccurrence>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    suggestions: Vec<SuggestionCandidate>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -590,8 +599,60 @@ fn build_tags_map(notes: &[ParsedNote], root: &str) -> HashMap<String, TagData> 
     tags_map
 }
 
+/// Compute top-N Jaro-Winkler suggestions for a query against a list of slugs.
+/// Also compares against basenames for Obsidian-style resolution (e.g. "foo" matches "Notes/foo").
+fn suggest_candidates(
+    query: &str,
+    all_slugs: &[&str],
+    _basename_index: &HashMap<&str, &str>,
+    limit: usize,
+    threshold: f64,
+) -> Vec<SuggestionCandidate> {
+    let query_lower = query.to_lowercase();
+    let query_basename = query.rsplit('/').next().unwrap_or(query).to_lowercase();
+
+    let mut scored: Vec<(String, f64)> = all_slugs
+        .iter()
+        .map(|slug| {
+            let slug_lower = slug.to_lowercase();
+            let slug_basename = slug.rsplit('/').next().unwrap_or(slug).to_lowercase();
+
+            // Score against full slug and basename, take the best
+            let score_full = jaro_winkler(&query_lower, &slug_lower);
+            let score_base = jaro_winkler(&query_basename, &slug_basename);
+            let score = score_full.max(score_base);
+
+            (slug.to_string(), score)
+        })
+        .filter(|(_, score)| *score >= threshold)
+        .collect();
+
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(limit);
+
+    scored
+        .into_iter()
+        .map(|(slug, score)| SuggestionCandidate { slug, score })
+        .collect()
+}
+
 fn build_wikilinks_map(notes: &[ParsedNote], root: &str) -> HashMap<String, WikilinkData> {
     let mut wikilinks_map: HashMap<String, WikilinkData> = HashMap::new();
+
+    // Collect all known slugs for resolution and suggestion
+    let slugs_set: HashMap<String, bool> = notes
+        .iter()
+        .map(|note| (path_to_slug(&note.path, root), true))
+        .collect();
+
+    // Build basename → slug index for Obsidian-style resolution
+    let mut basename_to_slug: HashMap<String, String> = HashMap::new();
+    for slug in slugs_set.keys() {
+        let basename = slug.rsplit('/').next().unwrap_or(slug).to_string();
+        basename_to_slug
+            .entry(basename)
+            .or_insert_with(|| slug.clone());
+    }
 
     for note in notes {
         let slug = path_to_slug(&note.path, root);
@@ -606,6 +667,7 @@ fn build_wikilinks_map(notes: &[ParsedNote], root: &str) -> HashMap<String, Wiki
                     count: 0,
                     embedded: false,
                     sources: HashMap::new(),
+                    suggestions: Vec::new(),
                 });
 
             entry.count += 1;
@@ -627,6 +689,46 @@ fn build_wikilinks_map(notes: &[ParsedNote], root: &str) -> HashMap<String, Wiki
                         end_col: None,
                     },
                 );
+        }
+    }
+
+    // Post-process: for each unresolved wikilink, compute Jaro-Winkler suggestions.
+    // A wikilink is "unresolved" if its stem doesn't match any slug (exact or basename).
+    let all_slugs: Vec<&str> = slugs_set.keys().map(|s| s.as_str()).collect();
+    let basename_ref: HashMap<&str, &str> = basename_to_slug
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+
+    // Collect unresolved stems first, then compute suggestions in parallel
+    let unresolved_stems: Vec<String> = wikilinks_map
+        .keys()
+        .filter(|stem| {
+            // Check exact slug match
+            if slugs_set.contains_key(*stem) {
+                return false;
+            }
+            // Check basename match
+            let basename = stem.rsplit('/').next().unwrap_or(stem);
+            if basename_to_slug.contains_key(basename) {
+                return false;
+            }
+            true
+        })
+        .cloned()
+        .collect();
+
+    let suggestions_map: Vec<(String, Vec<SuggestionCandidate>)> = unresolved_stems
+        .par_iter()
+        .map(|stem| {
+            let candidates = suggest_candidates(stem, &all_slugs, &basename_ref, 5, 0.65);
+            (stem.clone(), candidates)
+        })
+        .collect();
+
+    for (stem, suggestions) in suggestions_map {
+        if let Some(entry) = wikilinks_map.get_mut(&stem) {
+            entry.suggestions = suggestions;
         }
     }
 
