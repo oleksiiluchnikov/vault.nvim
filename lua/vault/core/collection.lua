@@ -471,7 +471,10 @@ function Collection:values_map_by_key(key, opts)
     end
 
     -- Optimize options access
-    opts = vim.tbl_extend("force", { lowercase = false, as_value = false }, opts or {})
+    if type(opts) ~= "table" then
+        opts = {}
+    end
+    opts = vim.tbl_extend("force", { lowercase = false, as_value = false }, opts)
     local lowercase = opts.lowercase
     local as_value = opts.as_value
 

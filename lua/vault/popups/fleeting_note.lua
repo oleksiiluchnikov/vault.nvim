@@ -81,9 +81,23 @@ end
 function PopupFleetingNote:init(content, opts)
     content = content or ""
     if not opts or next(opts) == nil then
-        opts = config.options.popups.fleeting_note
+        opts = (config.options.ui and config.options.ui.popups and config.options.ui.popups.fleeting_note)
+            or (config.options.popups and config.options.popups.fleeting_note)
+            or {}
     end
     opts.title = opts.title or { text = "Fleeting Note", preview = "border" }
+    -- Ensure editor has position for layout calculations
+    if opts.editor and not opts.editor.position then
+        local uis = vim.api.nvim_list_uis()
+        local ui = uis[1] or { height = 24, width = 80 }
+        opts.editor.position = {
+            row = math.floor(ui.height / 2) - math.floor((opts.editor.size and opts.editor.size.height or 6) / 2),
+            col = math.floor(ui.width / 2) - math.floor((opts.editor.size and opts.editor.size.width or 80) / 2),
+        }
+    end
+    if not opts.results then
+        opts.results = { size = { height = 10, width = (opts.editor and opts.editor.size and opts.editor.size.width) or 80 } }
+    end
     if opts.title.preview then
         if opts.title.preview == "border" then
             --- @type _nui_popup_border_style_list
@@ -101,7 +115,9 @@ function PopupFleetingNote:init(content, opts)
     --- @type vault.Note[]
     local notes_list = notes:list()
     --- @type vault.path
-    local new_note_path = config.options.dirs.inbox .. "/" .. opts.title.text .. config.options.ext
+    local inbox_dir = (config.options.dirs and config.options.dirs.inbox)
+        or (config.options.root .. "/inbox")
+    local new_note_path = inbox_dir .. "/" .. opts.title.text .. config.options.ext
     --- @type NuiPopup
     local editor_popup = Popup(opts.editor)
     local is_note_exist = false
@@ -361,7 +377,7 @@ function PopupFleetingNote:init(content, opts)
         end
 
         --- @type table<vault.stem, boolean>
-        local notes_stems = notes:values_map_by_key("stem", true)
+        local notes_stems = notes:values_map_by_key("stem", { lowercase = true })
         local query = opts.title.text:lower()
 
         -- Set the border color to `Error` if the note already exists. So we can warn the user.
@@ -374,7 +390,7 @@ function PopupFleetingNote:init(content, opts)
         else
             editor_popup.border:set_highlight("String")
             --- @type vault.path
-            new_note_path = config.options.dirs.inbox
+            new_note_path = inbox_dir
                 .. "/"
                 .. opts.title.text
                 .. config.options.ext

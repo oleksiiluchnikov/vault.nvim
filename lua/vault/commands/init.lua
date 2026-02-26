@@ -228,12 +228,7 @@ end
 function callbacks.open_notes_status_picker(args)
     local fargs = args.fargs
     if next(fargs) == nil then
-        -- require("telescope._extensions.vault.pickers").root_tags():find()
-        callbacks.open_properties_picker(args)
-        local bufnr = vim.api.nvim_get_current_buf()
-        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "status" })
-        require("telescope.actions").select_default.enter(bufnr)
-        return
+        fargs = { "status" }
     end
     --TODO: Moved statuse to the frontmatter. Need to update this
     local tags = require("vault.tags")()
@@ -245,9 +240,16 @@ function callbacks.open_notes_status_picker(args)
             end
         end
     end
-    local notes = require("vault.notes")():filter({ "tags", { statuses }, {}, "startswith", "all" })
+    if next(statuses) == nil then
+        vim.notify("No matching status tags found", vim.log.levels.INFO)
+        return
+    end
+    local notes = require("vault.notes")():filter({ "tags", statuses, {}, "startswith", "all" })
 
-    require("telescope._extensions.vault.pickers").notes({ notes = notes }):find()
+    local picker = require("telescope._extensions.vault.pickers").notes({ notes = notes })
+    if picker then
+        picker:find()
+    end
 end
 
 --- vault.FleetingNote
@@ -383,15 +385,28 @@ function callbacks.note_outlinks_picker()
         vim.notify("No outlinks")
         return
     end
-    -- pickers.notes({}, nil, outlinks):find()
     local slugs = {}
     for _, outlink in pairs(outlinks) do
         table.insert(slugs, outlink.data.slug)
     end
 
-    require("telescope._extensions.vault.pickers")
-        .notes({ notes = require("vault.notes")():filter(slugs) })
-        :find()
+    local notes = require("vault.notes")()
+    local filtered = {}
+    for id, n in pairs(notes.map) do
+        for _, slug in ipairs(slugs) do
+            if n.data.slug == slug then
+                filtered[id] = n
+                break
+            end
+        end
+    end
+    notes.map = filtered
+
+    local picker = require("telescope._extensions.vault.pickers")
+        .notes({ notes = notes })
+    if picker then
+        picker:find()
+    end
 end
 
 --- vault.NoteTags
@@ -460,6 +475,10 @@ function callbacks.note_from_selected_text(args)
     -- In visual line mode, col1 is 0 and col2 is 2147483647
     if col2 == 2147483647 then
         local line_content = vim.api.nvim_buf_get_lines(0, row2, row2 + 1, false)[1]
+        if not line_content then
+            vim.notify("Invalid selection range", vim.log.levels.WARN)
+            return
+        end
         col2 = #line_content
     else
         -- Include the last character
@@ -535,12 +554,19 @@ end
 function callbacks.open_note_by_dir_picker(args)
     local fargs = args.fargs
     if next(fargs) == nil then
-        -- return notes in the root directory
-        require("telescope._extensions.vault.pickers")
-            .notes({
-                notes = require("vault.notes")():filter("relpath", "", "exact", false),
-            })
-            :find()
+        -- return notes in the root directory (no subdirectory in relpath)
+        local notes = require("vault.notes")()
+        local root_notes = {}
+        for id, note in pairs(notes.map) do
+            if not note.data.relpath:find("/") then
+                root_notes[id] = note
+            end
+        end
+        notes.map = root_notes
+        local picker = require("telescope._extensions.vault.pickers").notes({ notes = notes })
+        if picker then
+            picker:find()
+        end
         return
     end
     local notes = require("vault.notes")():filter("relpath", fargs[1], "startswith", false)
@@ -552,7 +578,7 @@ function callbacks.note(args)
     local fargs = args.fargs
     -- if no arguments, then open a picker
     if next(fargs) == nil then
-        require("vault.api").open_notes_picker()
+        require("telescope._extensions.vault.pickers").notes():find()
         return
     elseif #fargs == 1 then
         --TODO: Implement choose a note from a picker
@@ -610,9 +636,16 @@ local function construct_notes_picker_args(input)
         require("telescope._extensions.vault.pickers").notes():find()
     elseif #args == 1 then
         if args[1] ~= "by" then
-            require("telescope._extensions.vault.pickers")
-                .notes({ notes = require("vault.notes")()[args[1]] })
-                :find()
+            local notes = require("vault.notes")()
+            local preset = notes[args[1]]
+            if type(preset) == "function" then
+                preset = preset(notes)
+            end
+            local picker = require("telescope._extensions.vault.pickers")
+                .notes({ notes = preset })
+            if picker then
+                picker:find()
+            end
         elseif args[1] == "by" then
             vim.notify("Need further arguments")
         end
@@ -900,13 +933,18 @@ local M = {
 
             local note_slug = input
             local notes = require("vault.notes")()
-            local note = vim.deepcopy(notes):filter("slug", note_slug, "exact"):list()[1]
+            local note = notes:filter("slug", note_slug, "exact"):list()[1]
             if not note then
                 vim.notify("Note not found " .. note_slug)
                 return
             end
+            -- Re-fetch notes since filter mutates in-place
+            notes = require("vault.notes")()
             local cluster = notes:to_cluster(note, 0)
-            require("telescope._extensions.vault.pickers").notes({ notes = cluster }):find()
+            local picker = require("telescope._extensions.vault.pickers").notes({ notes = cluster })
+            if picker then
+                picker:find()
+            end
         end,
         opts = {
             desc = "Open a picker with the notes that are in the same cluster",
