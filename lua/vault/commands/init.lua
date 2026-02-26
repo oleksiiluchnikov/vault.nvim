@@ -2,6 +2,19 @@ local completions = require("vault.commands.completions")
 --- @class vault.commands.callback
 local callbacks = {}
 
+local pickers = require("telescope._extensions.vault.pickers")
+
+--- Safe picker launch — handles nil return from empty results.
+--- @param picker any
+--- @param empty_msg? string
+local function safe_find(picker, empty_msg)
+    if picker then
+        picker:find()
+    else
+        vim.notify("[vault] " .. (empty_msg or "No results found"), vim.log.levels.INFO)
+    end
+end
+
 function callbacks.toggle_link()
     local winid = vim.api.nvim_get_current_win()
     local cursor_pos = vim.api.nvim_win_get_cursor(winid)
@@ -120,11 +133,11 @@ end
 function callbacks.pick_dirs(args)
     local fargs = args.fargs
     if next(fargs) == nil then
-        require("telescope._extensions.vault.pickers").dirs():find()
+        safe_find(pickers.dirs(), "No directories found")
         return
     end
     local notes = require("vault.notes")():filter("relpath", fargs[1], "startswith", false)
-    require("telescope._extensions.vault.pickers").notes({ notes = notes }):find()
+    safe_find(pickers.notes({ notes = notes }), "No notes found in directory: " .. fargs[1])
 end
 
 ---Edits a random note from the vault.
@@ -150,7 +163,7 @@ end
 function callbacks.open_tags_picker(args)
     local fargs = args.fargs
     if next(fargs) == nil then
-        require("telescope._extensions.vault.pickers").tags():find()
+        safe_find(pickers.tags(), "No tags found")
         return
     end
 
@@ -164,9 +177,10 @@ function callbacks.open_tags_picker(args)
         mode = "all",
     }
 
-    require("telescope._extensions.vault.pickers")
-        .notes({ notes = require("vault.notes")():filter(filter_opts) })
-        :find()
+    safe_find(
+        pickers.notes({ notes = require("vault.notes")():filter(filter_opts) }),
+        "No notes found with tags: " .. table.concat(tags_names, ", ")
+    )
 end
 
 --- Vault Dates
@@ -176,16 +190,16 @@ end
 function callbacks.open_dates_picker(args)
     local fargs = args.fargs
     if next(fargs) == nil then
-        require("telescope._extensions.vault.pickers").dates():find()
+        safe_find(pickers.dates(), "No dates found")
         return
     end
     --TODO: Add configuration to set the date format
     local today = os.date("%Y-%m-%d")
     local year_ago = os.date("%Y-%m-%d", os.time() - 60 * 60 * 24 * 365)
-    -- require("telescope._extensions.vault.pickers").dates(tostring(today), tostring(year_ago))
-    require("telescope._extensions.vault.pickers")
-        .dates({ start_date = tostring(today), end_date = tostring(year_ago) })
-        :find()
+    safe_find(
+        pickers.dates({ start_date = tostring(today), end_date = tostring(year_ago) }),
+        "No dates found"
+    )
 end
 
 --- vault.Today
@@ -210,14 +224,14 @@ end
 function callbacks.open_properties_picker(args)
     local fargs = args.fargs
     if next(fargs) == nil then
-        require("telescope._extensions.vault.pickers").properties():find()
+        safe_find(pickers.properties(), "No properties found")
         return
     end
     local values = {}
     for _, value in ipairs(fargs) do
         table.insert(values, value)
     end
-    require("telescope._extensions.vault.pickers").properties({ values = values }):find()
+    safe_find(pickers.properties({ values = values }), "No properties found")
 end
 
 --- @command :VaultYesterday {dates} [[
@@ -270,18 +284,20 @@ end
 --- Opens a picker with orphans
 --- @return nil
 function callbacks.open_orphans_picker()
-    require("telescope._extensions.vault.pickers")
-        .notes({ notes = require("vault.notes")():orphans() })
-        :find()
+    safe_find(
+        pickers.notes({ notes = require("vault.notes")():orphans() }),
+        "No orphan notes found"
+    )
 end
 
 --- vault.Linked
 --- Opens a picker with linked notes
 --- @return nil
 function callbacks.open_linked_picker()
-    require("telescope._extensions.vault.pickers")
-        .notes({ notes = require("vault.notes")():linked() })
-        :find()
+    safe_find(
+        pickers.notes({ notes = require("vault.notes")():linked() }),
+        "No linked notes found"
+    )
 end
 
 --- Opens a live grep picker with fuzzy search
@@ -365,7 +381,7 @@ function callbacks.note_inlinks_picker()
         return
     end
     local notes = require("vault.notes")():filter(vim.tbl_keys(inlinks))
-    require("telescope._extensions.vault.pickers").notes({ notes = notes }):find()
+    safe_find(pickers.notes({ notes = notes }), "No inlink notes found")
 end
 
 --- vault.NoteOutlinks
@@ -450,9 +466,10 @@ function callbacks.note_tags_picker(args)
     -- if args.range == 2 then
     --     error("Not implemented")
     -- end
-    require("telescope._extensions.vault.pickers")
-        .notes({ notes = require("vault.notes")():filter(slugs) })
-        :find()
+    safe_find(
+        pickers.notes({ notes = require("vault.notes")():filter(slugs) }),
+        "No notes found for tags"
+    )
 end
 
 --- Create a new note from the selected text, and replace the selected text with a link to the new note
@@ -538,14 +555,14 @@ end
 function callbacks.open_note_properties_picker(args)
     local fargs = args.fargs
     if next(fargs) == nil then
-        require("telescope._extensions.vault.pickers").properties():find()
+        safe_find(pickers.properties(), "No properties found")
         return
     end
     local values = {}
     for _, value in ipairs(fargs) do
         table.insert(values, value)
     end
-    require("telescope._extensions.vault.pickers").properties({ values = values }):find()
+    safe_find(pickers.properties({ values = values }), "No properties found")
 end
 
 --- VaultNoteByDir
@@ -570,7 +587,7 @@ function callbacks.open_note_by_dir_picker(args)
         return
     end
     local notes = require("vault.notes")():filter("relpath", fargs[1], "startswith", false)
-    require("telescope._extensions.vault.pickers").notes({ notes = notes }):find()
+    safe_find(pickers.notes({ notes = notes }), "No notes found in directory: " .. fargs[1])
 end
 
 --- @param args vim.api.keyset.create_user_command.command_args
@@ -578,7 +595,7 @@ function callbacks.note(args)
     local fargs = args.fargs
     -- if no arguments, then open a picker
     if next(fargs) == nil then
-        require("telescope._extensions.vault.pickers").notes():find()
+        safe_find(pickers.notes(), "No notes found")
         return
     elseif #fargs == 1 then
         --TODO: Implement choose a note from a picker
@@ -633,7 +650,7 @@ local function construct_notes_picker_args(input)
     end
     if #args == 0 then
         args = input
-        require("telescope._extensions.vault.pickers").notes():find()
+        safe_find(pickers.notes(), "No notes found")
     elseif #args == 1 then
         if args[1] ~= "by" then
             local notes = require("vault.notes")()
@@ -641,25 +658,20 @@ local function construct_notes_picker_args(input)
             if type(preset) == "function" then
                 preset = preset(notes)
             end
-            local picker = require("telescope._extensions.vault.pickers")
-                .notes({ notes = preset })
-            if picker then
-                picker:find()
-            end
+            safe_find(pickers.notes({ notes = preset }), "No notes found for preset: " .. args[1])
         elseif args[1] == "by" then
-            vim.notify("Need further arguments")
+            vim.notify("[vault] Need further arguments", vim.log.levels.WARN)
         end
     elseif #args == 2 then
+        vim.notify("[vault] Need further arguments", vim.log.levels.WARN)
         return
     elseif #args == 3 then
         if type(args[3]) ~= "table" then
             args[3] = { args[3] }
         end
-        require("telescope._extensions.vault.pickers")
-            .notes({
-                notes = require("vault.notes")({ args[2], args[3], {}, "startswith", "all" }),
-            })
-            :find()
+        safe_find(pickers.notes({
+            notes = require("vault.notes")({ args[2], args[3], {}, "startswith", "all" }),
+        }))
     elseif #args == 4 then
         if type(args[3]) ~= "table" then
             args[3] = { args[3] }
@@ -667,11 +679,9 @@ local function construct_notes_picker_args(input)
         if type(args[4]) ~= "table" then
             args[4] = { args[4] }
         end
-        require("telescope._extensions.vault.pickers")
-            .notes({
-                notes = require("vault.notes")({ args[2], args[3], args[4], "startswith", "all" }),
-            })
-            :find()
+        safe_find(pickers.notes({
+            notes = require("vault.notes")({ args[2], args[3], args[4], "startswith", "all" }),
+        }))
     elseif #args == 5 then
         if type(args[3]) ~= "table" then
             args[3] = { args[3] }
@@ -679,11 +689,9 @@ local function construct_notes_picker_args(input)
         if type(args[4]) ~= "table" then
             args[4] = { args[4] }
         end
-        require("telescope._extensions.vault.pickers")
-            .notes({
-                notes = require("vault.notes")({ args[2], args[3], args[4], args[5], "all" }),
-            })
-            :find()
+        safe_find(pickers.notes({
+            notes = require("vault.notes")({ args[2], args[3], args[4], args[5], "all" }),
+        }))
     elseif #args == 6 then
         if type(args[3]) ~= "table" then
             args[3] = { args[3] }
@@ -691,17 +699,15 @@ local function construct_notes_picker_args(input)
         if type(args[4]) ~= "table" then
             args[4] = { args[4] }
         end
-        require("telescope._extensions.vault.pickers")
-            .notes({
-                notes = require("vault.notes")({ args[2], args[3], args[4], args[5], args[6] }),
-            })
-            :find()
+        safe_find(pickers.notes({
+            notes = require("vault.notes")({ args[2], args[3], args[4], args[5], args[6] }),
+        }))
     end
 end
 
 function callbacks.notes(args)
     if next(args.fargs) == nil then
-        require("telescope._extensions.vault.pickers").notes():find()
+        safe_find(pickers.notes(), "No notes found")
         return
     elseif #args.fargs == 1 then
         construct_notes_picker_args(args.fargs)
@@ -710,7 +716,7 @@ end
 
 function callbacks.tasks()
     -- TODO: Implement to complete by status
-    require("telescope._extensions.vault.pickers").tasks():find()
+    safe_find(pickers.tasks(), "No tasks found")
 end
 
 -- Commands for the plugin
@@ -826,9 +832,10 @@ local M = {
     ["VaultInternals"] = {
         --- @command :VaultInternals [[
         callback = function()
-            require("telescope._extensions.vault.pickers")
-                .notes({ notes = require("vault.notes")():internals() })
-                :find()
+            safe_find(
+                pickers.notes({ notes = require("vault.notes")():internals() }),
+                "No internal notes found"
+            )
         end,
         opts = {
             desc = "Open a picker with the internals",
@@ -838,9 +845,10 @@ local M = {
     },
     ["VaultLeaves"] = {
         callback = function()
-            require("telescope._extensions.vault.pickers")
-                .notes({ notes = require("vault.notes")():leaves() })
-                :find()
+            safe_find(
+                pickers.notes({ notes = require("vault.notes")():leaves() }),
+                "No leaf notes found"
+            )
         end,
         opts = {
             desc = "Open a picker with the leaves",
@@ -850,11 +858,10 @@ local M = {
     },
     ["VaultDanglingLinks"] = {
         callback = function()
-            require("telescope._extensions.vault.pickers")
-                .notes({
-                    notes = require("vault.notes")():with_outlinks_unresolved(),
-                })
-                :find()
+            safe_find(
+                pickers.notes({ notes = require("vault.notes")():with_outlinks_unresolved() }),
+                "No dangling links found"
+            )
         end,
         opts = {
             desc = "Open a picker with the dangling links",
@@ -864,11 +871,10 @@ local M = {
     },
     ["VaultOutlinksUnresolved"] = {
         callback = function()
-            require("telescope._extensions.vault.pickers")
-                .notes({
-                    notes = require("vault.notes")():with_outlinks_unresolved(),
-                })
-                :find()
+            safe_find(
+                pickers.notes({ notes = require("vault.notes")():with_outlinks_unresolved() }),
+                "No unresolved outlinks found"
+            )
         end,
         opts = {
             desc = "Open a picker with the outlinks unresolved",
@@ -878,11 +884,10 @@ local M = {
     },
     ["VaultOutlinksResolvedOnly"] = {
         callback = function()
-            require("telescope._extensions.vault.pickers")
-                .notes({
-                    notes = require("vault.notes")():with_outlinks_resolved_only(),
-                })
-                :find()
+            safe_find(
+                pickers.notes({ notes = require("vault.notes")():with_outlinks_resolved_only() }),
+                "No notes with all outlinks resolved"
+            )
         end,
         opts = {
             desc = "Open a picker with the outlinks resolved only",
@@ -892,7 +897,7 @@ local M = {
     },
     ["VaultWikilinks"] = {
         callback = function()
-            require("telescope._extensions.vault.pickers").wikilinks():find()
+            safe_find(pickers.wikilinks(), "No wikilinks found")
         end,
         opts = {
             desc = "Open a picker with the wikilinks",
@@ -1075,14 +1080,14 @@ local M = {
         callback = function(args)
             local fargs = args.fargs
             if next(fargs) == nil then
-                require("telescope._extensions.vault.pickers").properties():find()
+                safe_find(pickers.properties(), "No properties found")
                 return
             end
             local values = {}
             for _, value in ipairs(fargs) do
                 table.insert(values, value)
             end
-            require("telescope._extensions.vault.pickers").properties({ values = values }):find()
+            safe_find(pickers.properties({ values = values }), "No properties found")
         end,
         opts = {
             nargs = "*",
@@ -1175,7 +1180,7 @@ local M = {
         callback = function(args)
             local fargs = args.fargs
             if next(fargs) == nil then
-                require("telescope._extensions.vault.pickers").bases():find()
+                safe_find(pickers.bases(), "No bases found")
                 return
             end
             local base_name = table.concat(fargs, " ")

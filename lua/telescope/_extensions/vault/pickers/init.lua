@@ -3,28 +3,28 @@ return setmetatable(
     vim.tbl_deep_extend("force", require("vault.config").options.telescope.pickers or {}, {
         orphans = require("telescope._extensions.vault.pickers.orphans"),
         leaves = function(opts)
-            require("telescope._extensions.vault.pickers.notes")(
+            return require("telescope._extensions.vault.pickers.notes")(
                 vim.tbl_deep_extend("force", opts or {}, {
                     notes = require("vault.notes")():leaves(),
                 })
             )
         end,
         internals = function(opts)
-            require("telescope._extensions.vault.pickers.notes")(
+            return require("telescope._extensions.vault.pickers.notes")(
                 vim.tbl_deep_extend("force", opts or {}, {
                     notes = require("vault.notes")():internals(),
                 })
             )
         end,
         with_outlinks_resolved_only = function(opts)
-            require("telescope._extensions.vault.pickers.notes")(
+            return require("telescope._extensions.vault.pickers.notes")(
                 vim.tbl_deep_extend("force", opts or {}, {
                     notes = require("vault.notes")():with_outlinks_resolved_only(),
                 })
             )
         end,
         with_outlinks_unresolved = function(opts)
-            require("telescope._extensions.vault.pickers.notes")(
+            return require("telescope._extensions.vault.pickers.notes")(
                 vim.tbl_deep_extend("force", opts or {}, {
                     notes = require("vault.notes")():with_outlinks_unresolved(),
                 })
