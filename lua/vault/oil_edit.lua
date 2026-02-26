@@ -234,7 +234,7 @@ end
 ---@param st vault.OilEditState
 ---@return string|nil slug
 local function get_line_slug(bufnr, row, st)
-  local marks = vim.api.nvim_buf_get_extmarks(bufnr, NS, { row, 0 }, { row, 0 }, {})
+  local marks = vim.api.nvim_buf_get_extmarks(bufnr, NS, { row, 0 }, { row, -1 }, {})
   for _, mark in ipairs(marks) do
     local slug = st.mark_to_slug[mark[1]]
     if slug then return slug end
@@ -660,13 +660,34 @@ local function set_frontmatter_field(path, key, value)
 
   local ok, lines = pcall(vim.fn.readfile, safe_path)
   if not ok then return end
-  if not lines[1] or not lines[1]:match("^%-%-%-$") then return end
 
+  local has_frontmatter = lines[1] and lines[1]:match("^%-%-%-$")
   local fm_end = nil
-  for i = 2, math.min(#lines, 100) do
-    if lines[i]:match("^%-%-%-$") then fm_end = i; break end
+
+  if has_frontmatter then
+    for i = 2, math.min(#lines, 100) do
+      if lines[i]:match("^%-%-%-$") then fm_end = i; break end
+    end
+    if not fm_end then return end
+  else
+    -- No frontmatter: create one with just this field
+    local new_lines = { "---" }
+    if type(value) == "table" then
+      table.insert(new_lines, key .. ":")
+      for _, v in ipairs(value) do
+        table.insert(new_lines, "  - " .. yaml_quote(tostring(v)))
+      end
+    elseif value ~= nil then
+      table.insert(new_lines, key .. ": " .. yaml_quote(tostring(value)))
+    end
+    table.insert(new_lines, "---")
+    for _, l in ipairs(lines) do table.insert(new_lines, l) end
+    local write_ok, write_err = atomic_writefile(safe_path, new_lines)
+    if not write_ok then
+      vim.notify("[vault] SAFETY: " .. write_err, vim.log.levels.ERROR)
+    end
+    return
   end
-  if not fm_end then return end
 
   local body_line_count = #lines - fm_end
 
