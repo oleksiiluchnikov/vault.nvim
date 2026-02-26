@@ -366,7 +366,9 @@ return function(opts)
         end)
 
         -- <C-r> — resolve: pick a suggestion or create note, rewrite all sources
-        local function resolve_action()
+        -- After resolving, auto-advances to the next entry and triggers again.
+        local resolve_action -- forward declaration for recursive scheduling
+        resolve_action = function()
             local selection = action_state.get_selected_entry()
             if not selection or not selection.value then
                 return
@@ -429,20 +431,22 @@ return function(opts)
 
                 local picked = choices[idx]
                 if picked.action == "skip" then
+                    -- Skip: advance to next entry and continue the resolve flow
+                    vim.schedule(resolve_action)
                     return
                 end
 
                 if picked.action == "create" then
-                    -- Create the note without closing the picker
                     local Note = require("vault.notes.note")
                     local path = utils.slug_to_path(slug)
                     local note = Note(path)
                     note:write(path)
                     vim.notify("[vault] Created: " .. slug, vim.log.levels.INFO)
 
-                    -- Remove from picker
                     local picker_obj = action_state.get_current_picker(prompt_bufnr)
                     remove_and_refresh(picker_obj, wl)
+                    -- Auto-advance to next entry
+                    vim.schedule(resolve_action)
                     return
                 end
 
@@ -454,9 +458,10 @@ return function(opts)
                     vim.log.levels.INFO
                 )
 
-                -- Remove from picker and advance
                 local picker_obj = action_state.get_current_picker(prompt_bufnr)
                 remove_and_refresh(picker_obj, wl)
+                -- Auto-advance to next entry
+                vim.schedule(resolve_action)
             end)
         end
 
