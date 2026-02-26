@@ -103,7 +103,7 @@ local function build_subcommands()
                 })
             end,
             complete = function(prefix)
-                local methods = { "new", "rename", "extract", "inlinks", "outlinks", "tags", "properties", "cluster", "random" }
+                local methods = { "new", "rename", "delete", "extract", "inlinks", "outlinks", "tags", "properties", "cluster", "random" }
                 -- Also include Note methods
                 local bufpath = vim.fn.expand("%:p")
                 if bufpath:match("%.md$") then
@@ -201,6 +201,34 @@ local function build_subcommands()
             random = {
                 run = function(args)
                     callbacks.edit_random_note({ fargs = args })
+                end,
+            },
+            delete = {
+                run = function(args)
+                    local path
+                    if args[1] and args[1] ~= "" then
+                        path = require("vault.utils").slug_to_path(args[1])
+                    else
+                        path = vim.fn.expand("%:p")
+                    end
+                    if not path:match("%.md$") then
+                        vim.notify("[vault] Current buffer is not a note", vim.log.levels.WARN)
+                        return
+                    end
+                    local note = require("vault.notes.note")(path)
+                    local permanent = vim.tbl_contains(args, "--permanent")
+                    local confirm = vim.fn.confirm(
+                        string.format("Delete note '%s'?%s", note.data.slug, permanent and " (PERMANENT)" or " (move to .trash)"),
+                        "&Yes\n&No", 2
+                    )
+                    if confirm ~= 1 then
+                        vim.notify("[vault] Delete cancelled", vim.log.levels.INFO)
+                        return
+                    end
+                    note:delete(permanent)
+                end,
+                complete = function(prefix)
+                    return completions.note_slugs(nil, "Vault note delete " .. prefix, nil) or {}
                 end,
             },
         },

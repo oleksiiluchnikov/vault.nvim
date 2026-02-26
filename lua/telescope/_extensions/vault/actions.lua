@@ -192,16 +192,34 @@ function vault_actions.note.rename(bufnr)
     batch_rename(bufnr, selections)
 end
 
---[[ --- Delete notes
---- TODO: Implement this
+--- Delete selected notes (moves to .trash by default)
 function vault_actions.note.delete(bufnr)
-    local _, _, selections = get_picker_selection(bufnr)
-    --- @type vault.Note
-    local note = selection.value
+    local _, _, selections = utils.get_picker_selection(bufnr)
+    if not selections or #selections == 0 then
+        return
+    end
+    local slugs = {}
+    for _, sel in ipairs(selections) do
+        table.insert(slugs, sel.value.data.slug)
+    end
     actions.close(bufnr)
-    vim.notify("vault_actions.note.delete is not implemented yet")
-    -- note:delete()
-end ]]
+    highlights.detach()
+    local confirm = vim.fn.confirm(
+        string.format("Delete %d note(s)?\n%s", #slugs, table.concat(slugs, "\n")),
+        "&Trash\n&Permanent\n&Cancel", 3
+    )
+    if confirm == 3 or confirm == 0 then
+        vim.notify("[vault] Delete cancelled", vim.log.levels.INFO)
+        return
+    end
+    local permanent = (confirm == 2)
+    for _, sel in ipairs(selections) do
+        local ok, err = pcall(function() sel.value:delete(permanent, true) end)
+        if not ok then
+            vim.notify("[vault] Failed to delete " .. sel.value.data.slug .. ": " .. tostring(err), vim.log.levels.ERROR)
+        end
+    end
+end
 
 --- @type table<string, fun(bufnr?: number, selections?: table<vault.TelescopeEntry>): nil>
 vault_actions.tag = {}
