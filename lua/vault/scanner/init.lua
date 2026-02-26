@@ -102,6 +102,7 @@ function Scanner.wikilinks(opts)
         wl.data.stem = wikilink_data.stem
         wl.data.count = wikilink_data.count
         wl.data.embedded = wikilink_data.embedded
+        wl.data.suggestions = wikilink_data.suggestions or {}
 
         wikilinks_map[wl.data.slug] = wl
         ::continue::

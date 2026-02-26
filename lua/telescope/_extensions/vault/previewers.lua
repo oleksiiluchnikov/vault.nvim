@@ -210,6 +210,19 @@ M.wikilinks = previewers.new_buffer_previewer({
                 table.insert(lines, "_No source references found._")
             end
 
+            -- Suggestions (Jaro-Winkler candidates from Rust scanner)
+            local suggestions = data and data.suggestions
+            if type(suggestions) == "table" and #suggestions > 0 then
+                table.insert(lines, "")
+                table.insert(lines, "## Suggested matches")
+                for _, candidate in ipairs(suggestions) do
+                    local slug = candidate.slug or candidate[1] or "?"
+                    local score = candidate.score or candidate[2] or 0
+                    local pct = math.floor(score * 100 + 0.5)
+                    table.insert(lines, "- [[" .. slug .. "]] (" .. pct .. "%)")
+                end
+            end
+
             -- Aliases / variants
             if data and type(data.aliases) == "table" and next(data.aliases) then
                 table.insert(lines, "")
