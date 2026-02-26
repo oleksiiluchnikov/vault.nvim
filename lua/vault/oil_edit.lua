@@ -323,28 +323,42 @@ end
 ---@return table[]  list of {slug, path, fields={col→value}}
 local function build_records(notes_map, columns)
   local records = {}
+  local skipped = 0
   for slug, note in pairs(notes_map) do
-    local path = note.data and note.data.path or note.path
-    if not path then goto continue end
+    -- pcall: one malformed note must not crash the entire process buffer
+    local ok, rec = pcall(function()
+      local path = note.data and note.data.path or note.path
+      if not path then return nil end
 
-    local fm = read_frontmatter_fields(path, columns)
-    local fields = {}
-    for _, col in ipairs(columns) do
-      if col == "title" then
-        fields.title = fm.title or (note.data and note.data.stem) or slug
-      elseif col == "dir" then
-        local relpath = note.data and note.data.relpath or ""
-        local dir = relpath:match("^(.-/)[^/]*$") or ""
-        fields.dir = dir ~= "" and dir or "/"
-      elseif col == "tags" then
-        fields.tags = fm.tags or (note.data and note.data.frontmatter and note.data.frontmatter.tags) or nil
-      else
-        fields[col] = fm[col]
+      local fm = read_frontmatter_fields(path, columns)
+      local fields = {}
+      for _, col in ipairs(columns) do
+        if col == "title" then
+          fields.title = fm.title or (note.data and note.data.stem) or slug
+        elseif col == "dir" then
+          local relpath = note.data and note.data.relpath or ""
+          local dir = relpath:match("^(.-/)[^/]*$") or ""
+          fields.dir = dir ~= "" and dir or "/"
+        elseif col == "tags" then
+          fields.tags = fm.tags or (note.data and note.data.frontmatter and note.data.frontmatter.tags) or nil
+        else
+          fields[col] = fm[col]
+        end
       end
-    end
+      return { slug = slug, path = path, fields = fields }
+    end)
 
-    table.insert(records, { slug = slug, path = path, fields = fields })
-    ::continue::
+    if ok and rec then
+      table.insert(records, rec)
+    else
+      skipped = skipped + 1
+    end
+  end
+  if skipped > 0 then
+    vim.notify(
+      string.format("[vault] Warning: %d notes skipped due to parse errors", skipped),
+      vim.log.levels.WARN
+    )
   end
   table.sort(records, function(a, b) return a.slug < b.slug end)
   return records
