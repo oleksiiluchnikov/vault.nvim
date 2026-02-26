@@ -1142,444 +1142,34 @@ function callbacks.tasks()
     safe_find(pickers.tasks(), "No tasks found")
 end
 
+--- Helper to create a deprecation stub that forwards to a :Vault subcommand.
+--- The old command still works but shows a one-time deprecation notice.
+--- @param old_name string  e.g. "VaultOrphans"
+--- @param new_cmd string   e.g. ":Vault notes orphans"
+--- @param forward_fn function  the actual callback to run
+--- @param opts? table  extra opts (nargs, complete, range, desc)
+--- @return table  command definition {callback, opts}
+local function deprecated(old_name, new_cmd, forward_fn, opts)
+    opts = opts or {}
+    local warned = false
+    return {
+        callback = function(args)
+            if not warned then
+                vim.notify(
+                    string.format("[vault] :%s is deprecated, use %s instead", old_name, new_cmd),
+                    vim.log.levels.WARN
+                )
+                warned = true
+            end
+            forward_fn(args)
+        end,
+        opts = vim.tbl_extend("force", { nargs = "*" }, opts),
+    }
+end
+
 -- Commands for the plugin
 local M = {
-    ["VaultNote"] = {
-        --- @command :VaultNote {method} {slug} {arguments} [[
-        --- Open a note in the vault
-        --- ```vim
-        --- :VaultNote <method> <slug> <arguments>
-        --- :VaultNote linked tags <include_tags> <exclude_tags> <match_opt> <match_type>
-        --- ```
-        --- @command ]]
-        callback = callbacks.note,
-        opts = {
-            desc = "Open a note in the vault",
-            complete = completions.note,
-            nargs = "*",
-        },
-    },
-    ["VaultRandomNote"] = {
-        --- @command :VaultRandomNote {slug} [[
-        --- Open a random note
-        --- @command ]]
-        callback = callbacks.edit_random_note,
-        opts = {
-            desc = "Open a random note",
-            complete = completions.notes_filter,
-            nargs = "*",
-        },
-    },
-    ["VaultNotes"] = {
-        --- Generates a picker with certain collection of notes
-        callback = callbacks.notes,
-        opts = {
-            desc = "Open a picker with a collection of notes",
-            complete = completions.notes_filter,
-            nargs = "*",
-        },
-    },
-    ["VaultTags"] = {
-        --- @command :VaultTags {tags} [[
-        --- Open a picker with the notes that have the tags
-        --- @command ]]
-        callback = callbacks.open_tags_picker,
-        opts = {
-            desc = "Open a picker with the notes that have the tags",
-            complete = completions.tags,
-            nargs = "*",
-        },
-    },
-    ["VaultDates"] = {
-        --- @command :VaultDates {dates} [[
-        --- Open a picker with the dates
-        --- @command ]]
-        callback = callbacks.open_dates_picker,
-        opts = {
-            desc = "Open a picker with the dates",
-            complete = completions.dates,
-            nargs = "*",
-        },
-    },
-    ["VaultToday"] = {
-        --- @command :VaultToday [[
-        --- Opens the today's journal note
-        --- @command ]]
-        callback = callbacks.today,
-        opts = {
-            desc = "Opens the today's journal note",
-            nargs = 0,
-        },
-    },
-    ["VaultNotesStatus"] = {
-        --- @command :VaultNotesStatus {statuses} [[
-        --- Opens a picker with the statuses
-        --- @command ]]
-        callback = callbacks.open_notes_status_picker,
-        opts = {
-            desc = "Open a picker with the statuses",
-            complete = completions.statuses,
-            nargs = "*",
-        },
-    },
-    ["VaultFleetingNote"] = {
-        --- @command :VaultFleetingNote [[
-        --- Opens a popup to create fleeting note
-        --- @command ]]
-        callback = callbacks.open_fleeting_note_popup,
-        opts = {
-            desc = "Open a popup to create a fleeting note",
-            nargs = "*",
-        },
-    },
-    ["VaultOrphans"] = {
-        --- @command :VaultOrphans [[
-        --- Opens a popup to pick
-        --- @command ]]
-        callback = callbacks.open_orphans_picker,
-        opts = {
-            desc = "Open a picker with the orphans",
-            nargs = 0,
-        },
-    },
-    ["VaultLinked"] = {
-        --- @command :VaultLinked [[
-        --- Opens a popup to pick
-        --- @command ]]
-        callback = callbacks.open_linked_picker,
-        opts = {
-            desc = "Open a picker with the linked notes",
-            nargs = 0,
-        },
-    },
-    ["VaultInternals"] = {
-        --- @command :VaultInternals [[
-        callback = function()
-            safe_find(
-                pickers.notes({ notes = require("vault.notes")():internals() }),
-                "No internal notes found"
-            )
-        end,
-        opts = {
-            desc = "Open a picker with the internals",
-            complete = completions.notes_filter,
-            nargs = "*",
-        },
-    },
-    ["VaultLeaves"] = {
-        callback = function()
-            safe_find(
-                pickers.notes({ notes = require("vault.notes")():leaves() }),
-                "No leaf notes found"
-            )
-        end,
-        opts = {
-            desc = "Open a picker with the leaves",
-            complete = completions.notes_filter,
-            nargs = "*",
-        },
-    },
-    ["VaultDanglingLinks"] = {
-        callback = function()
-            safe_find(
-                pickers.notes({ notes = require("vault.notes")():with_outlinks_unresolved() }),
-                "No dangling links found"
-            )
-        end,
-        opts = {
-            desc = "Open a picker with the dangling links",
-            complete = completions.notes_filter,
-            nargs = "*",
-        },
-    },
-    ["VaultOutlinksUnresolved"] = {
-        callback = function()
-            safe_find(
-                pickers.notes({ notes = require("vault.notes")():with_outlinks_unresolved() }),
-                "No unresolved outlinks found"
-            )
-        end,
-        opts = {
-            desc = "Open a picker with the outlinks unresolved",
-            complete = completions.notes_filter,
-            nargs = "*",
-        },
-    },
-    ["VaultOutlinksResolvedOnly"] = {
-        callback = function()
-            safe_find(
-                pickers.notes({ notes = require("vault.notes")():with_outlinks_resolved_only() }),
-                "No notes with all outlinks resolved"
-            )
-        end,
-        opts = {
-            desc = "Open a picker with the outlinks resolved only",
-            complete = completions.notes_filter,
-            nargs = "*",
-        },
-    },
-    ["VaultWikilinks"] = {
-        callback = function()
-            safe_find(pickers.wikilinks(), "No wikilinks found")
-        end,
-        opts = {
-            desc = "Open a picker with the wikilinks",
-            complete = completions.note_slugs,
-            nargs = "*",
-        },
-    },
-    ["VaultTasks"] = {
-        callback = callbacks.tasks,
-        opts = {
-            desc = "Open a picker with the tasks accross the vault",
-            complete = completions.statuses,
-            nargs = "*",
-        },
-    },
-    ["VaultNotesCluster"] = {
-        callback = function(args)
-            local path = vim.fn.expand("%")
-            -- Check if we are even in the vault note buffer
-            if type(path) ~= "string" then
-                return
-            end
-            -- if root dir is nil or empty, return early
-
-            -- Are we even in the vault?
-
-            local input = args.args
-
-            if input == "" or input == nil then
-                local path = vim.fn.expand("%")
-                if type(path) == "table" then
-                    path = path[1]
-                end
-                local relpath = require("vault.utils").path_to_slug(path)
-                input = relpath
-            end
-
-            local note_slug = input
-            local notes = require("vault.notes")()
-            local note = notes:filter("slug", note_slug, "exact"):list()[1]
-            if not note then
-                vim.notify("[vault] Note not found: " .. note_slug, vim.log.levels.WARN)
-                return
-            end
-            -- Re-fetch notes since filter mutates in-place
-            notes = require("vault.notes")()
-            local cluster = notes:to_cluster(note, 0)
-            local picker = require("telescope._extensions.vault.pickers").notes({ notes = cluster })
-            if picker then
-                picker:find()
-            end
-        end,
-        opts = {
-            desc = "Open a picker with the notes that are in the same cluster",
-            complete = completions.note_slugs,
-            nargs = "*",
-        },
-    },
-    ["VaultMove"] = {
-        --- Command to move a note to a new location.
-        --- If oargs then open picker
-        --- if arg, and it is a valid relpath, then move to that location
-        callback = function()
-            vim.notify("[vault] :VaultMove is deprecated, use :VaultRename or :Vault note rename instead", vim.log.levels.WARN)
-
-            -- local input = args.fargs[1]
-            -- local current_path = vim.fn.expand("%:p")
-            -- if type(current_path) ~= "string" then
-            --     return
-            -- end
-            -- if not current_path:match(config.options.root) then
-            --     vim.notify("Not a vault note")
-            --     return
-            -- elseif not current_path:match(config.options.ext .. "$") then
-            --     vim.notify("Not a vault note")
-            --     return
-            -- elseif not vim.fn.filereadable(current_path) then
-            --     vim.notify("Not a vault note")
-            --     return
-            -- elseif not vim.fn.isdirectory(current_path) then
-            --     vim.notify("Not a vault note")
-            --     return
-            -- end
-            --
-            -- local note = require("vault.notes.note")(current_path)
-            --
-            -- if input == nil or input == "" then
-            --     pickers.move_note_to(note):find()
-            --     return
-            -- end
-            -- if input:match("^.$") then
-            --     input = config.options.root
-            -- else
-            --     input = config.options.root .. "/" .. input
-            -- end
-            --
-            -- local new_path = string.format("%s/%s", input, note.data.basename)
-            -- if vim.fn.filereadable(new_path) == 1 then
-            --     vim.notify("File already exists")
-            --     return
-            -- elseif note.data.path == new_path then
-            --     vim.notify("Already in that location")
-            --     return
-            -- end
-            --
-            -- local clients = vim.lsp.get_clients({ bufnr = vim.fn.bufnr() })
-            -- note:rename(new_path)
-            -- for _, client in ipairs(clients) do
-            --     -- restart the lsp client
-            --     vim.lsp.stop_client(client.id)
-            --     vim.lsp.start_client(client.config)
-            -- end
-
-            -- vim.cmd("LspRestart") Simulate that command
-        end,
-        opts = {
-            nargs = "*",
-            complete = completions.dirs,
-        },
-    },
-    ["VaultGrep"] = {
-        callback = callbacks.open_live_grep_picker,
-        opts = {
-            nargs = "*",
-            range = true,
-        },
-    },
-    ["VaultYesterday"] = {
-        callback = callbacks.yesterday,
-        opts = {
-            nargs = 0,
-        },
-    },
-    ["VaultRename"] = {
-        callback = callbacks.rename,
-        opts = {
-            nargs = "*",
-        },
-    },
-    ["VaultNoteInlinks"] = {
-        callback = callbacks.note_inlinks_picker,
-        opts = {
-            nargs = 0,
-        },
-    },
-    ["VaultNoteOutlinks"] = {
-        callback = callbacks.note_outlinks_picker,
-        opts = {
-            nargs = 0,
-        },
-    },
-    ["VaultNoteTags"] = {
-        callback = callbacks.note_tags_picker,
-        opts = {
-            nargs = "*",
-            range = true,
-            complete = completions.note_tags,
-            desc = "Open a picker with the notes that have the tags and the note",
-        },
-    },
-    ["VaultNoteExtract"] = {
-        callback = callbacks.note_from_selected_text,
-        opts = {
-            nargs = "*",
-            range = true,
-            complete = completions.note_slugs,
-        },
-    },
-    ["VaultProperties"] = {
-        --- vault.Properties
-        --- Opens a picker with the properties
-        --- ```vim
-        --- :VaultProperties
-        --- :VaultProperties <property_name>
-        --- :VaultProperties <property_name> <property_name>
-        --- ```
-        --- @param args vim.api.keyset.create_user_command.command_args
-        --- @return nil
-        callback = function(args)
-            local fargs = args.fargs
-            if next(fargs) == nil then
-                safe_find(pickers.properties(), "No properties found")
-                return
-            end
-            local values = {}
-            for _, value in ipairs(fargs) do
-                table.insert(values, value)
-            end
-            safe_find(pickers.properties({ values = values }), "No properties found")
-        end,
-        opts = {
-            nargs = "*",
-            complete = function(_, cmd_line, _)
-                local arguments = vim.split(cmd_line, " ")
-                if next(arguments) == nil then
-                    return
-                end
-                --- @type vault.Property.Data.name[]
-                local properties = vim.tbl_keys(require("vault.scanner").properties())
-                return properties
-            end,
-            desc = "Open a picker of properties to browse",
-        },
-    },
-    ["VaultNoteProperties"] = {
-        callback = callbacks.open_note_properties_picker,
-        opts = {
-            nargs = "*",
-            complete = function(_, cmd_line, _)
-                local arguments = vim.split(cmd_line, " ")
-                if next(arguments) == nil then
-                    return
-                end
-                --- @type vault.Property.Data.name[]
-                local properties = {}
-                local config = require("vault.config")
-                if not vim.fn.expand("%:p"):match(config.options.ext .. "$") then
-                    properties = vim.tbl_keys(require("vault.scanner").properties())
-                    return properties
-                end
-                properties = vim.tbl_keys(
-                    require("vault.notes.note")(vim.fn.expand("%:p")).data.frontmatter.data
-                )
-                return properties
-            end,
-            desc = "Open a picker of properties to browse",
-        },
-    },
-    ["VaultNotesByDir"] = {
-        callback = callbacks.open_note_by_dir_picker,
-        opts = {
-            nargs = "*",
-            complete = function(_, cmd_line, _)
-                local arguments = vim.split(cmd_line, " ")
-                if next(arguments) == nil then
-                    return
-                end
-                local paths = vim.tbl_keys(require("vault.scanner").dirs())
-                return paths
-            end,
-            desc = "Open a picker with notes by directory",
-        },
-    },
-    ["VaultNoteNew"] = {
-        callback = callbacks.create_new_note,
-        opts = {
-            nargs = "*",
-            complete = completions.dirs,
-            desc = "Create a new note",
-        },
-    },
-    ["VaultDirs"] = {
-        callback = callbacks.pick_dirs,
-        opts = {
-            desc = "Open a picker with the directories in the vault",
-            complete = completions.dirs,
-            nargs = "*",
-        },
-    },
+    -- ── Primary dispatcher ──────────────────────────────────────────────
     ["Vault"] = {
         callback = callbacks.api,
         opts = {
@@ -1589,40 +1179,82 @@ local M = {
             range = true,
         },
     },
-    ["VaultToggleLink"] = {
-        callback = callbacks.toggle_link,
-        opts = {
-            desc = "Toggle a link under cursor",
-            nargs = 0,
-        },
-    },
-    ["VaultBases"] = {
-        --- @command :VaultBases [base_name] [[
-        --- Open a picker with all bases or drill into a specific base's matched notes
-        --- @command ]]
-        callback = function(args)
-            local fargs = args.fargs
-            if next(fargs) == nil then
-                safe_find(pickers.bases(), "No bases found")
-                return
-            end
-            local base_name = table.concat(fargs, " ")
-            require("vault.api").open_picker_base_notes(base_name)
-        end,
-        opts = {
-            desc = "Open a picker with Obsidian base database views",
-            nargs = "*",
-            complete = function()
-                local ok, bases = pcall(function()
-                    return require("vault.bases")()
-                end)
-                if ok and bases then
-                    return bases:names()
-                end
-                return {}
-            end,
-        },
-    },
+
+    -- ── Deprecated legacy commands (forward to :Vault subcommands) ──────
+    ["VaultNote"]               = deprecated("VaultNote",               ":Vault note",            callbacks.note,                     { complete = completions.note, nargs = "*" }),
+    ["VaultRandomNote"]         = deprecated("VaultRandomNote",         ":Vault note random",     callbacks.edit_random_note,          { nargs = "*" }),
+    ["VaultNotes"]              = deprecated("VaultNotes",              ":Vault notes",           callbacks.notes,                     { complete = completions.notes_filter, nargs = "*" }),
+    ["VaultTags"]               = deprecated("VaultTags",               ":Vault tags",            callbacks.open_tags_picker,           { complete = completions.tags, nargs = "*" }),
+    ["VaultDates"]              = deprecated("VaultDates",              ":Vault dates",           callbacks.open_dates_picker,          { complete = completions.dates, nargs = "*" }),
+    ["VaultToday"]              = deprecated("VaultToday",              ":Vault today",           callbacks.today,                     { nargs = 0 }),
+    ["VaultYesterday"]          = deprecated("VaultYesterday",          ":Vault yesterday",       callbacks.yesterday,                 { nargs = 0 }),
+    ["VaultNotesStatus"]        = deprecated("VaultNotesStatus",        ":Vault notes status",    callbacks.open_notes_status_picker,   { complete = completions.statuses, nargs = "*" }),
+    ["VaultFleetingNote"]       = deprecated("VaultFleetingNote",       ":Vault fleeting",        callbacks.open_fleeting_note_popup,   { nargs = "*" }),
+    ["VaultOrphans"]            = deprecated("VaultOrphans",            ":Vault notes orphans",   callbacks.open_orphans_picker,        { nargs = 0 }),
+    ["VaultLinked"]             = deprecated("VaultLinked",             ":Vault notes linked",    callbacks.open_linked_picker,         { nargs = 0 }),
+    ["VaultInternals"]          = deprecated("VaultInternals",          ":Vault notes internals", function()
+        safe_find(pickers.notes({ notes = require("vault.notes")():internals() }), "No internal notes found")
+    end, { nargs = "*" }),
+    ["VaultLeaves"]             = deprecated("VaultLeaves",             ":Vault notes leaves",    function()
+        safe_find(pickers.notes({ notes = require("vault.notes")():leaves() }), "No leaf notes found")
+    end, { nargs = "*" }),
+    ["VaultDanglingLinks"]      = deprecated("VaultDanglingLinks",      ":Vault notes dangling",  function()
+        safe_find(pickers.notes({ notes = require("vault.notes")():with_outlinks_unresolved() }), "No dangling links found")
+    end, { nargs = "*" }),
+    ["VaultOutlinksUnresolved"] = deprecated("VaultOutlinksUnresolved", ":Vault notes dangling",  function()
+        safe_find(pickers.notes({ notes = require("vault.notes")():with_outlinks_unresolved() }), "No unresolved outlinks found")
+    end, { nargs = "*" }),
+    ["VaultOutlinksResolvedOnly"] = deprecated("VaultOutlinksResolvedOnly", ":Vault notes resolved", function()
+        safe_find(pickers.notes({ notes = require("vault.notes")():with_outlinks_resolved_only() }), "No notes with all outlinks resolved")
+    end, { nargs = "*" }),
+    ["VaultWikilinks"]          = deprecated("VaultWikilinks",          ":Vault wikilinks",       function() safe_find(pickers.wikilinks(), "No wikilinks found") end, { nargs = "*" }),
+    ["VaultTasks"]              = deprecated("VaultTasks",              ":Vault tasks",           callbacks.tasks,                     { nargs = "*" }),
+    ["VaultNotesCluster"]       = deprecated("VaultNotesCluster",       ":Vault note cluster",    function(args)
+        local input = args.args or ""
+        if input == "" then
+            local path = vim.fn.expand("%")
+            if type(path) == "table" then path = path[1] end
+            input = require("vault.utils").path_to_slug(path)
+        end
+        local notes = require("vault.notes")()
+        local note = notes:filter("slug", input, "exact"):list()[1]
+        if not note then
+            vim.notify("[vault] Note not found: " .. input, vim.log.levels.WARN)
+            return
+        end
+        notes = require("vault.notes")()
+        local cluster = notes:to_cluster(note, 0)
+        local picker = pickers.notes({ notes = cluster })
+        if picker then picker:find() end
+    end, { complete = completions.note_slugs, nargs = "*" }),
+    ["VaultMove"]               = deprecated("VaultMove",               ":Vault note rename",     function() end, { nargs = "*" }),
+    ["VaultGrep"]               = deprecated("VaultGrep",               ":Vault grep",            callbacks.open_live_grep_picker,     { nargs = "*", range = true }),
+    ["VaultRename"]             = deprecated("VaultRename",             ":Vault note rename",     callbacks.rename,                    { nargs = "*" }),
+    ["VaultNoteInlinks"]        = deprecated("VaultNoteInlinks",        ":Vault note inlinks",    callbacks.note_inlinks_picker,        { nargs = 0 }),
+    ["VaultNoteOutlinks"]       = deprecated("VaultNoteOutlinks",       ":Vault note outlinks",   callbacks.note_outlinks_picker,       { nargs = 0 }),
+    ["VaultNoteTags"]           = deprecated("VaultNoteTags",           ":Vault note tags",       callbacks.note_tags_picker,           { nargs = "*", range = true, complete = completions.note_tags }),
+    ["VaultNoteExtract"]        = deprecated("VaultNoteExtract",        ":Vault note extract",    callbacks.note_from_selected_text,    { nargs = "*", range = true, complete = completions.note_slugs }),
+    ["VaultProperties"]         = deprecated("VaultProperties",         ":Vault properties",      function(args)
+        local fargs = args.fargs
+        if next(fargs) == nil then
+            safe_find(pickers.properties(), "No properties found")
+            return
+        end
+        safe_find(pickers.properties({ values = fargs }), "No properties found")
+    end, { nargs = "*", complete = function() return vim.tbl_keys(require("vault.scanner").properties()) end }),
+    ["VaultNoteProperties"]     = deprecated("VaultNoteProperties",     ":Vault note properties", callbacks.open_note_properties_picker, { nargs = "*" }),
+    ["VaultNotesByDir"]         = deprecated("VaultNotesByDir",         ":Vault notes dir",       callbacks.open_note_by_dir_picker,    { nargs = "*", complete = completions.dirs }),
+    ["VaultNoteNew"]            = deprecated("VaultNoteNew",            ":Vault note new",        callbacks.create_new_note,            { nargs = "*", complete = completions.dirs }),
+    ["VaultDirs"]               = deprecated("VaultDirs",               ":Vault dirs",            callbacks.pick_dirs,                  { nargs = "*", complete = completions.dirs }),
+    ["VaultToggleLink"]         = deprecated("VaultToggleLink",         ":Vault toggle-link",     callbacks.toggle_link,                { nargs = 0 }),
+    ["VaultBases"]              = deprecated("VaultBases",              ":Vault bases",           function(args)
+        local fargs = args.fargs
+        if next(fargs) == nil then
+            safe_find(pickers.bases(), "No bases found")
+            return
+        end
+        require("vault.api").open_picker_base_notes(table.concat(fargs, " "))
+    end, { nargs = "*", complete = function() local ok, b = pcall(function() return require("vault.bases")() end); return (ok and b) and b:names() or {} end }),
 }
 
 for command, opts in pairs(M) do
