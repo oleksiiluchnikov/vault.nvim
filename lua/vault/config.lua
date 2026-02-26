@@ -1,94 +1,458 @@
-local M = {}
+--- @class vault.Config
+--- @field options vault.Config.options The plugin configuration options
+--- @field setup fun(options?: vault.Config.options): nil Setup the plugin configuration
+--- @field reset fun(): nil Reset configuration to default state
+--- @field get_defaults fun(): vault.Config.options Get a fresh copy of default configuration
+--- @field check_dirs fun(): nil Validate and check directory structure
 
----@class VaultConfig
----@field dirs table - The directories for various elements in the note.
----@field ignore string[] - List of ignore patterns in glob format (e.g., ".obdidian/*, .git/*").
----@field ext string - The extension of the note files. Default: ".md"
----@field search_pattern table - The search pattern for various elements in the note.
+--- @class vault.Config.options
+--- @field root? string Root directory path of the vault where notes are stored. Example: "~/vault" or "/Users/user/Documents/vault"
+--- @field dirs? table Directory configuration for organizing different note types
+---   Example structure:
+---   ```lua
+---   {
+---     inbox = "inbox",           -- Quick capture/inbox notes
+---     docs = "_docs",           -- Documentation
+---     templates = "_templates", -- Note templates
+---     journal = {              -- Journal structure
+---       root = "Journal",
+---       daily = "Journal/Daily",
+---       weekly = "Journal/Weekly",
+---       monthly = "Journal/Monthly",
+---       yearly = "Journal/Yearly"
+---     }
+---   }
+---   ```
+--- @field ignore? string[] Glob patterns for files/directories to ignore during searches. Example: {".git/*", ".obsidian/*", "_templates/*"}
+--- @field ext? string File extension for notes. Example: ".md"
+--- @field tags? table Tag configuration and validation settings. Example: { valid = { hex = true } }
+--- @field search_pattern? table Regular expression patterns for parsing note elements. Example:
+---   ```lua
+---   {
+---     task = { pcre2 = [[^\s*-\s+\[.\]\s+\S+]] },
+---     date = { pcre2 = [[\d{4}-\d{2}-\d{2}]] },
+---     tag = "#([A-Za-z0-9/_-]+)[\r|%s|\n|$]",
+---     wikilink = "%[%[([^\\]]*)%]%]",
+---     note = { type = "class::%s#class/([A-Za-z0-9_-]+)" }
+---   }
+---   ```
+--- @field search_tool? string Tool used for searching vault. Example: "rg" or "fd"
+--- @field ui? { popups: table, notify: table} UI configuration settings
+--- @field notify? table Notification settings and preferences. Example: { on_write = true }
+--- @field features? { cmp: boolean, commands: boolean, blink: boolean } Feature toggles for plugin components. Example: { cmp = true, commands = true, blink = true }
+--- @field frontmatter? table YAML frontmatter configuration. Example: { keys = { tags = "tags" } }
+--- @field check_duplicate_basename? boolean Enable duplicate filename detection. Example: true
+---
+--- @field telescope? table Telescope configuration. Example:
+---   ```lua
+---   {
+---     pickers = {
+---       notes = function(opts)
+---         require("telescope._extensions.vault.pickers.notes")(opts)
+---       end,
+---     },
+---   }
+---   ```
+--- @field telescope.pickers? table Telescope pickers configuration. Example:
+---   ```lua
+---   {
+---     notes = function(opts)
+---       require("telescope._extensions.vault.pickers.notes")(opts)
+---     end,
+---   }
+---   ```
 
----@type VaultConfig
-local default_options = {
-  -- TODO: Test that the directories are expanded correctly.
-  dirs = {
-    root = "~/knowledge",
-    inbox = "inbox",
-    docs = "_docs",
-    templates = "_templates",
-    journal = {
-      root = "Journal",
-      daily = "Journal/Daily",
-      weekly = "Journal/Weekly",
-      monthly = "Journal/Monthly",
-      yearly = "Journal/Yearly",
-    },
-  },
-	ignore = {
-		".git/*",
-		".obsidian/*",
-    "_docs/*",
-    "_templates/*",
-	},
-	ext = ".md",
-  tag = {
-    valid = {
-      hex = true, -- Hex is a valid tag.
-    }
-  },
-  search_pattern = {
-    tag = "#([A-Za-z0-9/_-]+)[\r|%s|\n|$]",
-    wikilink = "%[%[([A-Za-z0-9/_-]+)%]%]",
-    class = "class::%s#class/([A-Za-z0-9_-]+)",
-  }
+--- The configuration for the vault plugin.
+--- @type vault.Config
+--- @diagnostic disable-next-line: missing-fields
+local Config = {
+    --- @diagnostic disable-next-line: missing-fields
+    options = {},
+    --- @type boolean
+    is_initialized = false,
 }
 
----Expand the directories in the config recursively.
----@param dirs table? - The directories to expand.
----@return table? - The expanded directories.
-  local function process_dirs(dirs)
-    if dirs == nil then
-      return
-    end
-    --- if dirs.root is nil, then the user has not set the root directory.
-    if dirs.root == nil then
-      error("Vault: root directory is not set.")
-      return
-    end
+--- Get the root directory for the demo vault
+---
+--- Finds the runtime path of the current plugin, then checks for the
+--- existence of the demo vault folder under it.
+--- @return vault.Config.options.root|nil - The root directory of the demo vault.
+local function get_demo_vault_root()
+    --- Get the runtime path for this plugin
+    --- @type string[]
+    local init_lua = vim.api.nvim_get_runtime_file("", true)
 
-    local root_dir = vim.fn.expand(dirs.root)
+    --- The detected root path of the plugin
+    --- @type string|nil
+    local plugin_root = nil
 
-    if type(root_dir) ~= "string" then
-      error("Vault: root directory is not a string.")
-      return
-    end
-
-    dirs.root = root_dir
-
-    -- Return full pathes of the directories.
-    for k, v in pairs(dirs) do
-      -- Skip the dirs.root.
-      if k ~= "root" then
-        if type(v) == "string" then
-          dirs[k] = root_dir .. "/" .. v
-        elseif type(v) == "table" then
-          process_dirs(v)
+    --- Check each returned path to find the plugin root
+    for _, path in ipairs(init_lua) do
+        if path:find("vault.nvim") then
+            plugin_root = path
+            break
         end
-      end
+    end
+    if plugin_root == nil then
+        return nil
+    end
+
+    local demo_vault_root = plugin_root .. "/tests/fixtures/demo-vault"
+    if vim.fn.isdirectory(demo_vault_root) == 0 then
+        return nil
+    end
+
+    return demo_vault_root
+end
+
+--- Default configuration options
+--- @type vault.Config.options
+local DEFAULT_OPTIONS = {
+    root = "~/knowledge",
+    dirs = nil,
+    ignore = {
+        ".git/*",
+        ".obsidian/*",
+        ".trash/*",
+        "node_modules/*",
+    },
+    ext = ".md",
+    frontmatter = {
+        keys = {
+            tags = "tags",
+        },
+    },
+    tags = {
+        valid = {
+            hex = true, -- Hex is a valid tag.
+        },
+        completion = {
+            strategy = "fuzzy", -- The strategy to use for tag completion. Default: "fuzzy"
+        },
+    },
+    properties = {
+        completion = {
+            strategy = "fuzzy", -- The strategy to use for property completion. Default: "fuzzy"
+        },
+    },
+    search_pattern = {
+        task = {
+            pcre2 = [[^\s*-\s+\[.\]\s+\S+]],
+        },
+        date = {
+            pcre2 = [[\d{4}-\d{2}-\d{2}]],
+            lua = "[%d%d%d%d]-[%d%d]-[%d%d]",
+        },
+        tag = "#([A-Za-z0-9/_-]+)[\r|%s|\n|$]",
+        wikilink = "%[%[([^\\]]*)%]%]",
+        note = {
+            type = "class::%s#class/([A-Za-z0-9_-]+)",
+        },
+    },
+    search_tool = "rg", -- The search tool to use. Default: "rg"
+    notify = {
+        on_write = true,
+    },
+    check_duplicate_basename = true,
+    ui = {
+
+        popups = {
+            fleeting_note = {
+                title = {
+                    text = "Fleeting Note",
+                    preview = "border", -- "border" | "prompt" | "none"
+                },
+                editor = { -- @see :h nui.popup
+                    -- position = {
+                    --     row = math.floor(vim.api.nvim_list_uis()[1].height / 2) - 9 or 0,
+                    --     col = math.floor(vim.api.nvim_list_uis()[1].width / 2) - 40 or 0,
+                    -- },
+                    size = {
+                        height = 6,
+                        width = 80,
+                    },
+                    enter = true,
+                    focusable = true,
+                    zindex = 60,
+                    relative = "editor",
+                    border = {
+                        padding = {
+                            top = 0,
+                            bottom = 0,
+                            left = 0,
+                            right = 0,
+                        },
+                        -- T shape side border: ├
+                        style = "rounded",
+                    },
+                    buf_options = {
+                        modifiable = true,
+                        readonly = false,
+                        filetype = "markdown",
+                        buftype = "nofile",
+                        swapfile = false,
+                        bufhidden = "wipe",
+                    },
+                    win_options = {
+                        winhighlight = "Normal:Normal,FloatBorder:FloatBorder",
+                    },
+                },
+                prompt = {
+                    hidden = true,
+                    size = {
+                        height = 0.8,
+                        width = 0.8,
+                    },
+                },
+                results = {
+                    size = {
+                        height = 10,
+                        width = 80,
+                    },
+                },
+            },
+        },
+    },
+    previewer = "glow", -- The previewer to use. Default: "glow"
+    telescope = {
+        pickers = {
+            -- custom = function(opts)
+            --     require("telescope._extensions.vault.pickers.notes")(
+            --         vim.tbl_deep_extend("force", opts or {}, {
+            --             notes = require("vault.notes")():with_outlinks_resolved_only(),
+            --         })
+            --     )
+            -- end,
+        },
+    },
+
+    features = {
+        cmp = true,
+        commands = true,
+        blink = true,
+        watcher = false, -- NEW: Enable file watcher
+    },
+
+    watcher = {
+        enabled = false,
+        debounce_ms = 500, -- Debounce delay for batch processing
+        auto_update_links = true, -- Automatically update wikilinks
+        notify_on_rename = true, -- Show notifications for renames
+        watch_external = true, -- Watch for external file changes
+        async_rename = true, -- Use async background processing for renames
+        -- When true, ask the user for confirmation before applying link updates
+        prompt_on_rename = false,
+        -- Frontmatter key to update on rename (e.g. `slug`). If nil, no frontmatter changes are made.
+        frontmatter_key = "slug",
+    },
+
+    bases = {
+        ext = ".base", -- File extension for base files
+        dirs = nil, -- Specific directories to scan for .base files (nil = scan entire vault)
+    },
+}
+
+--- Expand the root directory path.
+---
+--- @param root vault.Config.options.root - The root directory.
+--- @return vault.Config.options.root - The expanded root directory.
+local function expand_root(root)
+    -- Expand the root directory. If the root directory is relative, then expand
+    if root:sub(1, 1) == "~" then
+        local expanded_root = vim.fn.expand(root)
+        if type(expanded_root) ~= "string" or expanded_root == "" then
+            error(
+                "Invalid root directory: "
+                    .. vim.inspect(root)
+                    .. ". Please set a path to the root directory at the `root` option."
+            )
+        end
+        root = expanded_root
+    end
+
+    return root
+end
+
+--- Expand the directories in the config recursively.
+---
+--- @param dirs? table - The directories to expand.
+--- @return table? - The expanded directories.
+local function split_path(p)
+    local parts = {}
+    for part in string.gmatch(p or "", "[^/]+") do
+        parts[#parts + 1] = part
+    end
+    return parts
+end
+
+local function resolve_case_sensitive_path(base, rel)
+    if rel == nil or rel == "" then
+        return base
+    end
+    local current = base
+    for _, comp in ipairs(split_path(rel)) do
+        local found = nil
+        local ok, entries = pcall(vim.fn.readdir, current)
+        if ok and type(entries) == "table" then
+            for _, entry in ipairs(entries) do
+                if entry:lower() == comp:lower() then
+                    found = entry
+                    break
+                end
+            end
+        end
+        if found then
+            current = current .. "/" .. found
+        else
+            current = current .. "/" .. comp
+        end
+    end
+    return current
+end
+
+local function expand_dirs(root, dirs)
+    if dirs == nil then
+        return nil
+    end
+
+    for key, dir in pairs(dirs) do
+        if type(dir) == "string" then
+            local candidate = nil
+
+            if dir:find(root, 1, true) == 1 then
+                -- dir already contains root; resolve the relative part to canonical case
+                local rel = dir:sub(#root + 2)
+                candidate = resolve_case_sensitive_path(root, rel)
+                if vim.fn.isdirectory(candidate) == 0 then
+                    -- fallback: use the unexpanded concatenation
+                    candidate = vim.fn.expand(dir)
+                end
+            else
+                -- Always resolve to canonical filesystem case (handles case-insensitive macOS)
+                candidate = resolve_case_sensitive_path(root, dir)
+                if vim.fn.isdirectory(candidate) == 0 then
+                    -- fallback to expanded path (even if non-existent)
+                    candidate = vim.fn.expand(root .. "/" .. dir)
+                end
+            end
+
+            dirs[key] = candidate
+        elseif type(dir) == "table" then
+            dirs[key] = expand_dirs(root, dir)
+        end
     end
 
     return dirs
 end
 
----@param options table? - The options to set.
-function M.setup(options)
-  options = options or default_options
-  --- Expand the directories recursively.
-  if options.dirs == nil then
-    options.dirs = default_options.dirs
-  end
-  options.dirs = process_dirs(options.dirs) or default_options.dirs
-  M = vim.tbl_deep_extend("force", M, options)
+--- Safely access a nested directory config value.
+--- @param key string Dot-separated key path (e.g. "journal.daily", "docs", "inbox")
+--- @return string|nil The directory path, or nil if not configured
+function Config.dir(key)
+    local dirs = Config.options.dirs
+    if not dirs then
+        return nil
+    end
+    for part in key:gmatch("[^%.]+") do
+        if type(dirs) ~= "table" then
+            return nil
+        end
+        dirs = dirs[part]
+        if not dirs then
+            return nil
+        end
+    end
+    if type(dirs) ~= "string" then
+        return nil
+    end
+    return dirs
 end
 
-M.setup()
+--- Check each dir for existence and replace with root if not found.
+function Config.check_dirs()
+    local root = Config.options.root
+    local dirs = Config.options.dirs
+    if not dirs then
+        return
+    end
+    for key, dir in pairs(dirs) do
+        if type(dir) == "string" then
+            if vim.fn.isdirectory(dir) == 0 then
+                dirs[key] = root .. "/" .. dir
+            end
+        elseif type(dir) == "table" then
+            dirs[key] = expand_dirs(root, dir)
+        end
+    end
+    Config.options.dirs = dirs
+end
 
-return M
+--- Validate configuration options
+--- @param options vault.Config.options
+--- @return boolean, string? error message if validation fails
+local function validate_config(options)
+    -- If root is not specified, try to use demo vault
+    if not options.root then
+        vim.notify("No root directory specified. Attempting to use demo vault", vim.log.levels.INFO)
+        local demo_vault_root = get_demo_vault_root()
+        if demo_vault_root then
+            options.root = demo_vault_root
+        else
+            return false, "root directory must be specified"
+        end
+    end
+
+    if type(options.root) ~= "string" then
+        return false, "root directory must be a string"
+    end
+
+    -- Add more specific validations
+    return true
+end
+
+--- Setup the vault plugin configuration.
+---
+--- @param options? vault.Config.options
+function Config.setup(options)
+    -- Allow re-initialization with a warning
+    if Config.is_initialized then
+        vim.notify("Reinitializing vault.nvim configuration", vim.log.levels.INFO)
+    end
+
+    local defaults = Config.get_defaults()
+    local user_options = options or {}
+    local merged = vim.tbl_deep_extend("force", defaults, user_options)
+
+    local is_valid, err = validate_config(merged)
+    if not is_valid then
+        error("Invalid configuration: " .. err)
+    end
+
+    -- Only expand the root if user provided a custom root explicitly
+    if user_options.root ~= nil then
+        merged.root = expand_root(merged.root)
+    end
+
+    merged.dirs = expand_dirs(merged.root, merged.dirs)
+
+    --- @cast merged vault.Config.options
+    Config.options = merged
+    Config.is_initialized = true
+end
+
+--- Reset the configuration to empty state
+--- This is useful for testing
+function Config.reset()
+    --- @diagnostic disable-next-line: missing-fields
+    Config.options = {}
+end
+
+--- Get a fresh copy of default options
+--- @return vault.Config.options
+function Config.get_defaults()
+    local defaults = vim.deepcopy(DEFAULT_OPTIONS)
+    return defaults
+end
+
+--- @type vault.Config
+return Config

@@ -1,0 +1,102 @@
+-- --- Picker for browsing properties
+-- --- It opens the picker with all properties of the current note
+-- --- ```lua
+-- --- local properties = vim.tbl_keys(require("vault.scanner").properties())
+-- --- ```
+-- --- And then we can pick the property and see picker with values
+-- --- ```lua
+-- --- local property = vim.tbl_keys(require("vault.scanner").properties()[selected_property]
+-- --- ```
+-- --- @param opts table
+-- --- @param query? string[] - List of property names to show. If not provided, all properties will be shown.
+--- @return Picker
+-- function vault_pickers.properties(opts)
+--     --- @type vault.Notes
+--     local notes = require("vault.notes")()
+--     --- @type table<string, table>
+--     local properties = require("vault.scanner").properties()
+--
+--     -- filter properties by query
+--     if next(query) ~= nil then
+--         local new_properties = {}
+--         for _, property in ipairs(query) do
+--             if properties[property] ~= nil then
+--                 new_properties[property] = properties[property]
+--             end
+--         end
+--         if next(new_properties) == nil then
+--             vim.notify("No properties found")
+--             return
+--         end
+--
+--         properties = new_properties
+--     end
+--
+--     --- @type string
+--     local property_name -- "title"
+--     --- @type string[]
+--     local results = vim.tbl_keys(properties)
+--
+--     --- Enter callback
+--     --- @param bufnr integer
+--     local function enter(bufnr)
+--         --- @type TelescopeEntry
+--         local selection = actions_state.get_selected_entry()
+--         --- @type table<string, table>
+--         local values = properties[selection[1]]
+--         property_name = selection[1]
+--         results = vim.tbl_keys(values)
+--
+--         local function enter(bufnr)
+--             --- @type TelescopeEntry
+--             local selection = actions_state.get_selected_entry()
+--             --- @type vault.Note.data.path[]
+--             local sources = properties[property_name][selection[1]].sources
+--             --- @type vault.Note.data.path[]
+--             local paths = vim.tbl_keys(sources)
+--
+--             --- @type vault.Notes.map
+--             notes.map = {}
+--             for _, path in ipairs(paths) do
+--                 local note = Note(path)
+--                 notes:add_note(note)
+--             end
+--             vault_pickers.notes(opts)
+--         end
+--
+--         local attach_mappings = function(_, map)
+--             actions.select_default:replace(enter)
+--             return true
+--         end
+--
+--         pickers
+--             .new({}, {
+--                 prompt_title = selection[1],
+--                 finder = finders.new_table({
+--                     results = results,
+--                     entry_maker = entry_maker,
+--                 }),
+--                 sorter = sorters.get_generic_fuzzy_sorter(),
+--                 attach_mappings = attach_mappings,
+--             })
+--             :find()
+--     end
+--
+--     local attach_mappings = function(_, map)
+--         actions.select_default:replace(enter)
+--         return true
+--     end
+--
+--     pickers
+--         .new({}, {
+--             prompt_title = "Properties",
+--             finder = finders.new_table({
+--                 results = results,
+--                 entry_maker = entry_maker,
+--             }),
+--             sorter = sorters.get_generic_fuzzy_sorter(),
+--             attach_mappings = attach_mappings,
+--         })
+--         :find()
+-- end -- [[@as fun(opts: table?): nil]]
+--

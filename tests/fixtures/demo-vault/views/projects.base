@@ -1,0 +1,33 @@
+filters:
+  and:
+    - file.hasTag("project")
+    - file.inFolder("Project")
+
+formulas:
+  display_status: 'if(status, status, "unknown")'
+  name_upper: "file.name.title()"
+
+properties:
+  file.name:
+    displayName: "Name"
+  status:
+    displayName: "Status"
+  formula.display_status:
+    displayName: "Display Status"
+  formula.name_upper:
+    displayName: "Name (Title)"
+
+views:
+  - type: table
+    name: "Project Table"
+    order:
+      - file.name
+      - status
+      - formula.display_status
+      - formula.name_upper
+    group_by: status
+  - type: table
+    name: "Simple List"
+    order:
+      - file.name
+      - file.folder
