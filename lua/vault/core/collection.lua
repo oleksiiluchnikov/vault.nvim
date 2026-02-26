@@ -16,6 +16,11 @@ function Collection:init()
     self._map = {}
 end
 
+--- @return integer Number of items in the collection
+function Collection:__len()
+    return vim.tbl_count(self.map)
+end
+
 function Collection:load()
     error("Load method not implemented")
 end

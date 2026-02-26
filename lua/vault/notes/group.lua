@@ -14,7 +14,11 @@ function NotesGroup:init(notes)
         error(error_formatter.MISSING_PARAMETER("notes"))
     end
 
-    self.map = notes.map
+    -- Shallow-copy the map so mutations don't affect the source collection
+    self.map = {}
+    for k, v in pairs(notes.map) do
+        self.map[k] = v
+    end
 end
 
 --- @alias VaultNotesGroup.constructor fun(notes: vault.Notes): vault.Notes.Group
