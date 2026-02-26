@@ -1,30 +1,29 @@
 -- lua/vault/oil_edit.lua
 -- Oil.nvim-style editable buffer for vault note metadata.
 --
--- Pattern (adapted from oil.nvim + airtable.nvim):
---   1. Render notes as text lines with a hidden slug prefix (concealed).
---   2. buftype=acwrite so :w fires BufWriteCmd instead of touching disk.
---   3. On BufWriteCmd: diff buffer lines against snapshot → mutations.
---   4. Mutations rewrite YAML frontmatter, move/rename, delete, or create.
---   5. After mutations complete, re-scan and re-render.
+-- Architecture:
+--   1. Each data line is pure visible text: "title │ status │ #tags │ dir/"
+--   2. Slug identity is stored as extmark metadata (not in buffer text).
+--   3. buftype=acwrite so :w fires BufWriteCmd instead of touching disk.
+--   4. On BufWriteCmd: diff buffer lines against snapshot → mutations.
+--   5. Mutations rewrite YAML frontmatter, move/rename, delete, or create.
+--   6. After mutations complete, re-scan and re-render.
 --
--- Line format (visible after concealing):
---   /my-note-slug        Published │ #rust #programming │ Projects/
---   ^── concealed ──^
---
--- Lines without a /slug prefix → new note (CREATE).
--- Lines from snapshot missing in buffer → note trashed (DELETE).
+-- Extmark design:
+--   NS namespace — one extmark per data line at col 0, right_gravity=false.
+--   State maps extmark_id → slug and slug → extmark_id.
+--   Lines without a slug extmark → new note (CREATE).
+--   Slugs in snapshot whose extmark is gone → note trashed (DELETE).
+--   Header/separator rendered as virt_lines above row 0 (immutable).
 
 local M = {}
 
 -- ─── Constants ────────────────────────────────────────────────────────────────
 
 local SEP        = " │ "
-local ID_PREFIX  = "/"
 local EMPTY_CELL = "∅"
 local NS         = vim.api.nvim_create_namespace("vault_oil_edit")
 local NS_DIFF    = vim.api.nvim_create_namespace("vault_oil_diff")
-local HEADER_LINES = 2  -- header + separator
 
 -- ─── Per-buffer state ─────────────────────────────────────────────────────────
 
@@ -33,11 +32,10 @@ local HEADER_LINES = 2  -- header + separator
 ---@field winid        integer
 ---@field columns      string[]         ordered column names
 ---@field col_widths   integer[]        display width per column
----@field id_width     integer          byte length of slug prefix
 ---@field snapshot     table<string, table<string, string>>  slug → {col → value}
 ---@field note_paths   table<string, string>  slug → absolute path
----@field header_lines integer
----@field header_text  string[]
+---@field mark_to_slug table<integer, string>  extmark_id → slug
+---@field slug_to_mark table<string, integer>  slug → extmark_id
 ---@field filter_desc  string           human description of the filter used
 ---@field saving       boolean
 
@@ -54,7 +52,6 @@ local DEFAULT_COLUMNS = { "title", "status", "tags", "dir" }
 local function fmt_value(value)
   if value == nil or value == "" then return EMPTY_CELL end
   if type(value) == "table" then
-    -- tags array → "#foo #bar"
     local parts = {}
     for _, v in ipairs(value) do
       if type(v) == "string" and v ~= "" then
@@ -76,7 +73,6 @@ local function parse_value(text, col_name)
   if text == EMPTY_CELL or text == "" then return nil end
   if col_name == "tags" then
     local tags = {}
-    -- Match # followed by any non-whitespace characters (supports unicode, @, :, etc.)
     for tag in text:gmatch("#([^%s#]+)") do
       table.insert(tags, tag)
     end
@@ -95,7 +91,7 @@ local function calc_col_widths(columns, records)
   local win_width = (uis[1] and uis[1].width) or 120
   win_width = math.max(80, math.floor(win_width * 0.95)) - 2
   local sep_total = (#columns - 1) * #SEP
-  local content_width = win_width - 40 - sep_total  -- 40 for concealed ID
+  local content_width = win_width - sep_total
 
   local natural = {}
   for i, col in ipairs(columns) do
@@ -143,49 +139,6 @@ local function pad(s, width)
   return s .. string.rep(" ", width - dw)
 end
 
--- ─── ID prefix helpers ────────────────────────────────────────────────────────
-
----@param slugs string[]
----@return integer
-local function compute_id_width(slugs)
-  local max_len = 20
-  for _, slug in ipairs(slugs) do
-    local token_len = 1 + #slug + 2  -- "/" + slug + "  "
-    if token_len > max_len then max_len = token_len end
-  end
-  return max_len
-end
-
----@param slug string
----@param width integer
----@return string
-local function id_token(slug, width)
-  local raw = ID_PREFIX .. slug .. "  "
-  if #raw < width then
-    raw = raw .. string.rep(" ", width - #raw)
-  end
-  return raw
-end
-
----@param line string
----@return string|nil slug
----@return string rest
-local function parse_id(line)
-  -- Slug can contain any non-control characters (spaces, unicode, parens, etc.)
-  -- The delimiter between slug and data is TWO OR MORE consecutive spaces after the /prefix.
-  -- We match: "/" + (one or more non-"/" chars that don't start with space) + "  " + rest
-  if line:sub(1, 1) ~= ID_PREFIX then return nil, line end
-  -- Find the first occurrence of two consecutive spaces after position 1
-  local double_space = line:find("  ", 2, true)
-  if not double_space or double_space <= 2 then return nil, line end
-  local slug = line:sub(2, double_space - 1)
-  -- Trim trailing single spaces from slug (in case of variable padding)
-  slug = slug:match("^(.-)%s*$")
-  if not slug or slug == "" then return nil, line end
-  local rest = line:sub(double_space):match("^%s+(.*)")
-  return slug, rest or ""
-end
-
 ---@param text string
 ---@return string[]
 local function split_cells(text)
@@ -197,6 +150,40 @@ local function split_cells(text)
   return cells
 end
 
+-- ─── Extmark slug helpers ─────────────────────────────────────────────────────
+
+--- Get the slug for a buffer row by reading the NS extmark.
+---@param bufnr integer
+---@param row integer  0-indexed
+---@param st vault.OilEditState
+---@return string|nil slug
+local function get_line_slug(bufnr, row, st)
+  local marks = vim.api.nvim_buf_get_extmarks(bufnr, NS, { row, 0 }, { row, 0 }, {})
+  for _, mark in ipairs(marks) do
+    local slug = st.mark_to_slug[mark[1]]
+    if slug then return slug end
+  end
+  return nil
+end
+
+--- Place a slug identity extmark on a data row.
+---@param bufnr integer
+---@param row integer  0-indexed
+---@param slug string
+---@param st vault.OilEditState
+---@return integer mark_id
+local function set_line_slug(bufnr, row, slug, st)
+  local mark_id = vim.api.nvim_buf_set_extmark(bufnr, NS, row, 0, {
+    right_gravity = false,
+    -- Show slug as dim right-aligned hint
+    virt_text = { { slug, "NonText" } },
+    virt_text_pos = "right_align",
+  })
+  st.mark_to_slug[mark_id] = slug
+  st.slug_to_mark[slug] = mark_id
+  return mark_id
+end
+
 -- ─── Data extraction ──────────────────────────────────────────────────────────
 
 --- Read note frontmatter fields for the given columns.
@@ -205,10 +192,9 @@ end
 ---@return table<string, any>
 local function read_frontmatter_fields(path, columns)
   local fields = {}
-  local ok, lines = pcall(vim.fn.readfile, path, "", 50)  -- first 50 lines
+  local ok, lines = pcall(vim.fn.readfile, path, "", 50)
   if not ok then return fields end
 
-  -- Find frontmatter block
   if not lines[1] or not lines[1]:match("^%-%-%-") then return fields end
   local fm_lines = {}
   for i = 2, #lines do
@@ -216,21 +202,16 @@ local function read_frontmatter_fields(path, columns)
     table.insert(fm_lines, lines[i])
   end
 
-  -- Simple YAML key: value parser (handles tags as list)
   local current_key = nil
   local current_list = nil
   for _, l in ipairs(fm_lines) do
-    -- List continuation: "  - value"
     local list_item = l:match("^%s+%-%s+(.+)")
     if list_item and current_key and current_list then
-      -- Strip surrounding quotes
       list_item = list_item:gsub('^"(.*)"$', '%1'):gsub("^'(.*)'$", '%1')
       table.insert(current_list, list_item)
     else
-      -- New key: value line
       local key, value = l:match("^([%w_%-]+):%s*(.*)")
       if key then
-        -- Flush previous list
         if current_key and current_list and #current_list > 0 then
           fields[current_key] = current_list
         end
@@ -239,10 +220,8 @@ local function read_frontmatter_fields(path, columns)
 
         value = vim.trim(value or "")
         if value == "" then
-          -- Could be start of a list
           current_list = {}
         elseif value:match("^%[") then
-          -- Inline list: [foo, bar]
           local items = {}
           for item in value:gmatch("[%w/_%-%.]+") do
             table.insert(items, item)
@@ -250,9 +229,7 @@ local function read_frontmatter_fields(path, columns)
           fields[key] = items
           current_key = nil
         else
-          -- Strip surrounding quotes
           value = value:gsub('^"(.*)"$', '%1'):gsub("^'(.*)'$", '%1')
-          -- Handle wikilink values: "[[foo]]" → "foo"
           value = value:gsub("^%[%[(.-)%]%]$", "%1")
           fields[key] = value
           current_key = nil
@@ -260,7 +237,6 @@ local function read_frontmatter_fields(path, columns)
       end
     end
   end
-  -- Flush last list
   if current_key and current_list and #current_list > 0 then
     fields[current_key] = current_list
   end
@@ -297,7 +273,6 @@ local function build_records(notes_map, columns)
     table.insert(records, { slug = slug, path = path, fields = fields })
     ::continue::
   end
-  -- Sort by slug for stable ordering
   table.sort(records, function(a, b) return a.slug < b.slug end)
   return records
 end
@@ -324,38 +299,48 @@ end
 ---@param rec table
 ---@param columns string[]
 ---@param widths integer[]
----@param id_w integer
 ---@return string
-local function render_record_line(rec, columns, widths, id_w)
+local function render_record_line(rec, columns, widths)
   local cells = {}
   for i, col in ipairs(columns) do
     local cell = fmt_value(rec.fields[col])
     table.insert(cells, pad(cell, widths[i]))
   end
-  return id_token(rec.slug, id_w) .. table.concat(cells, SEP)
+  return table.concat(cells, SEP)
 end
 
+--- Build the header virt_lines chunks for display above row 0.
 ---@param st vault.OilEditState
----@param records table[]
----@return string[]
-local function build_lines(st, records)
-  local lines = {}
-  -- Header — include id_width padding so columns align even without concealing
-  local header_pad = string.rep(" ", st.id_width)
+---@return table[] virt_lines  list of {chunks} for nvim_buf_set_extmark virt_lines
+local function build_header_virt_lines(st)
+  -- Header row
   local hcells = {}
   for i, col in ipairs(st.columns) do
     table.insert(hcells, pad(col, st.col_widths[i]))
   end
-  table.insert(lines, header_pad .. table.concat(hcells, SEP))
-  -- Separator
+  local header_text = table.concat(hcells, SEP)
+
+  -- Separator row
   local sep_parts = {}
   for i, _ in ipairs(st.columns) do
     table.insert(sep_parts, string.rep("─", st.col_widths[i]))
   end
-  table.insert(lines, header_pad .. table.concat(sep_parts, "─┼─"))
-  -- Data
+  local sep_text = table.concat(sep_parts, "─┼─")
+
+  return {
+    { { header_text, "Visual" } },
+    { { sep_text, "Visual" } },
+  }
+end
+
+--- Build data lines (no header — header is virtual).
+---@param st vault.OilEditState
+---@param records table[]
+---@return string[]
+local function build_data_lines(st, records)
+  local lines = {}
   for _, rec in ipairs(records) do
-    table.insert(lines, render_record_line(rec, st.columns, st.col_widths, st.id_width))
+    table.insert(lines, render_record_line(rec, st.columns, st.col_widths))
   end
   return lines
 end
@@ -376,90 +361,29 @@ local function set_buffer_lines(bufnr, lines)
   vim.o.eventignore = saved_ei
 end
 
----@param bufnr integer
----@param row integer  0-indexed
-local function apply_conceal_to_line(bufnr, row)
-  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
-  -- Use the same parse_id logic: "/" + slug + "  " delimiter
-  if line:sub(1, 1) ~= ID_PREFIX then return end
-  local double_space = line:find("  ", 2, true)
-  if not double_space or double_space <= 2 then return end
-  -- The prefix includes the slug plus all trailing whitespace up to content
-  local rest_start = line:find("[^ ]", double_space)
-  local prefix_end = rest_start and (rest_start - 1) or #line
-
-  -- Clear existing conceal extmarks on this row to avoid accumulation
-  local existing = vim.api.nvim_buf_get_extmarks(bufnr, NS, { row, 0 }, { row, -1 }, {})
-  for _, mark in ipairs(existing) do
-    -- Only remove conceal marks (they start at col 0); preserve line_hl marks
-    if mark[3] == 0 then
-      vim.api.nvim_buf_del_extmark(bufnr, NS, mark[1])
-    end
-  end
-
-  vim.api.nvim_buf_set_extmark(bufnr, NS, row, 0, {
-    end_col  = prefix_end,
-    conceal  = "",
-    priority = 200,
-  })
-end
-
+--- Apply all extmarks: slug identity on data lines + header virt_lines on row 0.
 ---@param bufnr integer
 ---@param st vault.OilEditState
----@param num_records integer
-local function apply_highlights(bufnr, st, num_records)
+---@param records table[]
+local function apply_extmarks(bufnr, st, records)
   vim.api.nvim_buf_clear_namespace(bufnr, NS, 0, -1)
-  -- Header highlight + conceal the padding prefix on header/separator lines
-  for row = 0, st.header_lines - 1 do
-    vim.api.nvim_buf_set_extmark(bufnr, NS, row, 0, {
-      line_hl_group = "Visual",
-      priority = 10,
-    })
-    -- Conceal the id_width padding on header lines
-    if st.id_width > 0 then
-      vim.api.nvim_buf_set_extmark(bufnr, NS, row, 0, {
-        end_col  = st.id_width,
-        conceal  = "",
-        priority = 200,
-      })
-    end
-  end
-  -- Conceal ID prefixes on data lines
-  local total = vim.api.nvim_buf_line_count(bufnr)
-  for row = st.header_lines, total - 1 do
-    apply_conceal_to_line(bufnr, row)
-  end
-end
+  st.mark_to_slug = {}
+  st.slug_to_mark = {}
 
----@param bufnr integer
----@param st vault.OilEditState
-local function restore_header_if_needed(bufnr, st)
-  if not st.header_text or #st.header_text == 0 then return end
-  local current = vim.api.nvim_buf_get_lines(bufnr, 0, st.header_lines, false)
-  local needs_fix = false
-  for i = 1, st.header_lines do
-    if current[i] ~= st.header_text[i] then needs_fix = true; break end
+  -- Header as virtual lines above row 0
+  if #records > 0 then
+    local virt_lines = build_header_virt_lines(st)
+    vim.api.nvim_buf_set_extmark(bufnr, NS, 0, 0, {
+      virt_lines_above = true,
+      virt_lines = virt_lines,
+      -- This extmark is just for the header; don't track it as a slug
+    })
   end
-  if needs_fix then
-    local saved_ei = vim.o.eventignore
-    vim.o.eventignore = "TextChanged,TextChangedI,TextChangedP"
-    vim.bo[bufnr].modifiable = true
-    vim.api.nvim_buf_set_lines(bufnr, 0, st.header_lines, false, st.header_text)
-    vim.o.eventignore = saved_ei
-    for row = 0, st.header_lines - 1 do
-      vim.api.nvim_buf_set_extmark(bufnr, NS, row, 0, {
-        line_hl_group = "Visual",
-        priority = 10,
-      })
-      -- Re-apply conceal on header padding
-      if st.id_width > 0 then
-        vim.api.nvim_buf_set_extmark(bufnr, NS, row, 0, {
-          end_col  = st.id_width,
-          conceal  = "",
-          priority = 200,
-        })
-      end
-    end
+
+  -- Slug identity extmark on each data line
+  for i, rec in ipairs(records) do
+    local row = i - 1  -- 0-indexed (no header lines in buffer)
+    set_line_slug(bufnr, row, rec.slug, st)
   end
 end
 
@@ -469,14 +393,18 @@ end
 ---@param st vault.OilEditState
 local function update_diff_signs(bufnr, st)
   vim.api.nvim_buf_clear_namespace(bufnr, NS_DIFF, 0, -1)
-  local lines = vim.api.nvim_buf_get_lines(bufnr, st.header_lines, -1, false)
-  for idx, line in ipairs(lines) do
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local seen = {}
+
+  for row = 0, line_count - 1 do
+    local line = lines[row + 1]
     if vim.trim(line) == "" then goto continue end
-    local row = st.header_lines + idx - 1
-    local slug, rest = parse_id(line)
+
+    local slug = get_line_slug(bufnr, row, st)
     if not slug then
-      -- New note
-      local cells = split_cells(rest)
+      -- No extmark → new note
+      local cells = split_cells(line)
       local has_content = false
       for _, c in ipairs(cells) do
         if vim.trim(c) ~= "" and vim.trim(c) ~= EMPTY_CELL then has_content = true; break end
@@ -487,9 +415,10 @@ local function update_diff_signs(bufnr, st)
         })
       end
     else
+      seen[slug] = true
       local orig = st.snapshot[slug]
       if orig then
-        local cells = split_cells(rest)
+        local cells = split_cells(line)
         local changed = false
         for i, col in ipairs(st.columns) do
           local old_rendered = vim.trim(pad(fmt_value(orig[col]), st.col_widths[i]))
@@ -504,18 +433,14 @@ local function update_diff_signs(bufnr, st)
     end
     ::continue::
   end
+
   -- Count deletes
-  local seen = {}
-  for _, line in ipairs(lines) do
-    local rid = parse_id(line)
-    if rid then seen[rid] = true end
-  end
   local deleted = 0
   for slug, _ in pairs(st.snapshot) do
     if not seen[slug] then deleted = deleted + 1 end
   end
-  if deleted > 0 then
-    vim.api.nvim_buf_set_extmark(bufnr, NS_DIFF, 1, 0, {
+  if deleted > 0 and line_count > 0 then
+    vim.api.nvim_buf_set_extmark(bufnr, NS_DIFF, 0, 0, {
       sign_text = tostring(deleted), sign_hl_group = "DiffDelete", priority = 30,
     })
   end
@@ -533,13 +458,16 @@ end
 ---@return vault.OilEditDiff
 local function diff_buffer(bufnr, st)
   local diff = { updates = {}, deletes = {}, creates = {} }
-  local lines = vim.api.nvim_buf_get_lines(bufnr, st.header_lines, -1, false)
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local seen = {}
 
-  for _, line in ipairs(lines) do
+  for row = 0, line_count - 1 do
+    local line = lines[row + 1]
     if vim.trim(line) == "" then goto continue end
-    local slug, rest = parse_id(line)
-    local cells = split_cells(rest)
+
+    local slug = get_line_slug(bufnr, row, st)
+    local cells = split_cells(line)
 
     if slug then
       seen[slug] = true
@@ -551,8 +479,6 @@ local function diff_buffer(bufnr, st)
           local old_rendered = vim.trim(pad(fmt_value(orig[col]), st.col_widths[i]))
           local new_text = cells[i] or ""
           if old_rendered ~= new_text then
-            -- Guard: if old value was truncated (ends with …) and user modified it,
-            -- use the new text but warn — the user only saw a partial value.
             if old_rendered:match("…$") and not new_text:match("…$") then
               vim.notify(
                 string.format("[vault] Warning: '%s' was truncated for %s — edit may replace full value", col, slug),
@@ -568,7 +494,7 @@ local function diff_buffer(bufnr, st)
         end
       end
     else
-      -- New note
+      -- No extmark → new note
       local fields = {}
       local has_content = false
       for i, col in ipairs(st.columns) do
@@ -585,7 +511,7 @@ local function diff_buffer(bufnr, st)
     ::continue::
   end
 
-  -- Deletes: in snapshot but not in buffer
+  -- Deletes: in snapshot but not seen on any line
   for slug, _ in pairs(st.snapshot) do
     if not seen[slug] then
       table.insert(diff.deletes, slug)
@@ -606,14 +532,12 @@ local function set_frontmatter_field(path, key, value)
   if not ok then return end
   if not lines[1] or not lines[1]:match("^%-%-%-") then return end
 
-  -- Find frontmatter end
   local fm_end = nil
   for i = 2, #lines do
     if lines[i]:match("^%-%-%-") then fm_end = i; break end
   end
   if not fm_end then return end
 
-  -- Build new frontmatter lines
   local fm_lines = {}
   for i = 2, fm_end - 1 do
     table.insert(fm_lines, lines[i])
@@ -623,17 +547,17 @@ local function set_frontmatter_field(path, key, value)
   -- Track the original position so we can insert the new value there (preserving order).
   local new_fm = {}
   local skip = false
-  local insert_pos = nil  -- position where the old key was (1-indexed into new_fm)
+  local insert_pos = nil
   for _, l in ipairs(fm_lines) do
     if skip then
       if l:match("^%s") then
-        goto continue  -- skip indented continuation (list items, nested objects)
+        goto continue
       else
         skip = false
       end
     end
     if l:match("^" .. vim.pesc(key) .. ":") then
-      insert_pos = #new_fm + 1  -- remember where this key was
+      insert_pos = #new_fm + 1
       skip = true
       goto continue
     end
@@ -667,7 +591,6 @@ local function set_frontmatter_field(path, key, value)
     end
   end
 
-  -- Reconstruct file
   local result = { "---" }
   for _, l in ipairs(new_fm) do table.insert(result, l) end
   table.insert(result, "---")
@@ -688,7 +611,7 @@ local function apply_mutations(diff, st)
     local path = st.note_paths[upd.slug]
     if not path then goto continue end
 
-    -- Phase 1: dir move (must happen before any field writes)
+    -- Phase 1: dir move
     if upd.fields.dir ~= nil then
       local config = require("vault.config")
       local new_dir = upd.fields.dir or ""
@@ -708,7 +631,7 @@ local function apply_mutations(diff, st)
       end
     end
 
-    -- Phase 2: all other field writes (using the potentially updated path)
+    -- Phase 2: all other field writes
     for col, new_val in pairs(upd.fields) do
       if col == "dir" then
         -- already handled above
@@ -729,7 +652,7 @@ local function apply_mutations(diff, st)
       pcall(function()
         local Note = require("vault.notes.note")
         local note = Note(path)
-        note:delete(false, false)  -- soft delete to .trash
+        note:delete(false, false)
       end)
       n_deletes = n_deletes + 1
     end
@@ -739,7 +662,6 @@ local function apply_mutations(diff, st)
   for _, create in ipairs(diff.creates) do
     local title = create.fields.title
     if not title or title == "" then goto continue end
-    -- Derive slug: preserve unicode, underscores, dots; normalize spaces to hyphens
     local slug = title:lower():gsub("%s+", "-"):gsub("[%c%[%]#|^]", "")
     if slug == "" then slug = "untitled" end
     local config = require("vault.config")
@@ -747,7 +669,6 @@ local function apply_mutations(diff, st)
     if dir == "/" then dir = "" end
     local base_slug = slug
     local path = config.options.root .. "/" .. dir .. slug .. config.options.ext
-    -- Collision disambiguation: append -1, -2, etc. if file exists
     local counter = 1
     while vim.fn.filereadable(path) == 1 do
       slug = base_slug .. "-" .. counter
@@ -759,7 +680,6 @@ local function apply_mutations(diff, st)
       end
     end
 
-    -- Build frontmatter
     local fm = { "---" }
     if create.fields.title then
       table.insert(fm, "title: " .. create.fields.title)
@@ -776,7 +696,6 @@ local function apply_mutations(diff, st)
     table.insert(fm, "---")
     table.insert(fm, "")
 
-    -- Ensure directory exists
     local parent = vim.fn.fnamemodify(path, ":h")
     if vim.fn.isdirectory(parent) == 0 then
       vim.fn.mkdir(parent, "p")
@@ -813,7 +732,6 @@ local function on_save(bufnr)
     vim.log.levels.INFO
   )
 
-  -- Reload: re-scan and re-render
   vim.schedule(function()
     M.reload(bufnr)
     st.saving = false
@@ -838,7 +756,6 @@ function M.open(opts)
         return
       end
     else
-      -- Clean up stale state for invalid buffers
       buf_states[bufnr] = nil
     end
   end
@@ -859,8 +776,6 @@ function M.open(opts)
 
   -- Build records
   local records = build_records(notes_map, columns)
-  local slugs = {}
-  for _, rec in ipairs(records) do table.insert(slugs, rec.slug) end
 
   -- Create buffer
   local bufnr = vim.api.nvim_create_buf(true, false)
@@ -871,19 +786,17 @@ function M.open(opts)
   vim.bo[bufnr].swapfile = false
 
   -- Compute layout
-  local id_w = compute_id_width(slugs)
   local col_widths = calc_col_widths(columns, records)
 
   -- Build state
   local st = {
-    bufnr       = bufnr,
-    columns     = columns,
-    col_widths  = col_widths,
-    id_width    = id_w,
-    snapshot    = build_snapshot(records, columns),
-    note_paths  = {},
-    header_lines = HEADER_LINES,
-    header_text  = nil,
+    bufnr        = bufnr,
+    columns      = columns,
+    col_widths   = col_widths,
+    snapshot     = build_snapshot(records, columns),
+    note_paths   = {},
+    mark_to_slug = {},
+    slug_to_mark = {},
     filter_desc  = filter_desc,
     saving       = false,
   }
@@ -892,27 +805,24 @@ function M.open(opts)
   end
   buf_states[bufnr] = st
 
-  -- Render
-  local lines = build_lines(st, records)
-  st.header_text = { lines[1], lines[2] }
+  -- Render data lines (no header — header is virt_lines)
+  local lines = build_data_lines(st, records)
   set_buffer_lines(bufnr, lines)
-  vim.bo[bufnr].modifiable = true  -- allow editing after initial render
+  vim.bo[bufnr].modifiable = true
 
   -- Open in current window
   vim.api.nvim_set_current_buf(bufnr)
   local winid = vim.api.nvim_get_current_win()
   st.winid = winid
 
-  -- Window options for concealing
-  vim.wo[winid].conceallevel = 2
-  vim.wo[winid].concealcursor = "nvic"
+  -- Window options (no conceal needed — slug is in extmarks, not text)
   vim.wo[winid].signcolumn = "yes"
   vim.wo[winid].number = false
   vim.wo[winid].relativenumber = false
   vim.wo[winid].wrap = false
 
-  -- Apply highlights and conceals
-  apply_highlights(bufnr, st, #records)
+  -- Apply extmarks: header virt_lines + slug identity on each data line
+  apply_extmarks(bufnr, st, records)
 
   -- BufWriteCmd autocmd
   vim.api.nvim_create_autocmd("BufWriteCmd", {
@@ -920,19 +830,13 @@ function M.open(opts)
     callback = function() on_save(bufnr) end,
   })
 
-  -- Live diff signs on TextChanged
+  -- Live diff signs on TextChanged (no re-conceal needed — much cheaper)
   vim.api.nvim_create_autocmd({ "TextChanged", "InsertLeave" }, {
     buffer = bufnr,
     callback = function()
       local s = buf_states[bufnr]
       if s and not s.saving then
-        restore_header_if_needed(bufnr, s)
         update_diff_signs(bufnr, s)
-        -- Re-apply conceals (user may have added/edited lines)
-        local total = vim.api.nvim_buf_line_count(bufnr)
-        for row = s.header_lines, total - 1 do
-          apply_conceal_to_line(bufnr, row)
-        end
       end
     end,
   })
@@ -968,7 +872,7 @@ function M.reload(bufnr)
   local st = buf_states[bufnr]
   if not st then return end
 
-  -- Re-scan notes (using slug → path mapping from state for fresh reads)
+  -- Re-scan notes
   local records = {}
   local dead_slugs = {}
   for slug, path in pairs(st.note_paths) do
@@ -990,28 +894,22 @@ function M.reload(bufnr)
       end
       table.insert(records, { slug = slug, path = path, fields = fields })
     else
-      -- File no longer exists (trashed/deleted) — mark for removal
       table.insert(dead_slugs, slug)
     end
   end
-  -- Remove dead slugs from note_paths
   for _, slug in ipairs(dead_slugs) do
     st.note_paths[slug] = nil
   end
   table.sort(records, function(a, b) return a.slug < b.slug end)
 
-  -- Recompute (Bug 9: use only live slugs, not stale note_paths keys)
-  local live_slugs = {}
-  for _, rec in ipairs(records) do table.insert(live_slugs, rec.slug) end
+  -- Recompute
   st.col_widths = calc_col_widths(st.columns, records)
-  st.id_width = compute_id_width(live_slugs)
   st.snapshot = build_snapshot(records, st.columns)
 
-  local lines = build_lines(st, records)
-  st.header_text = { lines[1], lines[2] }
+  local lines = build_data_lines(st, records)
   set_buffer_lines(bufnr, lines)
   vim.bo[bufnr].modifiable = true
-  apply_highlights(bufnr, st, #records)
+  apply_extmarks(bufnr, st, records)
   vim.api.nvim_buf_clear_namespace(bufnr, NS_DIFF, 0, -1)
   vim.bo[bufnr].modified = false
 end
