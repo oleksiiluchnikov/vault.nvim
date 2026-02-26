@@ -67,7 +67,7 @@ function callbacks.toggle_link()
         url_start = s + 1
     end
 
-    vim.notify("No URL or Markdown link found under cursor", vim.log.levels.WARN)
+    vim.notify("[vault] No URL or Markdown link found under cursor", vim.log.levels.WARN)
 end
 
 --- @param args vim.api.keyset.create_user_command.command_args
@@ -216,7 +216,7 @@ function callbacks.today()
     local daily_dir = config.options.dirs.journal.daily
     local path = string.format("%s/%s%s", daily_dir, today, config.options.ext)
     if vim.fn.filereadable(path) == 0 then
-        vim.notify("Initializing today's journal note")
+        vim.notify("[vault] Initializing today's journal note", vim.log.levels.INFO)
     end
     vim.cmd("e " .. vim.fn.fnameescape(path))
 end
@@ -255,7 +255,7 @@ function callbacks.open_notes_status_picker(args)
         end
     end
     if next(statuses) == nil then
-        vim.notify("No matching status tags found", vim.log.levels.INFO)
+        vim.notify("[vault] No matching status tags found", vim.log.levels.INFO)
         return
     end
     local notes = require("vault.notes")():filter({ "tags", statuses, {}, "startswith", "all" })
@@ -323,7 +323,7 @@ function callbacks.yesterday()
     local daily_dir = config.options.dirs.journal.daily
     local path = string.format("%s/%s%s", daily_dir, yesterday, config.options.ext)
     if vim.fn.filereadable(path) == 0 then
-        vim.notify("Initializing yesterday's journal note")
+        vim.notify("[vault] Initializing yesterday's journal note", vim.log.levels.INFO)
     end
     vim.cmd("e " .. vim.fn.fnameescape(path))
 end
@@ -342,7 +342,7 @@ end
 function callbacks.rename(args)
     local note = require("vault.notes.note")(vim.fn.expand("%:p"))
     if next(args.fargs) == nil then
-        vim.notify("Not renamed")
+        vim.notify("[vault] Rename cancelled", vim.log.levels.WARN)
         --- TODO: Implement to open input popup
         return
     end
@@ -378,6 +378,7 @@ function callbacks.note_inlinks_picker()
     local note = require("vault.notes.note")(vim.fn.expand("%:p"))
     local inlinks = note.data.inlinks or {}
     if next(inlinks) == nil then
+        vim.notify("[vault] No inlinks", vim.log.levels.INFO)
         return
     end
     local notes = require("vault.notes")():filter(vim.tbl_keys(inlinks))
@@ -398,7 +399,7 @@ function callbacks.note_outlinks_picker()
     local note = require("vault.notes.note")(vim.fn.expand("%:p"))
     local outlinks = note.data.outlinks or {}
     if next(outlinks) == nil then
-        vim.notify("No outlinks")
+        vim.notify("[vault] No outlinks", vim.log.levels.INFO)
         return
     end
     local slugs = {}
@@ -437,7 +438,7 @@ end
 function callbacks.note_tags_picker(args)
     local note = require("vault.notes.note")(vim.fn.expand("%:p"))
     if next(note.data.tags) == nil then
-        vim.notify("No tags")
+        vim.notify("[vault] No tags", vim.log.levels.INFO)
         return
     end
 
@@ -480,7 +481,7 @@ function callbacks.note_from_selected_text(args)
 
     -- Validate marks
     if start_pos[1] == 0 or end_pos[1] == 0 then
-        vim.notify("No selection found", vim.log.levels.WARN)
+        vim.notify("[vault] No selection found", vim.log.levels.WARN)
         return
     end
 
@@ -493,7 +494,7 @@ function callbacks.note_from_selected_text(args)
     if col2 == 2147483647 then
         local line_content = vim.api.nvim_buf_get_lines(0, row2, row2 + 1, false)[1]
         if not line_content then
-            vim.notify("Invalid selection range", vim.log.levels.WARN)
+            vim.notify("[vault] Invalid selection range", vim.log.levels.WARN)
             return
         end
         col2 = #line_content
@@ -504,14 +505,14 @@ function callbacks.note_from_selected_text(args)
 
     local lines = vim.api.nvim_buf_get_text(0, row1, col1, row2, col2, {})
     if next(lines) == nil then
-        vim.notify("Invalid text")
+        vim.notify("[vault] Invalid text", vim.log.levels.WARN)
         return
     end
 
     --- @type string
     local new_note_slug = vim.fn.input("New note slug: ")
     if not new_note_slug or new_note_slug == "" then
-        vim.notify("Invalid slug")
+        vim.notify("[vault] Invalid slug", vim.log.levels.WARN)
         return
     end
 
@@ -523,7 +524,7 @@ function callbacks.note_from_selected_text(args)
     --- @type vault.path
     local new_note_path = require("vault.utils").slug_to_path(new_note_slug)
     if vim.fn.filereadable(new_note_path) == 1 then
-        vim.notify("File already exists: " .. new_note_path)
+        vim.notify("[vault] File already exists: " .. new_note_path, vim.log.levels.WARN)
         return
     end
 
@@ -602,7 +603,7 @@ function callbacks.note(args)
         -- apply the method to the note that is "%"
         local note = require("vault.notes.note")(vim.fn.expand("%:p"))
         if note == nil then
-            vim.notify("No note found")
+            vim.notify("[vault] No note found", vim.log.levels.WARN)
             return
         end
         table.insert(fargs, 1, note)
@@ -933,14 +934,13 @@ local M = {
                 end
                 local relpath = require("vault.utils").path_to_slug(path)
                 input = relpath
-                vim.notify(input)
             end
 
             local note_slug = input
             local notes = require("vault.notes")()
             local note = notes:filter("slug", note_slug, "exact"):list()[1]
             if not note then
-                vim.notify("Note not found " .. note_slug)
+                vim.notify("[vault] Note not found: " .. note_slug, vim.log.levels.WARN)
                 return
             end
             -- Re-fetch notes since filter mutates in-place

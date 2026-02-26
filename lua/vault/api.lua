@@ -83,7 +83,8 @@ function M.move_note(from_note_slug, to_note_slug)
     end
     local note = require("vault.notes")().map[from_note_slug]
     if not note then
-        vim.notify("Note not found")
+        vim.notify("[vault] Note not found: " .. tostring(from_note_slug), vim.log.levels.WARN)
+        return
     end
     require("vault.utils").slug_to_path(to_note_slug)
     note:move(to_note_slug)
