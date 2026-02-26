@@ -20,7 +20,8 @@ function TagDocumentation:init(name)
         error("Tag documentation name is required")
     end
     self.name = name
-    local doc_path = config.options.dirs.docs .. "/" .. name .. config.options.ext
+    local docs_dir = config.dir("docs") or (config.options.root .. "/_docs")
+    local doc_path = docs_dir .. "/" .. name .. config.options.ext
     self.description = ""
     self.path = doc_path
     self.exists = vim.fn.filereadable(doc_path) == 1
