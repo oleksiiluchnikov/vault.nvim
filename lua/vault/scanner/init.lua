@@ -212,6 +212,47 @@ function Scanner.base_files(opts)
 end
 
 
+--- Scan all vault notes for dash-prefixed lines (pure Lua — no Rust backend).
+--- Returns a map keyed by line content, each value is a Line object.
+--- @param opts? { ignore: boolean|string[] }
+--- @return table<string, vault.Line>
+function Scanner.lines(opts)
+    local Line = require("vault.lines.line")
+    local root, ignores = get_scan_args(opts)
+    local paths = Scanner.paths(opts)
+
+    local lines_map = {} --- @type table<string, vault.Line>
+
+    for slug, path in pairs(paths) do
+        local ok, file_lines = pcall(vim.fn.readfile, path)
+        if ok then
+            for lnum, raw in ipairs(file_lines) do
+                -- Match lines starting with "- " (list items)
+                if raw:match("^%s*%- ") then
+                    local content = vim.trim(raw)
+                    if content ~= "" then
+                        local existing = lines_map[content]
+                        if existing then
+                            -- Add this source
+                            existing.data.sources[slug] = existing.data.sources[slug] or {}
+                            existing.data.sources[slug][lnum] = true
+                            existing.data.count = existing.data.count + 1
+                            existing.data.occurences = existing.data.occurences + 1
+                        else
+                            lines_map[content] = Line({
+                                content = content,
+                                sources = { [slug] = { [lnum] = true } },
+                            })
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return lines_map
+end
+
 function Scanner.refresh()
     -- clear cache and state
     state.clear_all()
