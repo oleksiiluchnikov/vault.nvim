@@ -539,6 +539,94 @@ local function build_subcommands()
             end,
         },
 
+        -- :Vault watcher [start|stop|status] — file watcher control
+        watcher = {
+            run = function(args)
+                local state = require("vault.core.state")
+                local w = state.get_global_key("watcher")
+                local sub = args[1] or "status"
+                if sub == "status" then
+                    if w and w.is_watching then
+                        vim.notify("[vault] Watcher is active", vim.log.levels.INFO)
+                    else
+                        vim.notify("[vault] Watcher is inactive", vim.log.levels.INFO)
+                    end
+                elseif sub == "start" then
+                    local Watcher = require("vault.watcher")
+                    w = w or Watcher()
+                    w:start()
+                    state.set_global_key("watcher", w)
+                    vim.notify("[vault] Watcher started", vim.log.levels.INFO)
+                elseif sub == "stop" then
+                    if w and w.is_watching then
+                        w:stop()
+                        vim.notify("[vault] Watcher stopped", vim.log.levels.INFO)
+                    else
+                        vim.notify("[vault] Watcher is not running", vim.log.levels.WARN)
+                    end
+                else
+                    vim.notify("[vault] Usage: :Vault watcher [start|stop|status]", vim.log.levels.WARN)
+                end
+            end,
+            complete = function(prefix)
+                local subs = { "start", "stop", "status" }
+                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+            end,
+        },
+
+        -- :Vault trash — browse and manage trashed notes
+        trash = {
+            run = function()
+                local config = require("vault.config")
+                local trash_dir = config.options.root .. "/.trash"
+                if vim.fn.isdirectory(trash_dir) == 0 then
+                    vim.notify("[vault] Trash is empty (.trash/ does not exist)", vim.log.levels.INFO)
+                    return
+                end
+                local files = vim.fn.globpath(trash_dir, "*.md", false, true)
+                if #files == 0 then
+                    vim.notify("[vault] Trash is empty", vim.log.levels.INFO)
+                    return
+                end
+                -- Use vim.ui.select for simplicity
+                local items = {}
+                for _, f in ipairs(files) do
+                    table.insert(items, vim.fn.fnamemodify(f, ":t"))
+                end
+                vim.ui.select(items, {
+                    prompt = "Trashed notes (" .. #items .. ") — select to restore or delete:",
+                }, function(choice)
+                    if not choice then return end
+                    local full_path = trash_dir .. "/" .. choice
+                    local action = vim.fn.confirm(
+                        "Note: " .. choice,
+                        "&Restore\n&Permanent delete\n&Cancel", 3
+                    )
+                    if action == 1 then
+                        -- Restore to vault root
+                        local restore_path = config.options.root .. "/" .. choice
+                        if vim.fn.filereadable(restore_path) == 1 then
+                            vim.notify("[vault] A note with that name already exists in the vault", vim.log.levels.ERROR)
+                            return
+                        end
+                        local ok, err = (vim.uv or vim.loop).fs_rename(full_path, restore_path)
+                        if ok then
+                            vim.notify("[vault] Restored: " .. choice, vim.log.levels.INFO)
+                        else
+                            vim.notify("[vault] Restore failed: " .. tostring(err), vim.log.levels.ERROR)
+                        end
+                    elseif action == 2 then
+                        local ok, err = os.remove(full_path)
+                        if ok then
+                            vim.notify("[vault] Permanently deleted: " .. choice, vim.log.levels.INFO)
+                        else
+                            vim.notify("[vault] Delete failed: " .. tostring(err), vim.log.levels.ERROR)
+                        end
+                    end
+                end)
+            end,
+        },
+
         -- :Vault fleeting — fleeting note popup
         fleeting = {
             run = function(args)
