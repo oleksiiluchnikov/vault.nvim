@@ -937,6 +937,19 @@ function M.open(opts)
     end,
   })
 
+  -- Allow :q without "no write" error when there are no real changes
+  vim.api.nvim_create_autocmd("QuitPre", {
+    buffer = bufnr,
+    callback = function()
+      local s = buf_states[bufnr]
+      if not s then return end
+      local d = diff_buffer(bufnr, s)
+      if #d.updates == 0 and #d.deletes == 0 and #d.creates == 0 then
+        vim.bo[bufnr].modified = false
+      end
+    end,
+  })
+
   -- Cleanup on buffer delete
   vim.api.nvim_create_autocmd("BufDelete", {
     buffer = bufnr,
