@@ -438,16 +438,18 @@ end
 --- assert(links ~= nil)
 --- @return vault.Notes.Group
 function Notes:linked()
-    for slug, note in pairs(self.map) do
+    local linked = self:to_group()
+
+    for slug, note in pairs(linked.map) do
         local outlinks = note.data.outlinks
         local inlinks = note.data.inlinks
         if next(outlinks) == nil and next(inlinks) == nil then
-            self.map[slug] = nil
+            linked.map[slug] = nil
         end
     end
 
-    state.set_global_key("notes.linked", self)
-    return self:to_group()
+    state.set_global_key("notes.linked", linked)
+    return linked
 end
 
 --- Get internal notes. (Notes that have inlinks AND outlinks)
@@ -464,14 +466,16 @@ end
 --- ```
 --- @return vault.Notes.Group
 function Notes:internals()
-    for slug, note in pairs(self.map) do
+    local internals = self:to_group()
+
+    for slug, note in pairs(internals.map) do
         if next(note.data.outlinks) == nil or next(note.data.inlinks) == nil then
-            self.map[slug] = nil
+            internals.map[slug] = nil
         end
     end
 
-    state.set_global_key("notes.internals", self)
-    return self:to_group()
+    state.set_global_key("notes.internals", internals)
+    return internals
 end
 
 --- Get leaves notes. (Notes that don't have outgoing links, but have incoming links)
@@ -569,25 +573,26 @@ end
 function Notes:with_outlinks_resolved_only()
     -- Exclude notes that have unresolved links
     -- Exclude notes that have no links
+    local resolved = self:to_group()
 
-    for slug, note in pairs(self.map) do
+    for slug, note in pairs(resolved.map) do
         -- Should have outlinks
         local outlinks = note.data.outlinks
         if not outlinks or next(outlinks) == nil then
-            self.map[slug] = nil
+            resolved.map[slug] = nil
             goto continue
         end
         -- Should have only resolved links
         for _, wikilink in pairs(outlinks) do
             if not wikilink.data.target or wikilink.data.target == "" then
-                self.map[slug] = nil
+                resolved.map[slug] = nil
                 goto continue
             end
         end
         ::continue::
     end
 
-    return self:to_group()
+    return resolved
 end
 
 --- Get notes with unresolved links.
@@ -603,27 +608,29 @@ end
 --- ```
 --- @return vault.Notes.Group
 function Notes:with_outlinks_unresolved()
-    -- Exclude notes that have no outlinks
-    --- @type vault.Notes.map
-    local notes_map_with_unresolved_links = {}
-    for slug, note in pairs(self.map) do
+    local unresolved = self:to_group()
+
+    for slug, note in pairs(unresolved.map) do
         local outlinks = note.data.outlinks
         if not outlinks or next(outlinks) == nil then
-            self.map[slug] = nil
+            unresolved.map[slug] = nil
             goto continue
         end
-        -- Exclude notes that have only resolved links
+        -- Keep only notes that have at least one unresolved link
+        local has_unresolved = false
         for _, wikilink in pairs(outlinks) do
             if not wikilink.data.target then
-                notes_map_with_unresolved_links[slug] = note
+                has_unresolved = true
+                break
             end
+        end
+        if not has_unresolved then
+            unresolved.map[slug] = nil
         end
         ::continue::
     end
 
-    self.map = notes_map_with_unresolved_links
-
-    return self:to_group()
+    return unresolved
 end
 
 --- Get list of notes where title not matches stem
