@@ -210,16 +210,43 @@ M.wikilinks = previewers.new_buffer_previewer({
                 table.insert(lines, "_No source references found._")
             end
 
-            -- Suggestions (Jaro-Winkler candidates from Rust scanner)
+            -- Suggestions grouped by strategy from Rust scanner
             local suggestions = data and data.suggestions
-            if type(suggestions) == "table" and #suggestions > 0 then
-                table.insert(lines, "")
-                table.insert(lines, "## Suggested matches")
-                for _, candidate in ipairs(suggestions) do
-                    local slug = candidate.slug or candidate[1] or "?"
-                    local score = candidate.score or candidate[2] or 0
-                    local pct = math.floor(score * 100 + 0.5)
-                    table.insert(lines, "- [[" .. slug .. "]] (" .. pct .. "%)")
+            if type(suggestions) == "table" and next(suggestions) then
+                -- Strategy display names (ordered)
+                local strategy_order = { "jaro_winkler", "levenshtein", "contains", "prefix" }
+                local strategy_labels = {
+                    jaro_winkler = "Fuzzy (Jaro-Winkler)",
+                    levenshtein = "Edit distance (Levenshtein)",
+                    contains = "Substring match",
+                    prefix = "Prefix match",
+                }
+                -- Collect all unique slugs already shown to avoid duplicates across strategies
+                local seen = {}
+                for _, strategy in ipairs(strategy_order) do
+                    local candidates = suggestions[strategy]
+                    if type(candidates) == "table" and #candidates > 0 then
+                        -- Filter out already-shown slugs
+                        local unique = {}
+                        for _, c in ipairs(candidates) do
+                            local s = c.slug or c[1] or "?"
+                            if not seen[s] then
+                                seen[s] = true
+                                unique[#unique + 1] = c
+                            end
+                        end
+                        if #unique > 0 then
+                            table.insert(lines, "")
+                            local label = strategy_labels[strategy] or strategy
+                            table.insert(lines, "### " .. label)
+                            for _, candidate in ipairs(unique) do
+                                local slug = candidate.slug or candidate[1] or "?"
+                                local score = candidate.score or candidate[2] or 0
+                                local pct = math.floor(score * 100 + 0.5)
+                                table.insert(lines, "- [[" .. slug .. "]] (" .. pct .. "%)")
+                            end
+                        end
+                    end
                 end
             end
 
