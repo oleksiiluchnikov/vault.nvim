@@ -479,8 +479,8 @@ return function(opts)
             end)
         end
 
-        map("i", "gr", resolve_action)
-        map("n", "gr", resolve_action)
+        map("i", "<c-l>", resolve_action)
+        map("n", "<c-l>", resolve_action)
 
         -- Cleanup gradient highlights on close
         local function cleanup()
@@ -500,7 +500,7 @@ return function(opts)
     end
 
     local picker_opts = {
-        prompt_title = "Wikilinks  gr=resolve",
+        prompt_title = "Wikilinks  <C-l>=resolve",
         finder = finder,
         sorter = sorters.get_generic_fuzzy_sorter(),
         previewer = vault_previewers.wikilinks,
