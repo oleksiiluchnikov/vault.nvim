@@ -120,7 +120,8 @@ function callbacks.create_new_note(args)
     local new_slug = table.concat(fargs, " ")
     local notes = require("vault.notes")():filter("slug", new_slug, "exact", false)
     if next(notes.map) then
-        notes.map[new_slug]:edit()
+        local _, existing = next(notes.map)
+        existing:edit()
         return
     end
     local path = require("vault.utils").slug_to_path(new_slug)
@@ -275,12 +276,11 @@ end
 --- @return nil
 function callbacks.open_fleeting_note_popup(args)
     local FleetingNote = require("vault.popups.fleeting_note")
-    if next(args.fargs) == nil then
-        FleetingNote()
-        return
-    elseif #args.fargs == 1 then
+    local content = table.concat(args.fargs, " ")
+    if content == "" then
+        content = nil
     end
-    -- FleetingNote(args.fargs, {})
+    FleetingNote(content)
 end
 
 --- vault.Orphans
@@ -606,14 +606,21 @@ function callbacks.note(args)
         safe_find(pickers.notes(), "No notes found")
         return
     elseif #fargs == 1 then
-        --TODO: Implement choose a note from a picker
-        -- apply the method to the note that is "%"
+        -- Apply method to the current buffer's note
         local note = require("vault.notes.note")(vim.fn.expand("%:p"))
         if note == nil then
-            vim.notify("[vault] No note found", vim.log.levels.WARN)
+            vim.notify("[vault] No note found in current buffer", vim.log.levels.WARN)
             return
         end
-        table.insert(fargs, 1, note)
+        local method = fargs[1]
+        if type(note[method]) ~= "function" then
+            vim.notify("[vault] Unknown note method: " .. method, vim.log.levels.WARN)
+            return
+        end
+        local output = note[method](note)
+        if output then
+            vim.notify(tostring(output), vim.log.levels.INFO)
+        end
         return
     end
     local method = fargs[1]
@@ -717,9 +724,8 @@ function callbacks.notes(args)
     if next(args.fargs) == nil then
         safe_find(pickers.notes(), "No notes found")
         return
-    elseif #args.fargs == 1 then
-        construct_notes_picker_args(args.fargs)
     end
+    construct_notes_picker_args(args.fargs)
 end
 
 function callbacks.tasks()
@@ -969,7 +975,7 @@ local M = {
         --- If oargs then open picker
         --- if arg, and it is a valid relpath, then move to that location
         callback = function()
-            vim.notify("[vault] :VaultMove is deprecated, use :VaultRename instead", vim.log.levels.WARN)
+            vim.notify("[vault] :VaultMove is deprecated, use :VaultRename or :Vault note rename instead", vim.log.levels.WARN)
 
             -- local input = args.fargs[1]
             -- local current_path = vim.fn.expand("%:p")

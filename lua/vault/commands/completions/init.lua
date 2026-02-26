@@ -54,7 +54,6 @@ function M.tags(_, line, _)
     -- -- TODO: Add configuration to set completion strategy for tags, use fuzzy for now
     -- -- the name of the option could like opts.completion.tags.strategy
     local tags = vim.tbl_keys(require("vault.tags")():filter({
-        name = "name",
         search_term = "tags",
         include = { fargs[#fargs] },
         exclude = {},
