@@ -134,7 +134,7 @@ return function(opts)
         -- Calculate gradient for description
         local desc_hl = "TelescopeResultsNormal"
         if gradient_available then
-            local desc_length = #task.data.description
+            local desc_length = task.data.description and #task.data.description or 0
             local gradient_idx = math.max(
                 1,
                 math.min(math.floor(desc_length / 16), DISPLAY_CONFIG.COLORS.GRADIENT.STEPS)
@@ -160,7 +160,7 @@ return function(opts)
 
         return displayer({
             { status_info.symbol, status_info.hl },
-            { task.data.description, desc_hl },
+            { task.data.description or "", desc_hl },
             { right_align(task.data.id, DISPLAY_CONFIG.WIDTHS.ID), "Comment" },
             { right_align(task.data.due, DISPLAY_CONFIG.WIDTHS.DATE), "Repeat" },
             { right_align(task.data.created, DISPLAY_CONFIG.WIDTHS.DATE), "Special" },
