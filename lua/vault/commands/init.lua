@@ -323,6 +323,24 @@ local function build_subcommands()
             run = function()
                 safe_find(pickers.wikilinks(), "No wikilinks found")
             end,
+            complete = function(prefix)
+                local subs = { "unresolved", "resolved" }
+                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+            end,
+            unresolved = {
+                run = function()
+                    local wikilinks = require("vault.wikilinks")(require("vault.notes")())
+                    local unresolved = wikilinks:unresolved()
+                    safe_find(pickers.wikilinks({ wikilinks = unresolved }), "No unresolved wikilinks found")
+                end,
+            },
+            resolved = {
+                run = function()
+                    local wikilinks = require("vault.wikilinks")(require("vault.notes")())
+                    local resolved = wikilinks:resolved()
+                    safe_find(pickers.wikilinks({ wikilinks = resolved }), "No resolved wikilinks found")
+                end,
+            },
         },
 
         -- :Vault tasks — tasks picker

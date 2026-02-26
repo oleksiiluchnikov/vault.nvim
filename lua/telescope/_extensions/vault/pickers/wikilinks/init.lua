@@ -17,7 +17,7 @@ return function(opts)
     local sorters = require("telescope.sorters")
     local vault_previewers = require("telescope._extensions.vault.previewers")
     local VaultWikilinks = require("vault.wikilinks")
-    local wikilinks = VaultWikilinks()
+    local wikilinks = opts.wikilinks or VaultWikilinks()
     local vault_state = require("vault.core.state")
     local utils = require("vault.utils")
 
