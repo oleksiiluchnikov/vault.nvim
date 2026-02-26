@@ -212,8 +212,11 @@ function callbacks.today()
     if type(today) ~= "string" then
         return
     end
-    -- local path = config.options.dirs.journal.daily .. today .. ".md"
-    local daily_dir = config.options.dirs.journal.daily
+    local daily_dir = config.dir("journal.daily")
+    if not daily_dir then
+        vim.notify("[vault] Journal daily directory not configured (dirs.journal.daily)", vim.log.levels.ERROR)
+        return
+    end
     local path = string.format("%s/%s%s", daily_dir, today, config.options.ext)
     if vim.fn.filereadable(path) == 0 then
         vim.notify("[vault] Initializing today's journal note", vim.log.levels.INFO)
@@ -320,7 +323,11 @@ end
 function callbacks.yesterday()
     local config = require("vault.config")
     local yesterday = os.date("%Y-%m-%d", os.time() - 60 * 60 * 24)
-    local daily_dir = config.options.dirs.journal.daily
+    local daily_dir = config.dir("journal.daily")
+    if not daily_dir then
+        vim.notify("[vault] Journal daily directory not configured (dirs.journal.daily)", vim.log.levels.ERROR)
+        return
+    end
     local path = string.format("%s/%s%s", daily_dir, yesterday, config.options.ext)
     if vim.fn.filereadable(path) == 0 then
         vim.notify("[vault] Initializing yesterday's journal note", vim.log.levels.INFO)

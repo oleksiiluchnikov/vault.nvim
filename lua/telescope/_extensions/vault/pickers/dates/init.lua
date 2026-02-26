@@ -26,7 +26,11 @@ return function(opts)
     opts.end_date = opts.end_date or tostring(os.date("%Y-%m-%d"))
 
     local date_values = Dates.from_to(opts.start_date, opts.end_date)
-    local daily_dir = config.options.dirs.journal.daily
+    local daily_dir = config.dir("journal.daily")
+    if not daily_dir then
+        vim.notify("[vault] Journal daily directory not configured", vim.log.levels.WARN)
+        return
+    end
 
     local daily_notes = {}
     for _, date in ipairs(date_values) do

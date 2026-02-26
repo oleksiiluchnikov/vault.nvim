@@ -129,7 +129,11 @@ local function register_date_source()
             local dates = Dates.get(typed_string)
             --- @type lsp.CompletionItem[]
             local items = {}
-            local journal_dir = config.options.dirs.journal.daily
+            local journal_dir = config.dir("journal.daily")
+            if not journal_dir then
+                callback({})
+                return
+            end
             for _, date in ipairs(dates) do
                 local weekday = Dates.get_weekday(date)
                 local path = journal_dir .. "/" .. date .. " " .. weekday .. ".md"

@@ -345,10 +345,36 @@ local function expand_dirs(root, dirs)
     return dirs
 end
 
+--- Safely access a nested directory config value.
+--- @param key string Dot-separated key path (e.g. "journal.daily", "docs", "inbox")
+--- @return string|nil The directory path, or nil if not configured
+function Config.dir(key)
+    local dirs = Config.options.dirs
+    if not dirs then
+        return nil
+    end
+    for part in key:gmatch("[^%.]+") do
+        if type(dirs) ~= "table" then
+            return nil
+        end
+        dirs = dirs[part]
+        if not dirs then
+            return nil
+        end
+    end
+    if type(dirs) ~= "string" then
+        return nil
+    end
+    return dirs
+end
+
 --- Check each dir for existence and replace with root if not found.
 function Config.check_dirs()
     local root = Config.options.root
     local dirs = Config.options.dirs
+    if not dirs then
+        return
+    end
     for key, dir in pairs(dirs) do
         if type(dir) == "string" then
             if vim.fn.isdirectory(dir) == 0 then
