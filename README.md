@@ -9,7 +9,7 @@ serve as a reference and potentially become more customizable in the future.
 
 ## ✨ Features
 
-- **Fetch:**
+- **Scann:**
   - notes in vault.
   - notes associated with a tag.
   - tags in vault.
@@ -29,6 +29,7 @@ serve as a reference and potentially become more customizable in the future.
 
 I developed this plugin with the goal of harnessing Neovim's power to manage my [Obsidian](https://obsidian.md) vault, tailored to my distinctive note organization style.
 While I also appreciate and use the fantastic [obsidian.nvim](https://github.com/epwalsh/obsidian.nvim) plugin, I embarked on creating my own solution to provide the flexibility to adapt and customize it according to my unique requirements and preferences.
+s
 
 ## 📦 Installation
 
@@ -38,16 +39,16 @@ Install the plugin with your preferred package manager:
 
 ```lua
 return {
-  'oleksiiluchnikov/vault.nvim',
+  "oleksiiluchnikov/vault.nvim",
   dependencies = {
-    'nvim-lua/plenary.nvim',
-    'nvim-telescope/telescope.nvim',
-    'hrsh7th/nvim-cmp',
-    'oleksiiluchnikov/gradient.nvim',
-    'oleksiiluchnikov/dates.nvim',
+    "nvim-lua/plenary.nvim",
+    "nvim-telescope/telescope.nvim",
+    "hrsh7th/nvim-cmp",
+    "oleksiiluchnikov/gradient.nvim",
+    "oleksiiluchnikov/dates.nvim",
   },
   config = function()
-    require('vault').setup()
+    require("vault").setup()
   end,
 }
 ```
@@ -105,61 +106,62 @@ The plugin provides the following commands for seamless navigation and searching
 ### API
 
 ### Vault module
+
 ```lua
 --- Setup vault.
----@param opts table? -- An optional table of options.
-require('vault').setup(opts)
+--- @param opts? table -- An optional table of options.
+require("vault").setup(opts)
 
----Fetch an array of all notes in vault.
----@type table[] -- An array of note objects.
-require('vault').notes()
+--- Scann an list of all notes in vault.
+--- @type table[] -- An list of note objects.
+require("vault").notes()
 
----Fetch an array of notes filtered by tags.
----@param include table[]? -- An array of tag values to include.
----@param exclude table[]? -- An array of tag values to exclude.
----@param match_opt string? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
----@param mode string? -- A mode to filter notes by. E.g. "all", "any", "none". If not provided, "all" will be used.
----@type table[] -- An array of note objects.
-require('vault').notes_filter_by_tags(include, exclude, match_opts, mode)
+--- Scann an list of notes filtered by tags.
+--- @param include? table[] -- An list of tag names to include.
+--- @param exclude? table[] -- An list of tag names to exclude.
+--- @param match_opt? MatchOptsKeys -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
+--- @param mode? string -- A mode to filter notes by. E.g. "all", "any", "none". If not provided, "all" will be used.
+--- @type table[] -- An list of note objects.
+require("vault").notes_filter_by_tags(include, exclude, match_opts, mode)
 
---- Fetch an array of all tags in vault.
----@param include table[]? -- An optional array of tag values to include.
----@param exclude table[]? -- An optional array of tag values to exclude.
----@param match_opt string? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
----@type table[] -- An array of tag objects.
-require('vault').tags(include, exclude, match_opt)
+--- Scann an list of all tags in vault.
+--- @param include? table[] -- An optional list of tag names to include.
+--- @param exclude? table[] -- An optional list of tag names to exclude.
+--- @param match_opt? MatchOptsKeys -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
+--- @type table[] -- An list of tag objects.
+require("vault").tags(include, exclude, match_opt)
 ```
 
 ### Telescope pickers
 
 ```lua
----Open Telescope note search picker.
----@param notes table[]? -- An optional array of Note objects to search. If not provided, all notes in vault will be searched.
-require('vault.pickers').notes(notes)
+--- Open Telescope note search picker.
+--- @param notes? table[] -- An optional list of Note objects to search. If not provided, all notes in vault will be searched.
+require("telescope._extensions.vault.pickers").notes(notes):find()
 
----Open Telescope tag search picker.
----@param include table[]? -- An optional array of tag values to include.
----@param exclude table[]? -- An optional array of tag values to exclude.
----@param match_opt string? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
-require('vault.pickers').tags(include, exclude, match_opt)
+--- Open Telescope tag search picker.
+--- @param include? table[] -- An optional list of tag names to include.
+--- @param exclude? table[] -- An optional list of tag names to exclude.
+--- @param match_opt? MatchOptsKeys -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
+require("telescope._extensions.vault.pickers").tags(include, exclude, match_opt):find()
 
----Open Telescope notes picker for a specific tags.
----@param include table[]? -- An array of tag values to include.
----@param exclude table[]? -- An array of tag values to exclude.
----@param match_opt string? -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
----@param mode string? -- A mode to filter notes by. E.g. "all", "any", "none". If not provided, "all" will be used.
-require('vault.pickers').notes_filter_by_tags(include, exclude, match_opts, mode)
+--- Open Telescope notes picker for a specific tags.
+--- @param include? table[] -- An list of tag names to include.
+--- @param exclude? table[] -- An list of tag names to exclude.
+--- @param match_opt? MatchOptsKeys -- An optional table of match options. E.g "exact", "contains", "startwith", "endwith", "regex". If not provided, "exact" will be used.
+--- @param mode? string -- A mode to filter notes by. E.g. "all", "any", "none". If not provided, "all" will be used.
+require("telescope._extensions.vault.pickers").notes_filter_by_tags(include, exclude, match_opts, mode):find()
 
----Open Telescope picker to browse nested tags from a root tag.
-require('vault.pickers').root_tags()
+--- Open Telescope picker to browse nested tags from a root tag.
+require("telescope._extensions.vault.pickers").root_tags()
 
----Open Telescope picker for dates.
----@param start_date string -- Start date in ISO 8601 format. E.g. "2023-01-01". If not provided, the week ago date will be used.
----@param end_date string -- End date in ISO 8601 format. E.g. "2023-01-31". If not provided, the current date will be used.
-require('vault.pickers').dates(start_date, end_date)
+--- Open Telescope picker for dates.
+--- @param start_date string -- Start date in ISO 8601 format. E.g. "2023-01-01". If not provided, the week ago date will be used.
+--- @param end_date string -- End date in ISO 8601 format. E.g. "2023-01-31". If not provided, the current date will be used.
+require("telescope._extensions.vault.pickers").dates(start_date, end_date):find()
 
----Open Telescope picker for notes in the inbox directory.
-require('vault.pickers').inbox()
+--- Open Telescope picker for notes in the inbox directory.
+require("telescope._extensions.vault.pickers").inbox()
 ```
 
 ## 🤝 Similar Plugins
