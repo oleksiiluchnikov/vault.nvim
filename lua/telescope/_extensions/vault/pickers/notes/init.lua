@@ -286,10 +286,42 @@ return function(opts)
         return true
     end
 
+    -- Custom sorter: wraps fzy but boosts exact stem/title matches to the top.
+    local fzy = sorters.get_fzy_sorter()
+    local custom_sorter = sorters.new({
+        scoring_function = function(self, prompt, line, entry)
+            if prompt == "" or prompt == nil then
+                return 1
+            end
+            -- Get fzy base score (lower = better, 0 = no match)
+            local fzy_score = fzy.scoring_function(fzy, prompt, line, entry)
+            if fzy_score <= 0 then
+                return -1 -- filtered out
+            end
+
+            -- Boost: if the stem contains the query as an exact substring, heavily boost
+            local note = entry.value
+            if note and note.data then
+                local stem = vim.fn.fnamemodify(note.data.path or "", ":t:r"):lower()
+                local query = prompt:lower()
+                if stem == query then
+                    -- Exact match: best possible score
+                    return 0.001
+                elseif stem:find(query, 1, true) then
+                    -- Substring of stem: very strong boost
+                    return math.min(fzy_score, 0.01)
+                end
+            end
+
+            return fzy_score
+        end,
+        highlighter = fzy.highlighter,
+    })
+
     local picker_opts = {
         prompt_title = opts.prompt_title,
         finder = finder,
-        sorter = sorters.get_fzy_sorter(),
+        sorter = custom_sorter,
         previewer = vault_previewers.notes or nil,
         attach_mappings = attach_mappings,
         on_input_filter_cb = on_input_filter_cb,
