@@ -137,9 +137,12 @@ return function(opts)
     --- @param note vault.Note
     --- @return vault.TelescopeEntry
     local entry_maker = function(note)
+        -- Put stem (title) first so fzy ranks exact title matches highest.
+        -- Slug is second for path-based filtering. Content last for full-text.
+        local stem = vim.fn.fnamemodify(note.data.path, ":t:r")
         return {
             value = note,
-            ordinal = note.data.path .. " " .. (note.data.content or ""),
+            ordinal = stem .. " " .. (note.data.slug or "") .. " " .. (note.data.content or ""),
             display = make_display,
             filename = note.data.path,
         }
