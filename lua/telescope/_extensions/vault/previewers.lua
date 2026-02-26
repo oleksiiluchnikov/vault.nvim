@@ -215,14 +215,27 @@ M.wikilinks = previewers.new_buffer_previewer({
                 table.insert(lines, "")
                 table.insert(lines, "## Aliases")
                 for alias, _ in pairs(data.aliases) do
-                    table.insert(lines, "- " .. alias)
+                    table.insert(lines, "- " .. tostring(alias))
                 end
+            end
+        end
+
+        -- Flatten any lines containing embedded newlines — nvim_buf_set_lines
+        -- requires each element to be a single line (no \n characters).
+        local flat = {}
+        for _, line in ipairs(lines) do
+            if type(line) == "string" and line:find("\n") then
+                for _, sub in ipairs(vim.split(line, "\n", { plain = true })) do
+                    flat[#flat + 1] = sub
+                end
+            else
+                flat[#flat + 1] = type(line) == "string" and line or tostring(line)
             end
         end
 
         --- @type integer
         local bufnr = self.state.bufnr
-        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, flat)
         vim.api.nvim_set_option_value("filetype", "markdown", {
             buf = bufnr,
             scope = "local",
