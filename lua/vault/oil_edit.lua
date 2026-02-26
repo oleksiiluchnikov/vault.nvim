@@ -922,12 +922,25 @@ end
 --- Catches catastrophic extmark-loss scenarios that slip past integrity checks.
 local DELETE_HARD_CAP = 100
 
+--- Hard limit: refuse to create more than this many notes in a single save.
+--- Catches phantom extmark-loss scenarios where existing lines lose identity.
+local CREATE_HARD_CAP = 100
+
 --- Apply safe mutations (updates + creates only) and reload.
 ---@param bufnr integer
 ---@param st vault.OilEditState
 ---@param diff vault.OilEditDiff
 local function apply_safe_and_reload(bufnr, st, diff)
-  local safe_diff = { updates = diff.updates, deletes = {}, creates = diff.creates }
+  -- Also cap creates in the "safe" path — they can be phantom too
+  local safe_creates = diff.creates
+  if #safe_creates > CREATE_HARD_CAP then
+    vim.notify(
+      string.format("[vault] SAFETY: Also refusing %d creates (cap %d)", #safe_creates, CREATE_HARD_CAP),
+      vim.log.levels.ERROR
+    )
+    safe_creates = {}
+  end
+  local safe_diff = { updates = diff.updates, deletes = {}, creates = safe_creates }
   local n_u, _, n_c = apply_mutations(safe_diff, st)
   local msg = string.format("[vault] Applied: %d updated, %d created", n_u, n_c)
   if #diff.deletes > 0 then
@@ -966,6 +979,47 @@ local function on_save(bufnr)
     st.saving = false
     vim.notify("[vault] No changes", vim.log.levels.INFO)
     return
+  end
+
+  -- ── Hard cap on creates ──────────────────────────────────────────────────
+  if #diff.creates > CREATE_HARD_CAP then
+    vim.notify(
+      string.format(
+        "[vault] SAFETY: Refusing to create %d notes (cap is %d). "
+          .. "This likely indicates extmark identity loss (lines without extmarks "
+          .. "are treated as new notes). Applying updates only. "
+          .. "Please close and reopen the process buffer.",
+        #diff.creates, CREATE_HARD_CAP
+      ),
+      vim.log.levels.ERROR
+    )
+    local updates_only = { updates = diff.updates, deletes = {}, creates = {} }
+    local n_u = apply_mutations(updates_only, st)
+    vim.notify(string.format("[vault] Applied: %d updated (creates refused)", n_u), vim.log.levels.INFO)
+    vim.schedule(function()
+      M.reload(bufnr)
+      st.saving = false
+    end)
+    return
+  end
+
+  -- ── Confirmation for creates > 5 ───────────────────────────────────────
+  if #diff.creates > 5 then
+    local choice = vim.fn.confirm(
+      string.format(
+        "Vault process: About to CREATE %d new notes. This seems unusual.\n\nProceed?",
+        #diff.creates
+      ),
+      "&Yes, create them\n&No, skip creates\n&Cancel (no changes)"
+    )
+    if choice == 3 or choice == 0 then
+      vim.bo[bufnr].modified = true
+      st.saving = false
+      return
+    end
+    if choice == 2 then
+      diff.creates = {}
+    end
   end
 
   -- ── No deletes: apply immediately ────────────────────────────────────────
