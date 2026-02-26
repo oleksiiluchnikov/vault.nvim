@@ -56,7 +56,15 @@ function Wikilinks:init(notes)
     self.map = {}
 
     if not notes then
-        self.map = scanner().wikilinks()
+        local Wikilink = require("vault.wikilinks.wikilink")
+        local raw_map = scanner().wikilinks()
+        -- Filter out entries with slugs that look like code artifacts
+        for slug, wl in pairs(raw_map) do
+            local check_slug = (wl.data and wl.data.slug) or slug
+            if Wikilink.is_valid_slug(check_slug) then
+                self.map[slug] = wl
+            end
+        end
     else
         -- Collect wikilinks from notes
         for slug, note in pairs(notes.map) do
