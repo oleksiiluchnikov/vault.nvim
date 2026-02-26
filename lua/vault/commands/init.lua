@@ -525,6 +525,58 @@ local function build_subcommands()
             end,
         },
 
+        -- :Vault process [filter] — oil-style metadata editing buffer
+        process = {
+            run = function(args)
+                local oil_edit = require("vault.oil_edit")
+                local filter = args[1]
+                local notes, desc
+
+                if not filter or filter == "" then
+                    notes = require("vault.notes")()
+                    desc = "all notes"
+                elseif filter == "orphans" then
+                    notes = require("vault.notes")():orphans()
+                    desc = "orphan notes"
+                elseif filter == "leaves" then
+                    notes = require("vault.notes")():leaves()
+                    desc = "leaf notes"
+                elseif filter == "empty" then
+                    notes = require("vault.notes")():filter("content", [[^\s*$]], "regex", false)
+                    desc = "empty notes"
+                elseif filter == "no-frontmatter" then
+                    notes = require("vault.notes")():filter("content", [=[^\(---\)\@!.*$]=], "regex", true)
+                    desc = "no frontmatter"
+                elseif filter == "dir" and args[2] then
+                    notes = require("vault.notes")():filter("relpath", args[2], "startswith", false)
+                    desc = "dir:" .. args[2]
+                elseif filter == "tag" and args[2] then
+                    notes = require("vault.notes")():filter({
+                        search_term = "tags",
+                        include = { args[2] },
+                        exclude = {},
+                        match_opt = "exact",
+                        mode = "all",
+                    })
+                    desc = "tag:" .. args[2]
+                elseif filter == "empty-property" then
+                    -- Fallback: use API which handles the complex logic
+                    require("vault.api").open_picker_notes_with_empty_property_value(args[2], args[3])
+                    return
+                else
+                    -- Try as a slug filter
+                    notes = require("vault.notes")():filter("slug", filter, "fuzzy")
+                    desc = "filter:" .. filter
+                end
+
+                oil_edit.open({ notes = notes, filter_desc = desc })
+            end,
+            complete = function(prefix)
+                local subs = { "orphans", "leaves", "empty", "no-frontmatter", "dir", "tag", "empty-property" }
+                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+            end,
+        },
+
         -- :Vault today — today's journal
         today = {
             run = function()
