@@ -640,6 +640,60 @@ function Note:move(new_path, force, verbose)
     end
 end
 
+--- Delete a note by moving it to the vault's .trash/ directory (Obsidian-compatible).
+--- If `permanent` is true, the file is removed from disk entirely.
+--- Closes the buffer if it is currently open.
+--- @param permanent? boolean  If true, permanently delete instead of trashing (default: false)
+--- @param verbose? boolean    Show notifications (default: true)
+function Note:delete(permanent, verbose)
+    local uv = vim.uv or vim.loop
+    local old_path = self.data.path
+
+    if vim.fn.filereadable(old_path) == 0 then
+        error("Note:delete() file does not exist: " .. old_path)
+    end
+
+    -- Close any buffer visiting this file
+    local bufnr = vim.fn.bufnr(old_path)
+    if bufnr ~= -1 then
+        pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    end
+
+    if permanent then
+        local ok, err = os.remove(old_path)
+        if not ok then
+            error("Note:delete() os.remove failed: " .. tostring(err))
+        end
+    else
+        -- Move to .trash/ (Obsidian-compatible soft delete)
+        local config = require("vault.config")
+        local trash_dir = config.options.root .. "/.trash"
+        if vim.fn.isdirectory(trash_dir) == 0 then
+            vim.fn.mkdir(trash_dir, "p")
+        end
+        local basename = vim.fn.fnamemodify(old_path, ":t")
+        local trash_path = trash_dir .. "/" .. basename
+        -- Handle name collision in trash
+        if vim.fn.filereadable(trash_path) == 1 then
+            local stem = vim.fn.fnamemodify(basename, ":r")
+            local ext = vim.fn.fnamemodify(basename, ":e")
+            trash_path = string.format("%s/%s_%s.%s", trash_dir, stem, os.time(), ext)
+        end
+        local ok, err = uv.fs_rename(old_path, trash_path)
+        if not ok then
+            error("Note:delete() fs_rename to trash failed: " .. tostring(err))
+        end
+    end
+
+    if verbose ~= false then
+        local action = permanent and "Permanently deleted" or "Trashed"
+        vim.notify(
+            string.format("[vault] %s: %s", action, self.data.slug),
+            vim.log.levels.INFO
+        )
+    end
+end
+
 --- @type vault.Note|vault.Note.constructor
 local VaultNote = Note
 

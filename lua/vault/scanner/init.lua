@@ -223,7 +223,8 @@ function Scanner.lines(opts)
 
     local lines_map = {} --- @type table<string, vault.Line>
 
-    for slug, path in pairs(paths) do
+    for slug, note_data in pairs(paths) do
+        local path = note_data.path
         local ok, file_lines = pcall(vim.fn.readfile, path)
         if ok then
             for lnum, raw in ipairs(file_lines) do
