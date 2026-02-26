@@ -70,26 +70,422 @@ function callbacks.toggle_link()
     vim.notify("[vault] No URL or Markdown link found under cursor", vim.log.levels.WARN)
 end
 
+--- ============================================================================
+--- Subcommand dispatch tree for :Vault
+--- ============================================================================
+---
+--- Leaf nodes are tables with `run` (callback function) and optional `complete`
+--- (completion function). Branch nodes map subcommand names to children.
+---
+--- Examples:
+---   :Vault note              → note picker
+---   :Vault note new <slug>   → create note
+---   :Vault notes linked      → linked notes picker
+---   :Vault tags              → tags picker
+---   :Vault grep              → live grep
+--- ============================================================================
+
+--- @alias vault.Subcommand { run?: fun(args: string[], cmd_args: table), complete?: fun(prefix: string): string[], [string]: vault.Subcommand }
+
+--- Build the subcommand tree lazily so pickers/callbacks resolve at call time.
+--- @return table<string, vault.Subcommand>
+local function build_subcommands()
+    return {
+        -- :Vault note [method] — operate on current note
+        note = {
+            run = function(args, cmd_args)
+                -- No args: open notes picker
+                callbacks.note({
+                    fargs = args,
+                    line1 = cmd_args.line1,
+                    line2 = cmd_args.line2,
+                    range = cmd_args.range,
+                })
+            end,
+            complete = function(prefix)
+                local methods = { "new", "rename", "extract", "inlinks", "outlinks", "tags", "properties", "cluster", "random" }
+                -- Also include Note methods
+                local ok, Note = pcall(require, "vault.notes.note")
+                if ok and Note and Note.get_methods then
+                    local inst = Note(vim.fn.expand("%:p"))
+                    if inst then
+                        local extra = pcall(function()
+                            for _, m in ipairs(inst:get_methods()) do
+                                if not vim.tbl_contains(methods, m) then
+                                    table.insert(methods, m)
+                                end
+                            end
+                        end)
+                    end
+                end
+                return vim.tbl_filter(function(m) return m:find(prefix, 1, true) == 1 end, methods)
+            end,
+            new = {
+                run = function(args)
+                    callbacks.create_new_note({ fargs = args })
+                end,
+                complete = function(prefix)
+                    return completions.dirs(nil, "Vault note new " .. prefix, nil) or {}
+                end,
+            },
+            rename = {
+                run = function(args)
+                    callbacks.rename({ fargs = args })
+                end,
+            },
+            extract = {
+                run = function(args, cmd_args)
+                    callbacks.note_from_selected_text({
+                        fargs = args,
+                        line1 = cmd_args.line1,
+                        line2 = cmd_args.line2,
+                        range = cmd_args.range,
+                    })
+                end,
+                complete = function(prefix)
+                    return completions.note_slugs(nil, "Vault note extract " .. prefix, nil) or {}
+                end,
+            },
+            inlinks = {
+                run = function()
+                    callbacks.note_inlinks_picker({ fargs = {} })
+                end,
+            },
+            outlinks = {
+                run = function()
+                    callbacks.note_outlinks_picker({ fargs = {} })
+                end,
+            },
+            tags = {
+                run = function(args, cmd_args)
+                    callbacks.note_tags_picker({
+                        fargs = args,
+                        line1 = cmd_args.line1,
+                        line2 = cmd_args.line2,
+                        range = cmd_args.range,
+                    })
+                end,
+                complete = function(prefix)
+                    return completions.note_tags(nil, "Vault note tags " .. prefix, nil) or {}
+                end,
+            },
+            properties = {
+                run = function(args)
+                    callbacks.open_note_properties_picker({ fargs = args })
+                end,
+            },
+            cluster = {
+                run = function(args)
+                    local input = args[1] or ""
+                    if input == "" then
+                        local path = vim.fn.expand("%")
+                        if type(path) == "table" then path = path[1] end
+                        input = require("vault.utils").path_to_slug(path)
+                    end
+                    local notes = require("vault.notes")()
+                    local note = notes:filter("slug", input, "exact"):list()[1]
+                    if not note then
+                        vim.notify("[vault] Note not found: " .. input, vim.log.levels.WARN)
+                        return
+                    end
+                    notes = require("vault.notes")()
+                    local cluster = notes:to_cluster(note, 0)
+                    local picker = pickers.notes({ notes = cluster })
+                    if picker then picker:find() end
+                end,
+                complete = function(prefix)
+                    return completions.note_slugs(nil, "Vault note cluster " .. prefix, nil) or {}
+                end,
+            },
+            random = {
+                run = function(args)
+                    callbacks.edit_random_note({ fargs = args })
+                end,
+            },
+        },
+
+        -- :Vault notes [filter] — vault-wide note browsing
+        notes = {
+            run = function(args)
+                callbacks.notes({ fargs = args })
+            end,
+            complete = function(prefix)
+                local subs = { "linked", "orphans", "leaves", "internals", "dangling", "resolved", "status", "dir" }
+                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+            end,
+            linked = {
+                run = function()
+                    callbacks.open_linked_picker({ fargs = {} })
+                end,
+            },
+            orphans = {
+                run = function()
+                    callbacks.open_orphans_picker({ fargs = {} })
+                end,
+            },
+            leaves = {
+                run = function()
+                    safe_find(
+                        pickers.notes({ notes = require("vault.notes")():leaves() }),
+                        "No leaf notes found"
+                    )
+                end,
+            },
+            internals = {
+                run = function()
+                    safe_find(
+                        pickers.notes({ notes = require("vault.notes")():internals() }),
+                        "No internal notes found"
+                    )
+                end,
+            },
+            dangling = {
+                run = function()
+                    safe_find(
+                        pickers.notes({ notes = require("vault.notes")():with_outlinks_unresolved() }),
+                        "No dangling links found"
+                    )
+                end,
+            },
+            resolved = {
+                run = function()
+                    safe_find(
+                        pickers.notes({ notes = require("vault.notes")():with_outlinks_resolved_only() }),
+                        "No notes with all outlinks resolved"
+                    )
+                end,
+            },
+            status = {
+                run = function(args)
+                    callbacks.open_notes_status_picker({ fargs = args })
+                end,
+                complete = function(prefix)
+                    return completions.statuses(nil, "Vault notes status " .. prefix, nil) or {}
+                end,
+            },
+            dir = {
+                run = function(args)
+                    callbacks.open_note_by_dir_picker({ fargs = args })
+                end,
+                complete = function(prefix)
+                    return completions.dirs(nil, "Vault notes dir " .. prefix, nil) or {}
+                end,
+            },
+        },
+
+        -- :Vault tags [tag] — vault tags picker
+        tags = {
+            run = function(args)
+                safe_find(pickers.tags({ tags_list = args }), "No tags found")
+            end,
+            complete = function(prefix)
+                return completions.tags(nil, "Vault tags " .. prefix, nil) or {}
+            end,
+        },
+
+        -- :Vault properties [name] — vault properties picker
+        properties = {
+            run = function(args)
+                if #args == 0 then
+                    safe_find(pickers.properties(), "No properties found")
+                else
+                    safe_find(pickers.properties({ values = args }), "No properties found")
+                end
+            end,
+            complete = function()
+                local ok, props = pcall(function()
+                    return vim.tbl_keys(require("vault.scanner").properties())
+                end)
+                return ok and props or {}
+            end,
+        },
+
+        -- :Vault dirs [dir] — vault directories picker
+        dirs = {
+            run = function(args)
+                callbacks.pick_dirs({ fargs = args })
+            end,
+            complete = function(prefix)
+                return completions.dirs(nil, "Vault dirs " .. prefix, nil) or {}
+            end,
+        },
+
+        -- :Vault dates — dates picker
+        dates = {
+            run = function()
+                safe_find(pickers.dates(), "No dates found")
+            end,
+        },
+
+        -- :Vault wikilinks — wikilinks picker
+        wikilinks = {
+            run = function()
+                safe_find(pickers.wikilinks(), "No wikilinks found")
+            end,
+        },
+
+        -- :Vault tasks — tasks picker
+        tasks = {
+            run = function()
+                callbacks.tasks()
+            end,
+        },
+
+        -- :Vault bases [name] — bases picker
+        bases = {
+            run = function(args)
+                if #args == 0 then
+                    safe_find(pickers.bases(), "No bases found")
+                else
+                    require("vault.api").open_picker_base_notes(table.concat(args, " "))
+                end
+            end,
+            complete = function()
+                local ok, bases = pcall(function() return require("vault.bases")() end)
+                return (ok and bases) and bases:names() or {}
+            end,
+        },
+
+        -- :Vault today — today's journal
+        today = {
+            run = function()
+                callbacks.today()
+            end,
+        },
+
+        -- :Vault yesterday — yesterday's journal
+        yesterday = {
+            run = function()
+                callbacks.yesterday()
+            end,
+        },
+
+        -- :Vault fleeting — fleeting note popup
+        fleeting = {
+            run = function(args)
+                callbacks.open_fleeting_note_popup({ fargs = args })
+            end,
+        },
+
+        -- :Vault grep — live grep across vault
+        grep = {
+            run = function(args, cmd_args)
+                callbacks.open_live_grep_picker({
+                    fargs = args,
+                    line1 = cmd_args.line1,
+                    line2 = cmd_args.line2,
+                    range = cmd_args.range,
+                })
+            end,
+        },
+
+        -- :Vault toggle-link — toggle markdown link under cursor
+        ["toggle-link"] = {
+            run = function()
+                callbacks.toggle_link()
+            end,
+        },
+
+        -- :Vault move — deprecated stub
+        move = {
+            run = function()
+                vim.notify(
+                    "[vault] :Vault move is deprecated, use :Vault note rename instead",
+                    vim.log.levels.WARN
+                )
+            end,
+        },
+
+        -- :Vault api <func> [args] — raw API dispatch (backward compat)
+        api = {
+            run = function(args)
+                local func_name = args[1]
+                if not func_name then
+                    vim.notify("[vault] Usage: :Vault api <function> [args...]", vim.log.levels.INFO)
+                    return
+                end
+                local api_func = require("vault.api")[func_name]
+                if not api_func then
+                    vim.notify("[vault] Unknown API function: " .. func_name, vim.log.levels.WARN)
+                    return
+                end
+                api_func(unpack(args, 2))
+            end,
+            complete = function()
+                return vim.tbl_keys(require("vault.api"))
+            end,
+        },
+    }
+end
+
+--- Cached subcommand tree (built on first use)
+local _subcommands = nil
+local function get_subcommands()
+    if not _subcommands then
+        _subcommands = build_subcommands()
+    end
+    return _subcommands
+end
+
+--- Walk the subcommand tree and dispatch.
 --- @param args vim.api.keyset.create_user_command.command_args
 function callbacks.api(args)
-    local fargs = args.fargs
-    -- if next(fargs) == nil then
-    --     require("telescope._extensions.vault.pickers").api():find()
-    --     return
-    -- end
-    local api = fargs[1]
-    if api == nil then
+    local fargs = args.fargs or {}
+
+    -- No subcommand: show help
+    if #fargs == 0 then
+        local subs = vim.tbl_keys(get_subcommands())
+        table.sort(subs)
+        vim.notify("[vault] Available subcommands: " .. table.concat(subs, ", "), vim.log.levels.INFO)
         return
     end
-    local api_function = require("vault.api")[api]
-    if api_function == nil then
-        return
+
+    -- Walk the tree
+    local node = get_subcommands()
+    local depth = 0
+    for i, arg in ipairs(fargs) do
+        local child = node[arg]
+        if not child then
+            -- No deeper match — if current node has `run`, call it with remaining args
+            if node.run then
+                local remaining = vim.list_slice(fargs, i)
+                node.run(remaining, args)
+                return
+            end
+            vim.notify("[vault] Unknown subcommand: " .. table.concat(vim.list_slice(fargs, 1, i), " "), vim.log.levels.WARN)
+            return
+        end
+        depth = i
+        -- child is a subtree or a leaf
+        if type(child) == "table" and child.run then
+            -- Check if there are deeper children matching the next arg
+            local next_arg = fargs[i + 1]
+            if next_arg and child[next_arg] then
+                node = child
+            else
+                -- Leaf (or branch with run): call with remaining args
+                local remaining = vim.list_slice(fargs, i + 1)
+                child.run(remaining, args)
+                return
+            end
+        elseif type(child) == "table" then
+            node = child
+        end
     end
-    local arguments = {}
-    for i = 2, #fargs do
-        table.insert(arguments, fargs[i])
+
+    -- Reached end of args at a branch node with a run function
+    if node.run then
+        node.run({}, args)
+    else
+        local subs = {}
+        for k, v in pairs(node) do
+            if type(v) == "table" and k ~= "run" and k ~= "complete" then
+                table.insert(subs, k)
+            end
+        end
+        table.sort(subs)
+        vim.notify("[vault] Subcommands: " .. table.concat(subs, ", "), vim.log.levels.INFO)
     end
-    api_function(unpack(arguments))
 end
 
 --- ```vim
@@ -1174,9 +1570,10 @@ local M = {
     ["Vault"] = {
         callback = callbacks.api,
         opts = {
-            desc = "Open a picker with the directories in the vault",
+            desc = "Vault subcommand dispatcher — :Vault <subcommand> [args]",
             complete = completions.api,
             nargs = "*",
+            range = true,
         },
     },
     ["VaultToggleLink"] = {
@@ -1221,5 +1618,8 @@ for command, opts in pairs(M) do
         error(string.format("`:%s` failed to create, error: %s", command, err))
     end
 end
+
+--- Expose subcommand tree for completion module
+callbacks._get_subcommands = get_subcommands
 
 return callbacks

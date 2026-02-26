@@ -8,9 +8,76 @@ local M = {}
 ---CmdLine		the entire command line
 ---CursorPos	the cursor position in it (byte index)
 
----Returns the list of notes slugs
-function M.api(_, _, _)
-    return vim.tbl_keys(require("vault.api"))
+--- Context-aware completion for :Vault subcommands.
+--- Walks the subcommand tree to offer completions at the correct depth.
+function M.api(_, line, _)
+    line = line or ""
+    local parts = vim.split(line, "%s+", { trimempty = true })
+
+    -- Remove the command name ("Vault") from parts
+    if #parts > 0 and parts[1] == "Vault" then
+        table.remove(parts, 1)
+    end
+
+    -- Get the subcommand tree from the commands module
+    local ok, cmds = pcall(require, "vault.commands")
+    if not ok or not cmds or not cmds._get_subcommands then
+        return vim.tbl_keys(require("vault.api"))
+    end
+    local tree = cmds._get_subcommands()
+
+    -- Walk the tree for all but the last token (which is the prefix being completed)
+    local node = tree
+    local prefix = ""
+    local trailing_space = line:match("%s$")
+
+    if trailing_space then
+        -- Cursor is after a space — all parts are complete, prefix is empty
+        for _, part in ipairs(parts) do
+            local child = node[part]
+            if child and type(child) == "table" then
+                node = child
+            else
+                -- No deeper match — try node's own complete function
+                if node.complete then
+                    return node.complete(part)
+                end
+                return {}
+            end
+        end
+        prefix = ""
+    else
+        -- Last token is the prefix being completed
+        for i = 1, #parts - 1 do
+            local child = node[parts[i]]
+            if child and type(child) == "table" then
+                node = child
+            else
+                if node.complete then
+                    return node.complete(parts[i] or "")
+                end
+                return {}
+            end
+        end
+        prefix = parts[#parts] or ""
+    end
+
+    -- If node has a `complete` function, defer to it
+    if node.complete then
+        return node.complete(prefix)
+    end
+
+    -- Otherwise, list child subcommand names matching prefix
+    local results = {}
+    for k, v in pairs(node) do
+        if type(v) == "table" and k ~= "run" and k ~= "complete" then
+            if k:find(prefix, 1, true) == 1 then
+                table.insert(results, k)
+            end
+        end
+    end
+    table.sort(results)
+    return results
 end
 
 --- Returns the list of notes slugs
