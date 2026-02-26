@@ -703,14 +703,18 @@ end
 --- @param args vim.api.keyset.create_user_command.command_args
 --- @return nil
 function callbacks.open_live_grep_picker(args)
-    -- TODO: Implement live_grep picker
-    vim.notify("[vault] VaultGrep is not yet implemented", vim.log.levels.WARN)
-    -- if args.range == 0 then
-    --     require("telescope._extensions.vault.pickers").live_grep({ query = "" }):find()
-    --     return
-    -- end
-    -- local query = table.concat(args.fargs, " ")
-    -- require("telescope._extensions.vault.pickers").live_grep({ query = query }):find()
+    local query = ""
+    if args.range and args.range > 0 then
+        -- Visual selection: use selected text as initial query
+        local lines = vim.api.nvim_buf_get_lines(0, args.line1 - 1, args.line2, false)
+        query = table.concat(lines, "\n")
+        -- Trim to first line for grep prompt (multiline not practical)
+        query = vim.trim(lines[1] or "")
+    elseif args.fargs and #args.fargs > 0 then
+        query = table.concat(args.fargs, " ")
+    end
+    -- live_grep opens the picker directly (returns nil), no :find() needed
+    require("telescope._extensions.vault.pickers.grep")({ query = query })
 end
 
 --- vault.Yesterday
