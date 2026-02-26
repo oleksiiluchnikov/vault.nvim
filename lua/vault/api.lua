@@ -185,8 +185,8 @@ end
 --- Open the picker with note with empty content
 function M.open_picker_notes_with_empty_content()
     local empty_vim_regex_patterns = {
-        -- No any character
-        [[^\(\s*|\n*\})$]],
+        -- Match content that is only whitespace/newlines
+        [[^\s*$]],
         -- TODO: Has heading, but no further content
     }
 
