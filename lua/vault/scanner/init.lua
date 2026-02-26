@@ -55,6 +55,7 @@ function Scanner.slugs()
     local root, ignores = get_scan_args()
     local slugs = core.slugs(root, ignores)
     state.set_global_key("cache.notes.slugs", slugs)
+    state.set_global_key("cache.notes.basename_index", nil) -- invalidate derived index
     return slugs
 end
 
