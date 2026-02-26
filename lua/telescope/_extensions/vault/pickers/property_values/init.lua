@@ -6,6 +6,11 @@
 --- @param opts table
 --- @return Picker
 return function(opts)
+    local vault_state = require("vault.core.state")
+    local entry_display = require("telescope.pickers.entry_display")
+    local finders = require("telescope.finders")
+    local pickers = require("telescope.pickers")
+    local sorters = require("telescope.sorters")
     opts = opts or {}
     opts.values = opts.values or error("No values provided") -- TODO: Implement scanner for values only
     -- local results = vim.tbl_keys(opts.values)
@@ -15,19 +20,22 @@ return function(opts)
         table.insert(values_list, value)
     end
 
-    local steps = math.min(vim.api.nvim_list_uis()[1].height, vim.tbl_count(values_list))
-    --- @type Gradient|nil
-    local colors = Gradient.from_stops(steps, "Comment", "Normal", "String")
-    if type(colors) ~= "table" then
-        -- error(
-        --     error_msg.COMMAND_EXECUTION_ERROR("Gradient.from_stops", "table", vim.inspect(colors))
-        -- )
-        -- error("Gradient.from_stops", "table", vim.inspect(colors))
-        error("Gradient.from_stops")
-    end
+    local uis = vim.api.nvim_list_uis()
+    local ui_height = (uis[1] and uis[1].height) or 40
+    local steps = math.min(ui_height, vim.tbl_count(values_list))
+
+    -- Gradient setup with safe fallback
     local hl_name = "VaultProperty"
-    for i, color in ipairs(colors) do
-        vim.api.nvim_set_hl(0, hl_name .. tostring(i), { fg = color })
+    local colors = nil
+    local ok, maybe_colors = pcall(function()
+        local Gradient = require("gradient")
+        return Gradient.from_stops(steps, "Comment", "Normal", "String")
+    end)
+    if ok and type(maybe_colors) == "table" then
+        colors = maybe_colors
+        for i, color in ipairs(colors) do
+            pcall(vim.api.nvim_set_hl, 0, hl_name .. tostring(i), { fg = color })
+        end
     end
 
     --- @param entry vault.TelescopeEntry

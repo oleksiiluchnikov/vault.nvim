@@ -406,13 +406,31 @@ local function build_subcommands()
             end,
         },
 
-        -- :Vault move — deprecated stub
-        move = {
+        -- :Vault lines — lines picker (dash-prefixed lines across vault)
+        lines = {
             run = function()
-                vim.notify(
-                    "[vault] :Vault move is deprecated, use :Vault note rename instead",
-                    vim.log.levels.WARN
-                )
+                require("vault.api").open_picker_lines_starting_with_dash()
+            end,
+        },
+
+        -- :Vault move [note] — move note to a different directory
+        move = {
+            run = function(args)
+                local opts = {}
+                if args[1] and args[1] ~= "" then
+                    local notes = require("vault.notes")():filter("slug", args[1], "exact", false)
+                    local _, note = next(notes.map)
+                    if note then
+                        opts.note = note
+                    else
+                        vim.notify("[vault] Note not found: " .. args[1], vim.log.levels.WARN)
+                        return
+                    end
+                end
+                safe_find(pickers.move_to(opts), "No directories found")
+            end,
+            complete = function(prefix)
+                return completions.note_slugs(nil, "Vault move " .. prefix, nil) or {}
             end,
         },
 
@@ -452,11 +470,9 @@ end
 function callbacks.api(args)
     local fargs = args.fargs or {}
 
-    -- No subcommand: show help
+    -- No subcommand: open meta picker (picker of pickers)
     if #fargs == 0 then
-        local subs = vim.tbl_keys(get_subcommands())
-        table.sort(subs)
-        vim.notify("[vault] Available subcommands: " .. table.concat(subs, ", "), vim.log.levels.INFO)
+        safe_find(pickers.vault(), "No pickers available")
         return
     end
 
@@ -768,12 +784,17 @@ end
 --- @return nil
 function callbacks.rename(args)
     local note = require("vault.notes.note")(vim.fn.expand("%:p"))
+    local new_slug
     if next(args.fargs) == nil then
-        vim.notify("[vault] Rename cancelled", vim.log.levels.WARN)
-        --- TODO: Implement to open input popup
-        return
+        -- Interactive rename: prompt for new slug
+        new_slug = vim.fn.input("Rename to: ", note.data.slug)
+        if not new_slug or new_slug == "" or new_slug == note.data.slug then
+            vim.notify("[vault] Rename cancelled", vim.log.levels.INFO)
+            return
+        end
+    else
+        new_slug = table.concat(args.fargs, " ")
     end
-    local new_slug = table.concat(args.fargs, " ")
     if new_slug == "" then
         return
     end
