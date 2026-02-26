@@ -36,7 +36,7 @@ local Wikilinks = Collection:extend("VaultWikilinks")
 --- assert(map["foo"].data.target == "foo")
 --- assert(map["bar"].class.name == "VaultWikilink")
 --- ```
---- @alias vault.Wikilinks.map table<vault.stem, vault.Wikilink>
+--- @alias vault.Wikilinks.map table<vault.slug, vault.Wikilink>
 
 --- @example
 --- ```lua
@@ -63,13 +63,13 @@ function Wikilinks:init(notes)
             --- @type vault.Wikilinks.list
             local note_outlinks = note.data.outlinks
 
-            for wikilink_stem, wikilink in pairs(note_outlinks) do
-                if not self.map[wikilink_stem] then
-                    self.map[wikilink_stem] = wikilink
+            for wikilink_slug, wikilink in pairs(note_outlinks) do
+                if not self.map[wikilink_slug] then
+                    self.map[wikilink_slug] = wikilink
                 end
 
-                if not self.map[wikilink_stem].data.sources[slug] then
-                    self.map[wikilink_stem].data.sources[slug] = {}
+                if not self.map[wikilink_slug].data.sources[slug] then
+                    self.map[wikilink_slug].data.sources[slug] = {}
                 end
             end
         end
@@ -81,9 +81,9 @@ end
 --- Wikilinks that don't have a target key.
 --- @return vault.Wikilinks
 function Wikilinks:unresolved()
-    for stem, wikilink in pairs(self.map) do
+    for wikilink_slug, wikilink in pairs(self.map) do
         if wikilink.data.target and wikilink.data.target ~= "" then
-            self.map[stem] = nil
+            self.map[wikilink_slug] = nil
         end
     end
     return self
@@ -92,9 +92,9 @@ end
 --- Wikilinks that have a target key.
 --- @return vault.Wikilinks
 function Wikilinks:resolved()
-    for stem, wikilink in pairs(self.map) do
+    for wikilink_slug, wikilink in pairs(self.map) do
         if not wikilink.data.target or wikilink.data.target == "" then
-            self.map[stem] = nil
+            self.map[wikilink_slug] = nil
         end
     end
     return self
@@ -126,13 +126,10 @@ function Wikilinks:by_target(slug, match_opt, case_sensitive)
     -- error("asd")
 
     local wikilinks = {}
-    for target_slug, wikilink in pairs(self.map) do
-        -- if wikilink.target == target then
-        --   table.insert(wikilinks, wikilink)
-        -- end
-        if utils.match(target_slug, slug, match_opt, case_sensitive) then
-            -- Use the map key from the collection (target_slug) so callers get the correct mapping
-            wikilinks[target_slug] = wikilink
+    for wikilink_slug, wikilink in pairs(self.map) do
+        local target = wikilink.data.target or ""
+        if utils.match(target, slug, match_opt, case_sensitive) then
+            wikilinks[wikilink_slug] = wikilink
         end
     end
 
@@ -145,7 +142,7 @@ function Wikilinks:embeds()
     local embeds = {}
     for _, wikilink in pairs(self.map) do
         if wikilink.data.embedded then
-            embeds[wikilink.data.stem] = wikilink
+            embeds[wikilink.data.slug] = wikilink
         end
     end
     return embeds

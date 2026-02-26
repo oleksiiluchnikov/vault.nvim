@@ -283,11 +283,11 @@ Data.outlinks = function(note_data)
         end
         local wikilink_data = wikilink.data
 
-        if not outlinks[wikilink_data.stem] then
-            outlinks[wikilink_data.stem] = wikilink
+        if not outlinks[wikilink_data.slug] then
+            outlinks[wikilink_data.slug] = wikilink
         end
 
-        local data = outlinks[wikilink_data.stem].data
+        local data = outlinks[wikilink_data.slug].data
 
         if not data.sources then
             data.sources = {}
