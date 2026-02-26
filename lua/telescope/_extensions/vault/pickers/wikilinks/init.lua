@@ -21,7 +21,7 @@ return function(opts)
     local vault_state = require("vault.core.state")
     local utils = require("vault.utils")
 
-    local results = wikilinks:list() or {}
+    local results = opts._results or wikilinks:list() or {}
 
     -- Early exit if empty
     if next(results) == nil then
@@ -365,10 +365,9 @@ return function(opts)
             end
         end)
 
-        -- <C-r> — resolve: pick a suggestion or create note, rewrite all sources
-        -- After resolving, auto-advances to the next entry and triggers again.
-        local resolve_action -- forward declaration for recursive scheduling
-        resolve_action = function()
+        -- gr — resolve: close picker, show vim.ui.select, apply, reopen picker.
+        -- This avoids the float-vs-float conflict between Telescope and dressing.nvim.
+        local function resolve_action()
             local selection = action_state.get_selected_entry()
             if not selection or not selection.value then
                 return
@@ -413,7 +412,6 @@ return function(opts)
                     end
                 end
             end
-            -- Always offer "Create new note" and "Skip"
             choices[#choices + 1] = { label = "Create new note: " .. slug, slug = nil, action = "create" }
             choices[#choices + 1] = { label = "Skip", slug = nil, action = "skip" }
 
@@ -422,51 +420,67 @@ return function(opts)
                 labels[#labels + 1] = c.label
             end
 
-            vim.ui.select(labels, {
-                prompt = "Resolve [[" .. slug .. "]]:",
-            }, function(choice, idx)
-                if not choice or not idx then
-                    return
-                end
+            -- Close the picker BEFORE vim.ui.select so dressing.nvim doesn't
+            -- destroy the Telescope prompt buffer.
+            actions.close(prompt_bufnr)
 
-                local picked = choices[idx]
-                if picked.action == "skip" then
-                    -- Skip: advance to next entry and continue the resolve flow
-                    vim.schedule(resolve_action)
-                    return
-                end
+            vim.schedule(function()
+                vim.ui.select(labels, {
+                    prompt = "Resolve [[" .. slug .. "]]:",
+                }, function(choice, idx)
+                    local function reopen_picker()
+                        vim.schedule(function()
+                            local picker_mod = require("telescope._extensions.vault.pickers.wikilinks")
+                            local p = picker_mod({
+                                wikilinks = wikilinks,
+                                _results = results,
+                                sort_by = opts.sort_by,
+                                show_resolved = opts.show_resolved,
+                            })
+                            if p then p:find() end
+                        end)
+                    end
 
-                if picked.action == "create" then
-                    local Note = require("vault.notes.note")
-                    local path = utils.slug_to_path(slug)
-                    local note = Note(path)
-                    note:write(path)
-                    vim.notify("[vault] Created: " .. slug, vim.log.levels.INFO)
+                    if not choice or not idx then
+                        reopen_picker()
+                        return
+                    end
 
-                    local picker_obj = action_state.get_current_picker(prompt_bufnr)
-                    remove_and_refresh(picker_obj, wl)
-                    -- Auto-advance to next entry
-                    vim.schedule(resolve_action)
-                    return
-                end
+                    local picked = choices[idx]
 
-                -- Rewrite wikilink in all source files
-                local new_slug = picked.slug
-                local patched = rewrite_wikilink(wl, new_slug)
-                vim.notify(
-                    "[vault] [[" .. slug .. "]] -> [[" .. new_slug .. "]] | " .. patched .. " files patched",
-                    vim.log.levels.INFO
-                )
+                    if picked.action ~= "skip" then
+                        if picked.action == "create" then
+                            local Note = require("vault.notes.note")
+                            local path = utils.slug_to_path(slug)
+                            local note = Note(path)
+                            note:write(path)
+                            vim.notify("[vault] Created: " .. slug, vim.log.levels.INFO)
+                        else
+                            local new_slug = picked.slug
+                            local patched = rewrite_wikilink(wl, new_slug)
+                            vim.notify(
+                                "[vault] [[" .. slug .. "]] -> [[" .. new_slug .. "]] | " .. patched .. " files patched",
+                                vim.log.levels.INFO
+                            )
+                        end
 
-                local picker_obj = action_state.get_current_picker(prompt_bufnr)
-                remove_and_refresh(picker_obj, wl)
-                -- Auto-advance to next entry
-                vim.schedule(resolve_action)
+                        -- Remove resolved entry from results
+                        for i = #results, 1, -1 do
+                            if results[i] == wl then
+                                table.remove(results, i)
+                                break
+                            end
+                        end
+                    end
+
+                    -- Reopen the picker with updated results
+                    reopen_picker()
+                end)
             end)
         end
 
-        map("i", "<c-r>", resolve_action)
-        map("n", "<c-r>", resolve_action)
+        map("i", "gr", resolve_action)
+        map("n", "gr", resolve_action)
 
         -- Cleanup gradient highlights on close
         local function cleanup()
@@ -486,7 +500,7 @@ return function(opts)
     end
 
     local picker_opts = {
-        prompt_title = "Wikilinks  <C-r> resolve",
+        prompt_title = "Wikilinks  gr=resolve",
         finder = finder,
         sorter = sorters.get_generic_fuzzy_sorter(),
         previewer = vault_previewers.wikilinks,
