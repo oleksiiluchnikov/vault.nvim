@@ -144,17 +144,8 @@ end
 
 --- Returns the list of available statuses
 function M.statuses(_, _, _)
-    --TODO: Moved statuse to the frontmatter. Need to update this
-    vim.notify("Implement")
-    -- local tags = require("vault.tags")()
-    -- local statuses = {}
-    -- for _, tag in pairs(tags.map) do
-    --     if tag.data.name:match("^status") and #tag.data.children > 0 then
-    --         local status = tag.data.children[1]
-    --         table.insert(statuses, status.d
-    --     end
-    -- end
-    -- return statuses
+    --TODO: Moved statuses to the frontmatter. Need to update this
+    return {}
 end
 
 function M.note(_, line, _)
