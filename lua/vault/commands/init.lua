@@ -308,8 +308,43 @@ local function build_subcommands()
                 safe_find(pickers.tags({ tags_list = args }), "No tags found")
             end,
             complete = function(prefix)
-                return completions.tags(nil, "Vault tags " .. prefix, nil) or {}
+                local subs = { "rename", "merge" }
+                local tag_completions = completions.tags(nil, "Vault tags " .. prefix, nil) or {}
+                for _, s in ipairs(subs) do
+                    if s:find(prefix, 1, true) == 1 then
+                        table.insert(tag_completions, 1, s)
+                    end
+                end
+                return tag_completions
             end,
+            rename = {
+                run = function(args)
+                    if #args < 2 then
+                        vim.notify("[vault] Usage: :Vault tags rename <old> <new>", vim.log.levels.WARN)
+                        return
+                    end
+                    require("vault.api").rename_tag(args[1], args[2])
+                end,
+                complete = function(prefix)
+                    return completions.tags(nil, "Vault tags rename " .. prefix, nil) or {}
+                end,
+            },
+            merge = {
+                run = function(args)
+                    if #args < 2 then
+                        vim.notify("[vault] Usage: :Vault tags merge <target> <source1> [source2 ...]", vim.log.levels.WARN)
+                        return
+                    end
+                    local target = args[1]
+                    for i = 2, #args do
+                        require("vault.api").rename_tag(args[i], target)
+                    end
+                    vim.notify(string.format("[vault] Merged %d tags into '%s'", #args - 1, target), vim.log.levels.INFO)
+                end,
+                complete = function(prefix)
+                    return completions.tags(nil, "Vault tags merge " .. prefix, nil) or {}
+                end,
+            },
         },
 
         -- :Vault properties [name] — vault properties picker
@@ -431,6 +466,24 @@ local function build_subcommands()
         ["toggle-link"] = {
             run = function()
                 callbacks.toggle_link()
+            end,
+        },
+
+        -- :Vault inbox — inbox notes picker
+        inbox = {
+            run = function()
+                local config = require("vault.config")
+                local inbox_dir = config.dir("inbox")
+                if not inbox_dir or vim.fn.isdirectory(inbox_dir) == 0 then
+                    vim.notify("[vault] Inbox directory not configured or does not exist (dirs.inbox)", vim.log.levels.WARN)
+                    return
+                end
+                safe_find(
+                    pickers.notes({
+                        notes = require("vault.notes")():filter("relpath", vim.fn.fnamemodify(inbox_dir, ":t"), "startswith", false),
+                    }),
+                    "No notes in inbox"
+                )
             end,
         },
 

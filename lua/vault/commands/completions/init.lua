@@ -208,10 +208,17 @@ function M.dates(_, _, _)
     return date_values
 end
 
---- Returns the list of available statuses
+--- Returns the list of available statuses (from frontmatter 'status' property)
 function M.statuses(_, _, _)
-    --TODO: Moved statuses to the frontmatter. Need to update this
-    return {}
+    local ok, properties = pcall(function() return require("vault.scanner").properties() end)
+    if not ok or not properties then
+        return {}
+    end
+    local status_prop = properties.status
+    if not status_prop then
+        return {}
+    end
+    return vim.tbl_keys(status_prop.data.values or {})
 end
 
 function M.note(_, line, _)
