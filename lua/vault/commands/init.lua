@@ -103,7 +103,7 @@ local function build_subcommands()
                 })
             end,
             complete = function(prefix)
-                local methods = { "new", "rename", "delete", "extract", "inlinks", "outlinks", "tags", "properties", "cluster", "random" }
+                local methods = { "new", "rename", "delete", "extract", "inlinks", "outlinks", "tags", "properties", "cluster", "random", "preview", "obsidian" }
                 -- Also include Note methods
                 local bufpath = vim.fn.expand("%:p")
                 if bufpath:match("%.md$") then
@@ -231,6 +231,26 @@ local function build_subcommands()
                     return completions.note_slugs(nil, "Vault note delete " .. prefix, nil) or {}
                 end,
             },
+            preview = {
+                run = function()
+                    local path = vim.fn.expand("%:p")
+                    if not path:match("%.md$") then
+                        vim.notify("[vault] Current buffer is not a note", vim.log.levels.WARN)
+                        return
+                    end
+                    require("vault.notes.note")(path):preview()
+                end,
+            },
+            obsidian = {
+                run = function()
+                    local path = vim.fn.expand("%:p")
+                    if not path:match("%.md$") then
+                        vim.notify("[vault] Current buffer is not a note", vim.log.levels.WARN)
+                        return
+                    end
+                    require("vault.notes.note")(path):open_in_obsidian()
+                end,
+            },
         },
 
         -- :Vault notes [filter] — vault-wide note browsing
@@ -239,7 +259,7 @@ local function build_subcommands()
                 callbacks.notes({ fargs = args })
             end,
             complete = function(prefix)
-                local subs = { "linked", "orphans", "leaves", "internals", "dangling", "resolved", "status", "dir" }
+                local subs = { "linked", "orphans", "leaves", "internals", "dangling", "resolved", "status", "dir", "empty", "no-frontmatter", "empty-property" }
                 return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
             end,
             linked = {
@@ -300,6 +320,30 @@ local function build_subcommands()
                     return completions.dirs(nil, "Vault notes dir " .. prefix, nil) or {}
                 end,
             },
+            empty = {
+                run = function()
+                    require("vault.api").open_picker_notes_with_empty_content()
+                end,
+            },
+            ["no-frontmatter"] = {
+                run = function()
+                    require("vault.api").open_picker_notes_without_frontmatter()
+                end,
+            },
+            ["empty-property"] = {
+                run = function(args)
+                    local prop = args[1]
+                    local val = args[2]
+                    require("vault.api").open_picker_notes_with_empty_property_value(prop, val)
+                end,
+                complete = function(prefix)
+                    local ok, props = pcall(function()
+                        return vim.tbl_keys(require("vault.scanner").properties())
+                    end)
+                    if not ok then return {} end
+                    return vim.tbl_filter(function(p) return p:find(prefix, 1, true) == 1 end, props)
+                end,
+            },
         },
 
         -- :Vault tags [tag] — vault tags picker
@@ -308,7 +352,7 @@ local function build_subcommands()
                 safe_find(pickers.tags({ tags_list = args }), "No tags found")
             end,
             complete = function(prefix)
-                local subs = { "rename", "merge" }
+                local subs = { "rename", "merge", "doc" }
                 local tag_completions = completions.tags(nil, "Vault tags " .. prefix, nil) or {}
                 for _, s in ipairs(subs) do
                     if s:find(prefix, 1, true) == 1 then
@@ -345,23 +389,75 @@ local function build_subcommands()
                     return completions.tags(nil, "Vault tags merge " .. prefix, nil) or {}
                 end,
             },
+            doc = {
+                run = function(args)
+                    if #args == 0 then
+                        vim.notify("[vault] Usage: :Vault tags doc <tag_name>", vim.log.levels.WARN)
+                        return
+                    end
+                    require("vault.api").edit_tag_documentation(args[1])
+                end,
+                complete = function(prefix)
+                    return completions.tags(nil, "Vault tags doc " .. prefix, nil) or {}
+                end,
+            },
         },
 
-        -- :Vault properties [name] — vault properties picker
+        -- :Vault properties [name] [value] — vault properties picker / drill-down
         properties = {
             run = function(args)
                 if #args == 0 then
                     safe_find(pickers.properties(), "No properties found")
+                elseif #args == 1 then
+                    -- Drill into property values
+                    require("vault.api").open_picker_property_values(args[1])
                 else
-                    safe_find(pickers.properties({ values = args }), "No properties found")
+                    -- Show notes with specific property value
+                    require("vault.api").open_picker_notes_with_property_value(args[1], args[2])
                 end
             end,
-            complete = function()
+            complete = function(prefix)
                 local ok, props = pcall(function()
                     return vim.tbl_keys(require("vault.scanner").properties())
                 end)
-                return ok and props or {}
+                if not ok then return {} end
+                local subs = { "rename" }
+                local results = {}
+                for _, s in ipairs(subs) do
+                    if s:find(prefix, 1, true) == 1 then
+                        table.insert(results, s)
+                    end
+                end
+                for _, p in ipairs(props) do
+                    if p:find(prefix, 1, true) == 1 then
+                        table.insert(results, p)
+                    end
+                end
+                return results
             end,
+            rename = {
+                run = function(args)
+                    if #args < 2 then
+                        vim.notify("[vault] Usage: :Vault properties rename <old> <new>", vim.log.levels.WARN)
+                        return
+                    end
+                    local properties = require("vault.properties")()
+                    local property = properties.map[args[1]]
+                    if not property then
+                        vim.notify("[vault] Property not found: " .. args[1], vim.log.levels.WARN)
+                        return
+                    end
+                    property:rename(args[2])
+                    vim.notify(string.format("[vault] Renamed property '%s' -> '%s'", args[1], args[2]), vim.log.levels.INFO)
+                end,
+                complete = function(prefix)
+                    local ok, props = pcall(function()
+                        return vim.tbl_keys(require("vault.scanner").properties())
+                    end)
+                    if not ok then return {} end
+                    return vim.tbl_filter(function(p) return p:find(prefix, 1, true) == 1 end, props)
+                end,
+            },
         },
 
         -- :Vault dirs [dir] — vault directories picker
