@@ -194,17 +194,16 @@ return function(opts)
     if vim.tbl_count(opts.properties.map) == 1 then
         local property_name = vim.tbl_keys(opts.properties.map)[1]
         require("vault.api").open_picker_property_values(property_name)
-    else
-        local picker = pickers.new(opts, {
-            prompt_title = "Properties",
-            finder = finder,
-            sorter = sorters.get_fzy_sorter(),
-            attach_mappings = require("telescope._extensions.vault.mappings").properties,
-            on_input_filter_cb = on_input_filter_cb,
-        })
-        vault_state.set_global_key("picker", picker)
-        return picker
+        return nil
     end
 
+    local picker = pickers.new(opts, {
+        prompt_title = "Properties",
+        finder = finder,
+        sorter = sorters.get_fzy_sorter(),
+        attach_mappings = require("telescope._extensions.vault.mappings").properties,
+        on_input_filter_cb = on_input_filter_cb,
+    })
+    vault_state.set_global_key("picker", picker)
     return picker
 end

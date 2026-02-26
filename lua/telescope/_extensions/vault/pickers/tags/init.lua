@@ -21,7 +21,7 @@ return function(opts)
 
     --- @type vault.Tags.list
     local tags_list = opts.tags:list()
-    if next(opts.tags) == nil then
+    if next(tags_list) == nil then
         Log.info("No tags found in vault")
         return
     end

@@ -2,6 +2,17 @@
 local pickers = require("telescope._extensions.vault.pickers")
 local M = {}
 
+--- Safe picker launch — handles nil return from empty results.
+--- @param picker any
+--- @param empty_msg? string
+local function safe_find(picker, empty_msg)
+    if picker then
+        picker:find()
+    else
+        vim.notify("[vault] " .. (empty_msg or "No results found"), vim.log.levels.INFO)
+    end
+end
+
 --- Open the picker with the given tag name
 --- @param tag_name vault.Tag.Data.name
 --- @return nil
@@ -9,8 +20,8 @@ function M.open_picker_notes_with_tag(tag_name)
     if not tag_name then
         error("No tag name provided")
     end
-    pickers
-        .notes({
+    safe_find(
+        pickers.notes({
             notes = require("vault.notes")():filter({
                 search_term = "tags",
                 include = { tag_name },
@@ -19,8 +30,9 @@ function M.open_picker_notes_with_tag(tag_name)
                 mode = "all",
                 case_sensitive = false,
             }),
-        })
-        :find()
+        }),
+        "No notes found with tag: " .. tag_name
+    )
 end
 
 --- Open the tag documentation with the given tag name
@@ -81,12 +93,13 @@ function M.open_picker_property_values(property_name)
     local properties = require("vault.properties")()
     local values = properties.map[property_name].data.values
     -- pick_value(opts, property_name, values, on_value_selected)
-    pickers
-        .property_values({
+    safe_find(
+        pickers.property_values({
             prompt_title = property_name,
             values = values,
-        })
-        :find()
+        }),
+        "No values found for property: " .. property_name
+    )
 end
 
 function M.open_picker_notes_with_property_value(property_name, value_name)
@@ -104,19 +117,16 @@ function M.open_picker_notes_with_property_value(property_name, value_name)
         local note = require("vault.notes.note")(path)
         notes:push(note)
     end
-    pickers
-        .notes({
-            notes = notes,
-        })
-        :find()
+    safe_find(pickers.notes({ notes = notes }), "No notes found for property value")
 end
 
 function M.open_picker_notes_in_directory(directory)
-    pickers
-        .notes({
+    safe_find(
+        pickers.notes({
             notes = require("vault.notes")():filter("relpath", directory, "startswith", false),
-        })
-        :find()
+        }),
+        "No notes found in directory: " .. tostring(directory)
+    )
 end
 
 --- Open the picker with the given property name
@@ -174,12 +184,7 @@ function M.open_picker_notes_with_empty_property_value(property_name, value_name
         local note = require("vault.notes.note")(path)
         notes:push(note)
     end
-    -- telescope._extensions.vault.pickers.notes(opts)
-    pickers
-        .notes({
-            notes = notes,
-        })
-        :find()
+    safe_find(pickers.notes({ notes = notes }), "No notes with empty property values")
 end
 
 --- Open the picker with note with empty content
@@ -196,39 +201,42 @@ function M.open_picker_notes_with_empty_content()
         pattern = [[(]] .. pattern .. [[)]]
     end
 
-    pickers
-        .notes({
+    safe_find(
+        pickers.notes({
             notes = require("vault.notes")():filter("content", pattern, "regex", false),
-        })
-        :find()
+        }),
+        "No notes with empty content"
+    )
 end
 
 --- Open the picker with note without frontmatter(not starting with ---)
 function M.open_picker_notes_without_frontmatter()
-    pickers
-        .notes({
+    safe_find(
+        pickers.notes({
             -- notes = require("vault.notes")():without_frontmatter(),
             notes = require("vault.notes")():filter("content", [=[^\(---\)\@!.*$]=], "regex", true),
-        })
-        :find()
+        }),
+        "No notes without frontmatter"
+    )
 end
 
 -- lua require('telescope._extensions.vault.pickers.lines')({lines = require('vault.lines')():filter("content", "^- [A-Za-z]", "regex", false)}):find()
 --- Open the picker with lines that starts with "- "
 function M.open_picker_lines_starting_with_dash()
-    pickers
-        .lines({
+    safe_find(
+        pickers.lines({
             lines = require("vault.lines")()
                 :filter_by_source("journal", "startswith", false)
                 :filter("content", "^- [A-Za-z0-9]", "regex", false),
-        })
-        :find()
+        }),
+        "No lines starting with dash"
+    )
 end
 
 --- Open the picker with all bases (Level 1)
 --- @return nil
 function M.open_picker_bases()
-    pickers.bases():find()
+    safe_find(pickers.bases(), "No bases found")
 end
 
 --- Open the picker with matched notes for a specific base (Level 2)
