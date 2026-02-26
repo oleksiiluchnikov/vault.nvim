@@ -93,6 +93,11 @@ local function is_valid_content(content)
     if content:match("^[#|]+$") then
         return false
     end
+    -- Reject bash-style [[ -flag ... ]] — they always have leading/trailing whitespace.
+    -- Real Obsidian wikilinks never have leading or trailing whitespace inside brackets.
+    if content:match("^%s") or content:match("%s$") then
+        return false
+    end
     -- Must have at least one non-whitespace character in the slug portion
     local slug = content:match("^([^#|]*)")
     if not slug or slug:match("^%s*$") then
