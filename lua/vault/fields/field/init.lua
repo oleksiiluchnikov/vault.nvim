@@ -48,17 +48,25 @@ local function parse_field_value(value)
         end
         return array
     elseif value:match("^%{.*%}$") then
-        -- Table
+        -- Table (key:value pairs) or template string (e.g., {date:YYYY-MM-DD})
+        local inner = value:sub(2, -2)
+        local elements = vim.split(inner, ",%s*")
         local tbl = {}
-        local elements = vim.split(value:sub(2, -2), ",%s*")
+        local all_parsed = true
         for _, element in ipairs(elements) do
-            local k, v = element:match("^%s*([%w_]+):%s*(.*)$")
+            local k, v = element:match("^%s*([%w_%-]+):%s*(.*)$")
             if k == nil then
-                error("Invalid table element: " .. vim.inspect(element))
+                -- Not a valid key:value pair — treat the whole thing as a raw string
+                all_parsed = false
+                break
             end
             tbl[k] = parse_field_value(v)
         end
-        return tbl
+        if all_parsed then
+            return tbl
+        end
+        -- Fallback: return the braced string as-is (template/placeholder)
+        return value
     elseif value:match("^%[%[.*%]%]$") then
         -- Multiline string
         return value:sub(3, -3)
@@ -79,7 +87,7 @@ function Field:init(this)
     if not type(this.line) == "string" then
         error("Invalid argument: " .. vim.inspect(this))
     end
-    local key, value = this.line:match([[^([%w_]-):%s*(.*)$]])
+    local key, value = this.line:match([[^([%w_%-]-):%s*(.*)$]])
     if key == nil then
         return nil
     end
