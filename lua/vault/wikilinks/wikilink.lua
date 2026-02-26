@@ -149,14 +149,43 @@ function WikilinkData:init(this)
         self.variants[self.slug] = true
     end
 
-    -- Resolve target
+    -- Resolve target: match wikilink slug to an existing note.
+    -- Obsidian resolution order:
+    --   1. Exact slug match (e.g. [[Notes/foo]] → "Notes/foo")
+    --   2. Basename match (e.g. [[foo]] → first slug ending with "/foo" or exactly "foo")
     if this.target then
         self.target = this.target
     else
         --- @type vault.Notes.data.slugs
         local slugs = state.get_global_key("cache.notes.slugs") or scanner().slugs()
+
         if slugs[self.slug] then
+            -- Exact slug match
             self.target = self.slug
+        else
+            -- Basename resolution: build/use a cached basename → slug index
+            local basename_index = state.get_global_key("cache.notes.basename_index")
+            if not basename_index then
+                basename_index = {}
+                for slug, _ in pairs(slugs) do
+                    local base = slug:match("([^/]+)$") or slug
+                    if not basename_index[base] then
+                        basename_index[base] = slug
+                    end
+                    -- Also index the lowercased version for case-insensitive fallback
+                    local base_lower = base:lower()
+                    if not basename_index[base_lower] then
+                        basename_index[base_lower] = slug
+                    end
+                end
+                state.set_global_key("cache.notes.basename_index", basename_index)
+            end
+
+            -- Try exact basename match, then case-insensitive
+            local resolved = basename_index[self.slug] or basename_index[self.slug:lower()]
+            if resolved then
+                self.target = resolved
+            end
         end
     end
 end
