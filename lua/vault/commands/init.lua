@@ -789,8 +789,18 @@ function callbacks.note_inlinks_picker()
         vim.notify("[vault] No inlinks", vim.log.levels.INFO)
         return
     end
-    local notes = require("vault.notes")():filter(vim.tbl_keys(inlinks))
-    safe_find(pickers.notes({ notes = notes }), "No inlink notes found")
+    local notes = require("vault.notes")()
+    local group = notes:to_group()
+    local inlink_slugs = {}
+    for slug, _ in pairs(inlinks) do
+        inlink_slugs[slug] = true
+    end
+    for slug, _ in pairs(group.map) do
+        if not inlink_slugs[slug] then
+            group.map[slug] = nil
+        end
+    end
+    safe_find(pickers.notes({ notes = group }), "No inlink notes found")
 end
 
 --- vault.NoteOutlinks
@@ -816,19 +826,19 @@ function callbacks.note_outlinks_picker()
     end
 
     local notes = require("vault.notes")()
-    local filtered = {}
-    for id, n in pairs(notes.map) do
-        for _, slug in ipairs(slugs) do
-            if n.data.slug == slug then
-                filtered[id] = n
-                break
-            end
+    local group = notes:to_group()
+    local slug_set = {}
+    for _, slug in ipairs(slugs) do
+        slug_set[slug] = true
+    end
+    for id, n in pairs(group.map) do
+        if not slug_set[n.data.slug] then
+            group.map[id] = nil
         end
     end
-    notes.map = filtered
 
     local picker = require("telescope._extensions.vault.pickers")
-        .notes({ notes = notes })
+        .notes({ notes = group })
     if picker then
         picker:find()
     end

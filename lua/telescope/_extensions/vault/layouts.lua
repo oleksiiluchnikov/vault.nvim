@@ -1,5 +1,14 @@
 local Layouts = {}
 
+--- Get UI dimensions with fallback for headless/startup race
+local function ui_size()
+    local uis = vim.api.nvim_list_uis()
+    if uis[1] then
+        return uis[1].height, uis[1].width
+    end
+    return vim.o.lines or 24, vim.o.columns or 80
+end
+
 function Layouts.mini()
     return {
         layout_strategy = "vertical",
@@ -14,43 +23,36 @@ function Layouts.mini()
 end
 
 function Layouts.notes()
-    local bufheight = vim.api.nvim_list_uis()[1].height - 4
-    local bufwidth = vim.api.nvim_list_uis()[1].width - 4
-
+    local h, w = ui_size()
     return {
         sorting_strategy = "ascending",
         layout_config = {
-            height = bufheight,
-            width = bufwidth,
+            height = h - 4,
+            width = w - 4,
             preview_width = 0.4,
         },
     }
 end
 
 function Layouts.tags()
-    local bufheight = vim.api.nvim_list_uis()[1].height - 4
-    local bufwidth = vim.api.nvim_list_uis()[1].width - 4
-    local preview_width = 0.7
-
+    local h, w = ui_size()
     return {
         sorting_strategy = "ascending",
         layout_config = {
-            height = bufheight,
-            width = bufwidth,
-            preview_width = preview_width,
+            height = h - 4,
+            width = w - 4,
+            preview_width = 0.7,
         },
     }
 end
 
 function Layouts.bases()
-    local bufheight = vim.api.nvim_list_uis()[1].height - 4
-    local bufwidth = vim.api.nvim_list_uis()[1].width - 4
-
+    local h, w = ui_size()
     return {
         sorting_strategy = "ascending",
         layout_config = {
-            height = bufheight,
-            width = bufwidth,
+            height = h - 4,
+            width = w - 4,
             preview_width = 0.4,
         },
     }
