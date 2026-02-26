@@ -1043,6 +1043,27 @@ local function on_save(bufnr)
     end
   end
 
+  -- ── Safety: if creates ≈ deletes, it's likely extmark identity loss ──────
+  -- (lines lost their slug → flagged as "delete original + create new")
+  if #diff.creates > 0 and #diff.deletes > 0 then
+    vim.notify(
+      string.format(
+        "[vault] SAFETY: Found %d creates AND %d deletes — likely extmark identity loss. "
+          .. "Applying %d updates only. Please close and reopen the process buffer.",
+        #diff.creates, #diff.deletes, #diff.updates
+      ),
+      vim.log.levels.WARN
+    )
+    local updates_only = { updates = diff.updates, deletes = {}, creates = {} }
+    local n_u = apply_mutations(updates_only, st)
+    vim.notify(string.format("[vault] Applied: %d updated", n_u), vim.log.levels.INFO)
+    vim.schedule(function()
+      M.reload(bufnr)
+      st.saving = false
+    end)
+    return
+  end
+
   -- ── No deletes: apply immediately ────────────────────────────────────────
   if #diff.deletes == 0 then
     local n_u, _, n_c = apply_mutations(diff, st)
