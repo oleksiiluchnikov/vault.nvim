@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
-use strsim::jaro_winkler;
+use strsim::{jaro_winkler, normalized_levenshtein};
 use walkdir::{DirEntry, WalkDir};
 
 fn is_hidden(entry: &DirEntry) -> bool {
@@ -267,8 +267,8 @@ struct WikilinkData {
     count: usize,
     embedded: bool,
     sources: HashMap<String, HashMap<usize, SourceOccurrence>>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    suggestions: Vec<SuggestionCandidate>,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    suggestions: HashMap<String, Vec<SuggestionCandidate>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -599,41 +599,153 @@ fn build_tags_map(notes: &[ParsedNote], root: &str) -> HashMap<String, TagData> 
     tags_map
 }
 
-/// Compute top-N Jaro-Winkler suggestions for a query against a list of slugs.
-/// Also compares against basenames for Obsidian-style resolution (e.g. "foo" matches "Notes/foo").
-fn suggest_candidates(
+// ============================================================================
+// Suggestion Strategies
+// ============================================================================
+
+/// Helper: score, sort, truncate, and convert to SuggestionCandidate vec.
+fn top_n(scored: Vec<(String, f64)>, limit: usize, threshold: f64) -> Vec<SuggestionCandidate> {
+    let mut filtered: Vec<(String, f64)> = scored
+        .into_iter()
+        .filter(|(_, s)| *s >= threshold)
+        .collect();
+    filtered.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    filtered.truncate(limit);
+    filtered
+        .into_iter()
+        .map(|(slug, score)| SuggestionCandidate { slug, score })
+        .collect()
+}
+
+/// Jaro-Winkler fuzzy similarity (compares full slug and basename).
+fn strategy_jaro_winkler(
     query: &str,
     all_slugs: &[&str],
-    _basename_index: &HashMap<&str, &str>,
     limit: usize,
     threshold: f64,
 ) -> Vec<SuggestionCandidate> {
     let query_lower = query.to_lowercase();
-    let query_basename = query.rsplit('/').next().unwrap_or(query).to_lowercase();
-
-    let mut scored: Vec<(String, f64)> = all_slugs
+    let query_base = query.rsplit('/').next().unwrap_or(query).to_lowercase();
+    let scored: Vec<(String, f64)> = all_slugs
         .iter()
         .map(|slug| {
-            let slug_lower = slug.to_lowercase();
-            let slug_basename = slug.rsplit('/').next().unwrap_or(slug).to_lowercase();
-
-            // Score against full slug and basename, take the best
-            let score_full = jaro_winkler(&query_lower, &slug_lower);
-            let score_base = jaro_winkler(&query_basename, &slug_basename);
-            let score = score_full.max(score_base);
-
+            let sl = slug.to_lowercase();
+            let sb = slug.rsplit('/').next().unwrap_or(slug).to_lowercase();
+            let score = jaro_winkler(&query_lower, &sl).max(jaro_winkler(&query_base, &sb));
             (slug.to_string(), score)
         })
-        .filter(|(_, score)| *score >= threshold)
         .collect();
+    top_n(scored, limit, threshold)
+}
 
-    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    scored.truncate(limit);
+/// Normalized Levenshtein distance (0..1, higher = more similar).
+fn strategy_levenshtein(
+    query: &str,
+    all_slugs: &[&str],
+    limit: usize,
+    threshold: f64,
+) -> Vec<SuggestionCandidate> {
+    let query_lower = query.to_lowercase();
+    let query_base = query.rsplit('/').next().unwrap_or(query).to_lowercase();
+    let scored: Vec<(String, f64)> = all_slugs
+        .iter()
+        .map(|slug| {
+            let sl = slug.to_lowercase();
+            let sb = slug.rsplit('/').next().unwrap_or(slug).to_lowercase();
+            let score = normalized_levenshtein(&query_lower, &sl)
+                .max(normalized_levenshtein(&query_base, &sb));
+            (slug.to_string(), score)
+        })
+        .collect();
+    top_n(scored, limit, threshold)
+}
 
-    scored
-        .into_iter()
-        .map(|(slug, score)| SuggestionCandidate { slug, score })
-        .collect()
+/// Substring / contains match. Score = len(query) / len(slug) so longer matches rank higher.
+fn strategy_contains(query: &str, all_slugs: &[&str], limit: usize) -> Vec<SuggestionCandidate> {
+    let query_lower = query.to_lowercase();
+    let scored: Vec<(String, f64)> = all_slugs
+        .iter()
+        .filter_map(|slug| {
+            let sl = slug.to_lowercase();
+            if sl.contains(&query_lower) || query_lower.contains(&sl) {
+                let score =
+                    query_lower.len().min(sl.len()) as f64 / query_lower.len().max(sl.len()) as f64;
+                Some((slug.to_string(), score))
+            } else {
+                // Also check basename
+                let sb = slug.rsplit('/').next().unwrap_or(slug).to_lowercase();
+                let qb = query.rsplit('/').next().unwrap_or(query).to_lowercase();
+                if sb.contains(&qb) || qb.contains(&sb) {
+                    let score = qb.len().min(sb.len()) as f64 / qb.len().max(sb.len()) as f64;
+                    Some((slug.to_string(), score))
+                } else {
+                    None
+                }
+            }
+        })
+        .collect();
+    top_n(scored, limit, 0.0)
+}
+
+/// Prefix match: slug or basename starts with the query (or vice versa).
+fn strategy_prefix(query: &str, all_slugs: &[&str], limit: usize) -> Vec<SuggestionCandidate> {
+    let query_lower = query.to_lowercase();
+    let query_base = query.rsplit('/').next().unwrap_or(query).to_lowercase();
+    let scored: Vec<(String, f64)> = all_slugs
+        .iter()
+        .filter_map(|slug| {
+            let sl = slug.to_lowercase();
+            let sb = slug.rsplit('/').next().unwrap_or(slug).to_lowercase();
+            let is_match = sl.starts_with(&query_lower)
+                || query_lower.starts_with(&sl)
+                || sb.starts_with(&query_base)
+                || query_base.starts_with(&sb);
+            if is_match {
+                // Score = ratio of shorter / longer (exact prefix = 1.0)
+                let score =
+                    query_lower.len().min(sl.len()) as f64 / query_lower.len().max(sl.len()) as f64;
+                Some((slug.to_string(), score))
+            } else {
+                None
+            }
+        })
+        .collect();
+    top_n(scored, limit, 0.0)
+}
+
+/// Compute suggestions for a single unresolved stem across all strategies.
+/// Returns a map: strategy_name → Vec<SuggestionCandidate>.
+fn suggest_all_strategies(
+    query: &str,
+    all_slugs: &[&str],
+    limit: usize,
+) -> HashMap<String, Vec<SuggestionCandidate>> {
+    let mut map = HashMap::new();
+
+    let jw = strategy_jaro_winkler(query, all_slugs, limit, 0.75);
+    if !jw.is_empty() {
+        map.insert("jaro_winkler".to_string(), jw);
+    }
+
+    let lev = strategy_levenshtein(query, all_slugs, limit, 0.55);
+    if !lev.is_empty() {
+        map.insert("levenshtein".to_string(), lev);
+    }
+
+    let cont = strategy_contains(query, all_slugs, limit);
+    // Filter out very low-quality substring matches
+    let cont: Vec<_> = cont.into_iter().filter(|c| c.score >= 0.25).collect();
+    if !cont.is_empty() {
+        map.insert("contains".to_string(), cont);
+    }
+
+    let pre = strategy_prefix(query, all_slugs, limit);
+    let pre: Vec<_> = pre.into_iter().filter(|c| c.score >= 0.25).collect();
+    if !pre.is_empty() {
+        map.insert("prefix".to_string(), pre);
+    }
+
+    map
 }
 
 fn build_wikilinks_map(notes: &[ParsedNote], root: &str) -> HashMap<String, WikilinkData> {
@@ -667,7 +779,7 @@ fn build_wikilinks_map(notes: &[ParsedNote], root: &str) -> HashMap<String, Wiki
                     count: 0,
                     embedded: false,
                     sources: HashMap::new(),
-                    suggestions: Vec::new(),
+                    suggestions: HashMap::new(),
                 });
 
             entry.count += 1;
@@ -695,10 +807,6 @@ fn build_wikilinks_map(notes: &[ParsedNote], root: &str) -> HashMap<String, Wiki
     // Post-process: for each unresolved wikilink, compute Jaro-Winkler suggestions.
     // A wikilink is "unresolved" if its stem doesn't match any slug (exact or basename).
     let all_slugs: Vec<&str> = slugs_set.keys().map(|s| s.as_str()).collect();
-    let basename_ref: HashMap<&str, &str> = basename_to_slug
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
 
     // Collect unresolved stems first, then compute suggestions in parallel
     let unresolved_stems: Vec<String> = wikilinks_map
@@ -718,13 +826,14 @@ fn build_wikilinks_map(notes: &[ParsedNote], root: &str) -> HashMap<String, Wiki
         .cloned()
         .collect();
 
-    let suggestions_map: Vec<(String, Vec<SuggestionCandidate>)> = unresolved_stems
-        .par_iter()
-        .map(|stem| {
-            let candidates = suggest_candidates(stem, &all_slugs, &basename_ref, 5, 0.65);
-            (stem.clone(), candidates)
-        })
-        .collect();
+    let suggestions_map: Vec<(String, HashMap<String, Vec<SuggestionCandidate>>)> =
+        unresolved_stems
+            .par_iter()
+            .map(|stem| {
+                let strategies = suggest_all_strategies(stem, &all_slugs, 5);
+                (stem.clone(), strategies)
+            })
+            .collect();
 
     for (stem, suggestions) in suggestions_map {
         if let Some(entry) = wikilinks_map.get_mut(&stem) {
