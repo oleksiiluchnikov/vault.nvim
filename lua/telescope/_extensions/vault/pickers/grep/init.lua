@@ -4,7 +4,7 @@
 return function(opts)
     opts = opts or {}
     local config = require("vault.config")
-    local root_dir = config.options.root
+    local root_dir = vim.fn.expand(config.options.root)
     local screen_width = vim.api.nvim_list_uis()[1].width
     local screen_height = vim.api.nvim_list_uis()[1].height
     local default_opts = {
