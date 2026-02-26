@@ -820,20 +820,18 @@ function callbacks.note_outlinks_picker()
         vim.notify("[vault] No outlinks", vim.log.levels.INFO)
         return
     end
-    local slugs = {}
+    local target_slugs = {}
     for _, outlink in pairs(outlinks) do
-        table.insert(slugs, outlink.data.slug)
+        if outlink.data.target and outlink.data.target ~= "" then
+            target_slugs[outlink.data.target] = true
+        end
     end
 
     local notes = require("vault.notes")()
     local group = notes:to_group()
-    local slug_set = {}
-    for _, slug in ipairs(slugs) do
-        slug_set[slug] = true
-    end
-    for id, n in pairs(group.map) do
-        if not slug_set[n.data.slug] then
-            group.map[id] = nil
+    for slug, _ in pairs(group.map) do
+        if not target_slugs[slug] then
+            group.map[slug] = nil
         end
     end
 
