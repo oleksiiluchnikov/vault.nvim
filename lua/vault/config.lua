@@ -423,6 +423,19 @@ function Config.setup(options)
     local user_options = options or {}
     local merged = vim.tbl_deep_extend("force", defaults, user_options)
 
+    -- Ensure default ignore patterns are always present (user patterns are additive)
+    if user_options.ignore then
+      local seen = {}
+      local combined = {}
+      for _, pat in ipairs(defaults.ignore) do
+        if not seen[pat] then seen[pat] = true; table.insert(combined, pat) end
+      end
+      for _, pat in ipairs(user_options.ignore) do
+        if not seen[pat] then seen[pat] = true; table.insert(combined, pat) end
+      end
+      merged.ignore = combined
+    end
+
     local is_valid, err = validate_config(merged)
     if not is_valid then
         error("Invalid configuration: " .. err)
