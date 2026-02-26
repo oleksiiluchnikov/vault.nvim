@@ -175,9 +175,6 @@ end
 local function set_line_slug(bufnr, row, slug, st)
   local mark_id = vim.api.nvim_buf_set_extmark(bufnr, NS, row, 0, {
     right_gravity = false,
-    -- Show slug as dim right-aligned hint
-    virt_text = { { slug, "NonText" } },
-    virt_text_pos = "right_align",
   })
   st.mark_to_slug[mark_id] = slug
   st.slug_to_mark[slug] = mark_id
@@ -452,6 +449,7 @@ end
 ---@field updates table[]  {slug: string, fields: table<string, any>}
 ---@field deletes string[]  slugs
 ---@field creates table[]  {fields: table<string, any>}
+---@field _integrity_error? boolean  true if extmark integrity check failed
 
 ---@param bufnr integer
 ---@param st vault.OilEditState
@@ -462,14 +460,20 @@ local function diff_buffer(bufnr, st)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local seen = {}
 
+  -- Count non-empty lines and extmark hits for integrity check
+  local non_empty_lines = 0
+  local extmark_hits = 0
+
   for row = 0, line_count - 1 do
     local line = lines[row + 1]
     if vim.trim(line) == "" then goto continue end
+    non_empty_lines = non_empty_lines + 1
 
     local slug = get_line_slug(bufnr, row, st)
     local cells = split_cells(line)
 
     if slug then
+      extmark_hits = extmark_hits + 1
       seen[slug] = true
       local orig = st.snapshot[slug]
       if orig then
@@ -511,6 +515,35 @@ local function diff_buffer(bufnr, st)
     ::continue::
   end
 
+  -- ── SAFETY: Extmark integrity check ──────────────────────────────────────
+  -- If extmarks are missing on lines that should have them, the slug identity
+  -- has been lost. Computing deletes in this state would be catastrophic.
+  local snapshot_size = vim.tbl_count(st.snapshot)
+
+  if snapshot_size > 0 and non_empty_lines > 0 and extmark_hits == 0 then
+    -- TOTAL extmark loss: every line lost its identity. Refuse ALL operations.
+    vim.notify(
+      "[vault] SAFETY: All extmark identity lost — refusing to save. "
+        .. "Please close this buffer and reopen with :Vault process",
+      vim.log.levels.ERROR
+    )
+    return { updates = {}, deletes = {}, creates = {}, _integrity_error = true }
+  end
+
+  if snapshot_size > 0 and extmark_hits < non_empty_lines * 0.5 then
+    -- PARTIAL extmark loss: many lines lost identity. Refuse deletes.
+    vim.notify(
+      string.format(
+        "[vault] SAFETY: Only %d/%d lines have extmark identity — "
+          .. "skipping delete detection (updates still applied)",
+        extmark_hits, non_empty_lines
+      ),
+      vim.log.levels.WARN
+    )
+    -- Return updates/creates only — no deletes
+    return diff
+  end
+
   -- Deletes: in snapshot but not seen on any line
   for slug, _ in pairs(st.snapshot) do
     if not seen[slug] then
@@ -530,13 +563,16 @@ end
 local function set_frontmatter_field(path, key, value)
   local ok, lines = pcall(vim.fn.readfile, path)
   if not ok then return end
-  if not lines[1] or not lines[1]:match("^%-%-%-") then return end
+  if not lines[1] or not lines[1]:match("^%-%-%-$") then return end
 
   local fm_end = nil
-  for i = 2, #lines do
-    if lines[i]:match("^%-%-%-") then fm_end = i; break end
+  for i = 2, math.min(#lines, 100) do  -- frontmatter must close within 100 lines
+    if lines[i]:match("^%-%-%-$") then fm_end = i; break end
   end
   if not fm_end then return end
+
+  -- Safety: verify the rewritten file preserves all content after frontmatter
+  local body_line_count = #lines - fm_end
 
   local fm_lines = {}
   for i = 2, fm_end - 1 do
@@ -596,6 +632,17 @@ local function set_frontmatter_field(path, key, value)
   table.insert(result, "---")
   for i = fm_end + 1, #lines do table.insert(result, lines[i]) end
 
+  -- Safety: verify body content is preserved (same number of lines after frontmatter)
+  local new_body_count = #result - (#new_fm + 2)  -- +2 for the two "---" lines
+  if new_body_count ~= body_line_count then
+    vim.notify(
+      string.format("[vault] SAFETY: Aborting frontmatter write to %s — body line count mismatch (%d vs %d)",
+        vim.fn.fnamemodify(path, ":t"), new_body_count, body_line_count),
+      vim.log.levels.ERROR
+    )
+    return
+  end
+
   vim.fn.writefile(result, path)
 end
 
@@ -616,6 +663,11 @@ local function apply_mutations(diff, st)
       local config = require("vault.config")
       local new_dir = upd.fields.dir or ""
       if new_dir == "/" then new_dir = "" end
+      -- Safety: reject paths that escape the vault root
+      if new_dir:match("%.%.") then
+        vim.notify("[vault] SAFETY: Refusing to move note to path with '..': " .. new_dir, vim.log.levels.ERROR)
+        goto continue
+      end
       local basename = vim.fn.fnamemodify(path, ":t")
       local new_path = config.options.root .. "/" .. new_dir .. basename
       if new_path ~= path then
@@ -667,6 +719,11 @@ local function apply_mutations(diff, st)
     local config = require("vault.config")
     local dir = create.fields.dir or ""
     if dir == "/" then dir = "" end
+    -- Safety: reject paths that escape the vault root (e.g., "../" in dir)
+    if dir:match("%.%.") then
+      vim.notify("[vault] SAFETY: Refusing to create note with '..' in path: " .. dir, vim.log.levels.ERROR)
+      goto continue
+    end
     local base_slug = slug
     local path = config.options.root .. "/" .. dir .. slug .. config.options.ext
     local counter = 1
@@ -710,14 +767,48 @@ end
 
 -- ─── Save handler ─────────────────────────────────────────────────────────────
 
+--- Hard limit: refuse to delete more than this many notes in a single save.
+--- Catches catastrophic extmark-loss scenarios that slip past integrity checks.
+local DELETE_HARD_CAP = 100
+
+--- Apply safe mutations (updates + creates only) and reload.
+---@param bufnr integer
+---@param st vault.OilEditState
+---@param diff vault.OilEditDiff
+local function apply_safe_and_reload(bufnr, st, diff)
+  local safe_diff = { updates = diff.updates, deletes = {}, creates = diff.creates }
+  local n_u, _, n_c = apply_mutations(safe_diff, st)
+  local msg = string.format("[vault] Applied: %d updated, %d created", n_u, n_c)
+  if #diff.deletes > 0 then
+    msg = msg .. string.format(" (%d deletes skipped)", #diff.deletes)
+  end
+  vim.notify(msg, vim.log.levels.INFO)
+  vim.schedule(function()
+    M.reload(bufnr)
+    st.saving = false
+  end)
+end
+
 ---@param bufnr integer
 local function on_save(bufnr)
   local st = buf_states[bufnr]
-  if not st then return end
+  if not st then
+    vim.notify("[vault] Process buffer state lost — please reopen with :Vault process", vim.log.levels.WARN)
+    vim.bo[bufnr].modified = false
+    return
+  end
   if st.saving then return end
   st.saving = true
 
   local diff = diff_buffer(bufnr, st)
+
+  -- Integrity error — diff_buffer already notified the user
+  if diff._integrity_error then
+    vim.bo[bufnr].modified = false
+    st.saving = false
+    return
+  end
+
   local total = #diff.updates + #diff.deletes + #diff.creates
   if total == 0 then
     vim.bo[bufnr].modified = false
@@ -726,16 +817,74 @@ local function on_save(bufnr)
     return
   end
 
-  local n_u, n_d, n_c = apply_mutations(diff, st)
-  vim.notify(
-    string.format("[vault] Applied: %d updated, %d trashed, %d created", n_u, n_d, n_c),
-    vim.log.levels.INFO
+  -- ── No deletes: apply immediately ────────────────────────────────────────
+  if #diff.deletes == 0 then
+    local n_u, _, n_c = apply_mutations(diff, st)
+    vim.notify(
+      string.format("[vault] Applied: %d updated, %d created", n_u, n_c),
+      vim.log.levels.INFO
+    )
+    vim.schedule(function()
+      M.reload(bufnr)
+      st.saving = false
+    end)
+    return
+  end
+
+  -- ── Hard cap on deletes ──────────────────────────────────────────────────
+  if #diff.deletes > DELETE_HARD_CAP then
+    vim.notify(
+      string.format(
+        "[vault] SAFETY: Refusing to delete %d notes (cap is %d). "
+          .. "This likely indicates a bug. Applying updates/creates only. "
+          .. "Please close and reopen the process buffer.",
+        #diff.deletes, DELETE_HARD_CAP
+      ),
+      vim.log.levels.ERROR
+    )
+    apply_safe_and_reload(bufnr, st, diff)
+    return
+  end
+
+  -- ── Confirmation prompt for deletes ──────────────────────────────────────
+  local preview_slugs = {}
+  for i = 1, math.min(10, #diff.deletes) do
+    table.insert(preview_slugs, "  - " .. diff.deletes[i])
+  end
+  if #diff.deletes > 10 then
+    table.insert(preview_slugs, string.format("  ... and %d more", #diff.deletes - 10))
+  end
+
+  local prompt = string.format(
+    "Vault process: About to TRASH %d note%s:\n%s\n\nAlso: %d updated, %d created.\n\nProceed with deletes?",
+    #diff.deletes,
+    #diff.deletes == 1 and "" or "s",
+    table.concat(preview_slugs, "\n"),
+    #diff.updates,
+    #diff.creates
   )
 
-  vim.schedule(function()
-    M.reload(bufnr)
+  local choice = vim.fn.confirm(prompt, "&Yes, trash them\n&No, skip deletes\n&Cancel (no changes)")
+
+  if choice == 1 then
+    -- Apply everything including deletes
+    local n_u, n_d, n_c = apply_mutations(diff, st)
+    vim.notify(
+      string.format("[vault] Applied: %d updated, %d trashed, %d created", n_u, n_d, n_c),
+      vim.log.levels.INFO
+    )
+    vim.schedule(function()
+      M.reload(bufnr)
+      st.saving = false
+    end)
+  elseif choice == 2 then
+    -- Apply updates + creates only, skip deletes
+    apply_safe_and_reload(bufnr, st, diff)
+  else
+    -- Cancel entirely
+    vim.notify("[vault] Save cancelled", vim.log.levels.INFO)
     st.saving = false
-  end)
+  end
 end
 
 -- ─── Public API ───────────────────────────────────────────────────────────────
@@ -842,13 +991,17 @@ function M.open(opts)
   })
 
   -- Allow :q without "no write" error when there are no real changes
+  -- Also allow quit if state is lost (nothing to save anyway)
   vim.api.nvim_create_autocmd("QuitPre", {
     buffer = bufnr,
     callback = function()
       local s = buf_states[bufnr]
-      if not s then return end
+      if not s then
+        vim.bo[bufnr].modified = false
+        return
+      end
       local d = diff_buffer(bufnr, s)
-      if #d.updates == 0 and #d.deletes == 0 and #d.creates == 0 then
+      if d._integrity_error or (#d.updates == 0 and #d.deletes == 0 and #d.creates == 0) then
         vim.bo[bufnr].modified = false
       end
     end,
