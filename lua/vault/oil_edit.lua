@@ -257,6 +257,137 @@ local function set_line_slug(bufnr, row, slug, st)
   return mark_id
 end
 
+-- ─── Extmark drift reconciliation ────────────────────────────────────────────
+--
+-- Problem: nvim_buf_set_lines (used by dd, cc, visual paste, etc.) uses
+-- delete+insert semantics that shift extmarks on neighboring rows. This causes
+-- slug identity to drift: extmark N may end up on the wrong row, so the diff
+-- engine applies changes to the wrong note.
+--
+-- Solution: before diffing, verify each row's extmark slug by cross-checking
+-- the title cell against the snapshot. If drift is detected, reconcile by
+-- matching line content (title) to find the true slug for each row.
+
+--- Build a reconciled slug-per-row map that corrects for extmark drift.
+--- Returns a table { [row] = slug } where each slug is verified or
+--- content-matched, plus metadata about the reconciliation.
+---@param bufnr integer
+---@param st vault.OilEditState
+---@param lines string[]  buffer lines (already read)
+---@return table<integer, string|nil>  row → slug (nil = genuinely new line)
+---@return integer drift_count  number of rows where extmark was wrong
+---@return integer reconciled_count  number of drifted rows successfully fixed
+local function reconcile_extmarks(bufnr, st, lines)
+  local title_col_idx = nil
+  for i, col in ipairs(st.columns) do
+    if col == "title" then title_col_idx = i; break end
+  end
+
+  -- Build reverse lookup: snapshot title → slug (for content matching)
+  -- Only used when extmark drift is detected.
+  local title_to_slugs = {}  -- title_text → list of slugs (handle duplicates)
+  if title_col_idx then
+    for slug, snap in pairs(st.snapshot) do
+      local title_rendered = vim.trim(pad(fmt_value(snap.title), st.col_widths[title_col_idx]))
+      if not title_to_slugs[title_rendered] then
+        title_to_slugs[title_rendered] = {}
+      end
+      table.insert(title_to_slugs[title_rendered], slug)
+    end
+  end
+
+  local row_to_slug = {}      -- final reconciled map
+  local drift_count = 0
+  local reconciled_count = 0
+  local claimed_slugs = {}    -- slugs already assigned to a row (prevent duplicates)
+  local line_count = #lines
+
+  for row = 0, line_count - 1 do
+    local line = lines[row + 1]
+    if vim.trim(line) == "" then goto continue end
+
+    local extmark_slug = get_line_slug(bufnr, row, st)
+    local cells = split_cells(line)
+
+    if extmark_slug and st.snapshot[extmark_slug] then
+      -- Extmark claims this row is `extmark_slug`. Verify via title.
+      if title_col_idx then
+        local expected_title = vim.trim(pad(
+          fmt_value(st.snapshot[extmark_slug].title),
+          st.col_widths[title_col_idx]
+        ))
+        local actual_title = cells[title_col_idx] or ""
+
+        if expected_title == actual_title then
+          -- Extmark is correct — use it
+          row_to_slug[row] = extmark_slug
+          claimed_slugs[extmark_slug] = true
+        else
+          -- DRIFT DETECTED: extmark says one slug but title says another.
+          drift_count = drift_count + 1
+          -- Try content-based reconciliation: look up by title
+          local candidates = title_to_slugs[actual_title]
+          if candidates then
+            -- Find a candidate that hasn't been claimed yet
+            local matched = false
+            for _, cand_slug in ipairs(candidates) do
+              if not claimed_slugs[cand_slug] then
+                row_to_slug[row] = cand_slug
+                claimed_slugs[cand_slug] = true
+                reconciled_count = reconciled_count + 1
+                matched = true
+                break
+              end
+            end
+            if not matched then
+              -- All candidates claimed — treat as drifted but unresolvable
+              -- Still use extmark slug as fallback (better than nil)
+              row_to_slug[row] = extmark_slug
+              claimed_slugs[extmark_slug] = true
+            end
+          else
+            -- Title was edited AND extmark drifted — can't distinguish
+            -- which note this was. Use extmark slug as best guess but
+            -- flag the drift so we can warn.
+            row_to_slug[row] = extmark_slug
+            claimed_slugs[extmark_slug] = true
+          end
+        end
+      else
+        -- No title column — can't verify, trust the extmark
+        row_to_slug[row] = extmark_slug
+        claimed_slugs[extmark_slug] = true
+      end
+    elseif extmark_slug then
+      -- Extmark points to a slug not in snapshot (shouldn't happen normally)
+      -- Treat as a new line
+      row_to_slug[row] = nil
+    else
+      -- No extmark at all. Try content-based recovery.
+      if title_col_idx then
+        local actual_title = cells[title_col_idx] or ""
+        local candidates = title_to_slugs[actual_title]
+        if candidates then
+          for _, cand_slug in ipairs(candidates) do
+            if not claimed_slugs[cand_slug] then
+              row_to_slug[row] = cand_slug
+              claimed_slugs[cand_slug] = true
+              reconciled_count = reconciled_count + 1
+              drift_count = drift_count + 1  -- extmark was missing entirely
+              break
+            end
+          end
+        end
+        -- If no candidate found, row_to_slug[row] stays nil → new note
+      end
+    end
+
+    ::continue::
+  end
+
+  return row_to_slug, drift_count, reconciled_count
+end
+
 -- ─── Data extraction ──────────────────────────────────────────────────────────
 
 --- Read note frontmatter fields for the given columns.
@@ -463,6 +594,7 @@ local function apply_extmarks(bufnr, st, records)
     vim.api.nvim_buf_set_extmark(bufnr, NS, 0, 0, {
       virt_lines_above = true,
       virt_lines = virt_lines,
+      right_gravity = false,
       -- This extmark is just for the header; don't track it as a slug
     })
   end
@@ -484,13 +616,16 @@ local function update_diff_signs(bufnr, st)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local seen = {}
 
+  -- Use reconciled slugs for diff signs (consistent with save logic)
+  local row_to_slug = reconcile_extmarks(bufnr, st, lines)
+
   for row = 0, line_count - 1 do
     local line = lines[row + 1]
     if vim.trim(line) == "" then goto continue end
 
-    local slug = get_line_slug(bufnr, row, st)
+    local slug = row_to_slug[row]
     if not slug then
-      -- No extmark → new note
+      -- No identity → new note
       local cells = split_cells(line)
       local has_content = false
       for _, c in ipairs(cells) do
@@ -550,20 +685,33 @@ local function diff_buffer(bufnr, st)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local seen = {}
 
-  -- Count non-empty lines and extmark hits for integrity check
+  -- ── Reconcile extmark drift before diffing ──────────────────────────────
+  local row_to_slug, drift_count, reconciled_count = reconcile_extmarks(bufnr, st, lines)
+
+  if drift_count > 0 then
+    vim.notify(
+      string.format(
+        "[vault] Extmark drift detected on %d row%s (%d reconciled via title matching)",
+        drift_count, drift_count == 1 and "" or "s", reconciled_count
+      ),
+      drift_count > reconciled_count and vim.log.levels.WARN or vim.log.levels.INFO
+    )
+  end
+
+  -- Count non-empty lines and identified lines for integrity check
   local non_empty_lines = 0
-  local extmark_hits = 0
+  local identified_lines = 0
 
   for row = 0, line_count - 1 do
     local line = lines[row + 1]
     if vim.trim(line) == "" then goto continue end
     non_empty_lines = non_empty_lines + 1
 
-    local slug = get_line_slug(bufnr, row, st)
+    local slug = row_to_slug[row]  -- use reconciled slug, not raw extmark
     local cells = split_cells(line)
 
     if slug then
-      extmark_hits = extmark_hits + 1
+      identified_lines = identified_lines + 1
       seen[slug] = true
       local orig = st.snapshot[slug]
       if orig then
@@ -588,7 +736,7 @@ local function diff_buffer(bufnr, st)
         end
       end
     else
-      -- No extmark → new note
+      -- No identity → new note
       local fields = {}
       local has_content = false
       for i, col in ipairs(st.columns) do
@@ -605,28 +753,28 @@ local function diff_buffer(bufnr, st)
     ::continue::
   end
 
-  -- ── SAFETY: Extmark integrity check ──────────────────────────────────────
-  -- If extmarks are missing on lines that should have them, the slug identity
-  -- has been lost. Computing deletes in this state would be catastrophic.
+  -- ── SAFETY: Identity integrity check ─────────────────────────────────────
+  -- After reconciliation, if we still can't identify most lines, something
+  -- is seriously wrong. Refuse operations accordingly.
   local snapshot_size = vim.tbl_count(st.snapshot)
 
-  if snapshot_size > 0 and non_empty_lines > 0 and extmark_hits == 0 then
-    -- TOTAL extmark loss: every line lost its identity. Refuse ALL operations.
+  if snapshot_size > 0 and non_empty_lines > 0 and identified_lines == 0 then
+    -- TOTAL identity loss even after reconciliation. Refuse ALL operations.
     vim.notify(
-      "[vault] SAFETY: All extmark identity lost — refusing to save. "
+      "[vault] SAFETY: All line identity lost (even after title reconciliation) — refusing to save. "
         .. "Please close this buffer and reopen with :Vault process",
       vim.log.levels.ERROR
     )
     return { updates = {}, deletes = {}, creates = {}, _integrity_error = true }
   end
 
-  if snapshot_size > 0 and extmark_hits < non_empty_lines * 0.5 then
-    -- PARTIAL extmark loss: many lines lost identity. Refuse deletes.
+  if snapshot_size > 0 and identified_lines < non_empty_lines * 0.5 then
+    -- PARTIAL identity loss: many lines unidentifiable. Refuse deletes.
     vim.notify(
       string.format(
-        "[vault] SAFETY: Only %d/%d lines have extmark identity — "
+        "[vault] SAFETY: Only %d/%d lines identified (after reconciliation) — "
           .. "skipping delete detection (updates still applied)",
-        extmark_hits, non_empty_lines
+        identified_lines, non_empty_lines
       ),
       vim.log.levels.WARN
     )
@@ -1320,5 +1468,8 @@ function M.reload(bufnr)
   vim.api.nvim_buf_clear_namespace(bufnr, NS_DIFF, 0, -1)
   vim.bo[bufnr].modified = false
 end
+
+--- Debug: expose buf_states for testing
+M._buf_states = buf_states
 
 return M
