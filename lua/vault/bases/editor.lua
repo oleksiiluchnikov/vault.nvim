@@ -1644,6 +1644,13 @@ end
 ---@param opts? { notes?: vault.Notes, columns?: string[], filter_desc?: string, base?: vault.Base }
 function M.open(opts)
   opts = opts or {}
+
+  -- Clear winfixbuf so we can switch buffers (e.g. after Telescope closes)
+  local win = vim.api.nvim_get_current_win()
+  if vim.wo[win].winfixbuf then
+    vim.wo[win].winfixbuf = false
+  end
+
   local base = opts.base
   local columns = opts.columns or DEFAULT_COLUMNS
   local display_names = {}

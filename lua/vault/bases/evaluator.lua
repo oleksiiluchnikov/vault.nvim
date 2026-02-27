@@ -532,9 +532,13 @@ local function resolve_identifier(name, ctx)
         end
     end
 
-    -- Also try data fields directly
-    if note.data and note.data[name] ~= nil then
-        return note.data[name]
+    -- Also try data fields directly (use pcall to guard against
+    -- NoteData __index metamethod throwing on unknown keys)
+    if note.data then
+        local ok_d, val_d = pcall(function() return note.data[name] end)
+        if ok_d and val_d ~= nil then
+            return val_d
+        end
     end
 
     return nil
@@ -668,6 +672,13 @@ local eval_node
 --- @param ctx vault.bases.EvalContext
 --- @return any
 local function eval_method(obj, method, args, ctx)
+    -- nil/missing values: isEmpty → true, everything else → nil/false
+    if obj == nil then
+        if method == "isEmpty" then return true end
+        if method == "length" then return 0 end
+        return nil
+    end
+
     -- ---- File methods ----
     if type(obj) == "table" and obj._type == "file_ref" then
         local note = obj.note
