@@ -402,13 +402,14 @@ local function reconcile_extmarks(bufnr, st, lines)
         ))
         local actual_title = cells[title_col_idx] or ""
 
-        if expected_title == actual_title then
+         if expected_title == actual_title then
           -- Extmark is correct — use it
           row_to_slug[row] = extmark_slug
           claimed_slugs[extmark_slug] = true
         else
           -- DRIFT DETECTED: extmark says one slug but title says another.
           drift_count = drift_count + 1
+
           -- Try content-based reconciliation: look up by title
           local candidates = title_to_slugs[actual_title]
           if candidates then
@@ -557,7 +558,8 @@ local function build_records(notes_map, columns, base)
 
       for _, col in ipairs(columns) do
         if col == "title" then
-          fields.title = fm.title or (note.data and note.data.stem) or slug
+          local basename = slug:match("[^/]+$") or slug
+          fields.title = fm.title or (note.data and note.data.stem) or basename
         elseif col == "dir" then
           local relpath = note.data and note.data.relpath or ""
           local dir = relpath:match("^(.-/)[^/]*$") or ""
@@ -813,7 +815,7 @@ local function update_diff_signs(bufnr, st)
         local cells = split_cells(line)
         local changed = false
         for i, col in ipairs(st.columns) do
-          local old_rendered = vim.trim(pad(fmt_value(orig[col]), st.col_widths[i]))
+          local old_rendered = vim.trim(pad(fmt_value(orig[col], col), st.col_widths[i]))
           if old_rendered ~= (cells[i] or "") then changed = true; break end
         end
         if changed then
@@ -894,14 +896,13 @@ local function diff_buffer(bufnr, st)
         end
         for i, col in ipairs(st.columns) do
           if formula_set[col] then goto next_col end  -- skip read-only formula columns
-          local old_rendered = vim.trim(pad(fmt_value(orig[col]), st.col_widths[i]))
+          local old_rendered = vim.trim(pad(fmt_value(orig[col], col), st.col_widths[i]))
           local new_text = cells[i] or ""
           if old_rendered ~= new_text then
-            if old_rendered:match("…$") and not new_text:match("…$") then
-              vim.notify(
-                string.format("[vault] Warning: '%s' was truncated for %s — edit may replace full value", col, slug),
-                vim.log.levels.WARN
-              )
+            -- If EITHER the old or new text is truncated (ends with …),
+            -- skip the field — truncated values cannot be reliably diffed.
+            if old_rendered:match("…$") or new_text:match("…$") then
+              goto next_col
             end
             changed_fields[col] = parse_value(new_text, col)
             has_changes = true
@@ -916,12 +917,18 @@ local function diff_buffer(bufnr, st)
       -- No identity → new note
       local fields = {}
       local has_content = false
+      local formula_set = {}
+      if st.formula_cols then
+        for _, fc in ipairs(st.formula_cols) do formula_set[fc] = true end
+      end
       for i, col in ipairs(st.columns) do
+        if formula_set[col] then goto next_create_col end  -- skip formula columns
         local text = cells[i] or ""
         if text ~= "" and text ~= EMPTY_CELL then
           fields[col] = parse_value(text, col)
           has_content = true
         end
+        ::next_create_col::
       end
       if has_content then
         table.insert(diff.creates, { fields = fields })
@@ -1370,23 +1377,57 @@ local function on_save(bufnr)
 
   -- ── Safety: if creates ≈ deletes, it's likely extmark identity loss ──────
   -- (lines lost their slug → flagged as "delete original + create new")
+  -- However, small numbers (e.g. 1 create + 1 delete) usually mean the user
+  -- edited a title, causing the old slug to appear as "deleted" and the new
+  -- title as "created". In that case, try to pair them as renames/updates.
   if #diff.creates > 0 and #diff.deletes > 0 then
-    vim.notify(
-      string.format(
-        "[vault] SAFETY: Found %d creates AND %d deletes — likely extmark identity loss. "
-          .. "Applying %d updates only. Please close and reopen the process buffer.",
-        #diff.creates, #diff.deletes, #diff.updates
-      ),
-      vim.log.levels.WARN
-    )
-    local updates_only = { updates = diff.updates, deletes = {}, creates = {} }
-    local n_u = apply_mutations(updates_only, st)
-    vim.notify(string.format("[vault] Applied: %d updated", n_u), vim.log.levels.INFO)
-    vim.schedule(function()
-      M.reload(bufnr)
-      st.saving = false
-    end)
-    return
+    -- Try to pair creates with deletes by matching row proximity.
+    -- If counts are small (≤5), attempt to convert create+delete pairs into
+    -- updates by assigning the deleted slug to the created row's fields.
+    if #diff.creates <= 5 and #diff.deletes <= 5 and #diff.creates == #diff.deletes then
+      -- Pair them: each "create" is really an edit of the corresponding "delete"
+      -- (the extmark drifted, so the slug was lost for that row)
+      local n_paired = #diff.creates
+      -- Build formula set to filter out read-only columns
+      local formula_set = {}
+      if st.formula_cols then
+        for _, fc in ipairs(st.formula_cols) do formula_set[fc] = true end
+      end
+      for i, cr in ipairs(diff.creates) do
+        local del_slug = diff.deletes[i]
+        if del_slug then
+          -- Filter out formula columns from the paired update
+          local fields = {}
+          for k, v in pairs(cr.fields) do
+            if not formula_set[k] then fields[k] = v end
+          end
+          table.insert(diff.updates, { slug = del_slug, fields = fields })
+        end
+      end
+      diff.creates = {}
+      diff.deletes = {}
+      vim.notify(
+        string.format("[vault] Paired %d create+delete as title edits", n_paired),
+        vim.log.levels.INFO
+      )
+    else
+      vim.notify(
+        string.format(
+          "[vault] SAFETY: Found %d creates AND %d deletes — likely extmark identity loss. "
+            .. "Applying %d updates only. Please close and reopen the process buffer.",
+          #diff.creates, #diff.deletes, #diff.updates
+        ),
+        vim.log.levels.WARN
+      )
+      local updates_only = { updates = diff.updates, deletes = {}, creates = {} }
+      local n_u = apply_mutations(updates_only, st)
+      vim.notify(string.format("[vault] Applied: %d updated", n_u), vim.log.levels.INFO)
+      vim.schedule(function()
+        M.reload(bufnr)
+        st.saving = false
+      end)
+      return
+    end
   end
 
   -- ── No deletes: apply immediately ────────────────────────────────────────
@@ -1561,8 +1602,8 @@ function M.open(opts)
 
   -- Window options (no conceal needed — slug is in extmarks, not text)
   vim.wo[winid].signcolumn = "yes"
-  vim.wo[winid].number = false
-  vim.wo[winid].relativenumber = false
+  vim.wo[winid].number = true
+  vim.wo[winid].relativenumber = true
   vim.wo[winid].wrap = false
 
   -- Apply extmarks: header virt_lines + slug identity on each data line
@@ -1656,7 +1697,8 @@ function M.reload(bufnr)
       local fields = {}
       for _, col in ipairs(st.columns) do
         if col == "title" then
-          fields.title = fm.title or slug
+          local basename = slug:match("[^/]+$") or slug
+          fields.title = fm.title or basename
         elseif col == "dir" then
           local relpath = require("vault.utils").path_to_relpath(path)
           local dir = relpath:match("^(.-/)[^/]*$") or "/"
