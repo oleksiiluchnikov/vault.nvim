@@ -577,12 +577,20 @@ describe("bases.editor", function()
       assert.are.equal("title", st.sort_by.col)
       assert.are.equal("asc", st.sort_by.dir)
 
-      -- Verify lines are sorted
+      -- Verify lines are sorted: extract title column by index
+      local title_col_idx = nil
+      for i, col in ipairs(st.columns) do
+        if col == "title" then title_col_idx = i; break end
+      end
+      assert.truthy(title_col_idx, "title column must exist in st.columns")
       local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
       local titles = {}
       for _, line in ipairs(lines) do
-        local title = vim.trim((line:match("^(.-)  ") or line):match("^(.-)%s*│") or "")
+        if vim.trim(line) == "" then goto cont end
+        local cells = vim.split(line, "│", { plain = true })
+        local title = vim.trim(cells[title_col_idx] or "")
         table.insert(titles, title:lower())
+        ::cont::
       end
       for i = 2, #titles do
         assert.truthy(titles[i - 1] <= titles[i],
@@ -644,12 +652,20 @@ describe("bases.editor", function()
       assert.are.equal("title", st.sort_by.col)
       assert.are.equal("desc", st.sort_by.dir)
 
-      -- Verify lines are sorted descending
+      -- Verify lines are sorted descending: extract title column by index
+      local title_col_idx2 = nil
+      for i, col in ipairs(st.columns) do
+        if col == "title" then title_col_idx2 = i; break end
+      end
+      assert.truthy(title_col_idx2, "title column must exist in st.columns")
       local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
       local titles = {}
       for _, line in ipairs(lines) do
-        local title = vim.trim((line:match("^(.-)  ") or line):match("^(.-)%s*│") or "")
+        if vim.trim(line) == "" then goto cont2 end
+        local cells = vim.split(line, "│", { plain = true })
+        local title = vim.trim(cells[title_col_idx2] or "")
         table.insert(titles, title:lower())
+        ::cont2::
       end
       for i = 2, #titles do
         assert.truthy(titles[i - 1] >= titles[i],
