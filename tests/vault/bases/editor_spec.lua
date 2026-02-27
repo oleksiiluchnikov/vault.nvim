@@ -1,14 +1,14 @@
--- tests/vault/oil_edit_spec.lua
--- Tests for oil_edit extmark drift reconciliation.
+-- tests/vault/bases/editor_spec.lua
+-- Tests for bases editor extmark drift reconciliation.
 
 local fixture_root = vim.fn.getcwd() .. "/tests/fixtures/demo-vault"
 
-describe("oil_edit", function()
-  local oil_edit
+describe("bases.editor", function()
+  local editor
 
   before_each(function()
-    package.loaded["vault.oil_edit"] = nil
-    oil_edit = require("vault.oil_edit")
+    package.loaded["vault.bases.editor"] = nil
+    editor = require("vault.bases.editor")
   end)
 
   after_each(function()
@@ -27,7 +27,7 @@ describe("oil_edit", function()
       local notes = Notes()
       assert(vim.tbl_count(notes.map) >= 5, "expected at least 5 fixture notes")
 
-      oil_edit.open({ notes = notes, filter_desc = "test-open" })
+      editor.open({ notes = notes, filter_desc = "test-open" })
 
       local bufnr = vim.api.nvim_get_current_buf()
       local name = vim.api.nvim_buf_get_name(bufnr)
@@ -37,9 +37,9 @@ describe("oil_edit", function()
       assert.are.equal(vim.tbl_count(notes.map), line_count)
 
       -- All lines should have extmark identity
-      local st = oil_edit._buf_states[bufnr]
+      local st = editor._buf_states[bufnr]
       assert.truthy(st, "buf_states should have entry")
-      local NS = vim.api.nvim_create_namespace("vault_oil_edit")
+      local NS = vim.api.nvim_create_namespace("vault_bases_editor")
       for row = 0, line_count - 1 do
         local marks = vim.api.nvim_buf_get_extmarks(bufnr, NS, { row, 0 }, { row, -1 }, {})
         local found = false
@@ -56,10 +56,10 @@ describe("oil_edit", function()
       local Notes = require("vault.notes")
       local notes = Notes()
 
-      oil_edit.open({ notes = notes, filter_desc = "test-drift" })
+      editor.open({ notes = notes, filter_desc = "test-drift" })
       local bufnr = vim.api.nvim_get_current_buf()
-      local st = oil_edit._buf_states[bufnr]
-      local NS = vim.api.nvim_create_namespace("vault_oil_edit")
+      local st = editor._buf_states[bufnr]
+      local NS = vim.api.nvim_create_namespace("vault_bases_editor")
       local line_count = vim.api.nvim_buf_line_count(bufnr)
 
       -- Record original slug-per-row
@@ -121,9 +121,9 @@ describe("oil_edit", function()
       local Notes = require("vault.notes")
       local notes = Notes()
 
-      oil_edit.open({ notes = notes, filter_desc = "test-no-corrupt" })
+      editor.open({ notes = notes, filter_desc = "test-no-corrupt" })
       local bufnr = vim.api.nvim_get_current_buf()
-      local st = oil_edit._buf_states[bufnr]
+      local st = editor._buf_states[bufnr]
       local line_count = vim.api.nvim_buf_line_count(bufnr)
 
       -- Record the title for each slug from the file (ground truth)
