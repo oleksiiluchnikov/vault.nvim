@@ -559,16 +559,27 @@ local function build_subcommands()
                         mode = "all",
                     })
                     desc = "tag:" .. args[2]
-                elseif filter == "base" and args[2] then
-                    -- Open editor for a specific .base file
-                    local Bases = require("vault.bases")
-                    local bases = Bases()
-                    local base = bases:get(args[2])
-                    if not base then
-                        vim.notify("[vault] Base not found: " .. args[2], vim.log.levels.ERROR)
-                        return
+                elseif filter == "base" then
+                    if args[2] then
+                        -- Join remaining args to support base names with spaces
+                        local base_name = table.concat(vim.list_slice(args, 2), " ")
+                        local Bases = require("vault.bases")
+                        local bases = Bases()
+                        local base = bases:get(base_name)
+                        if not base then
+                            vim.notify("[vault] Base not found: " .. base_name, vim.log.levels.ERROR)
+                            return
+                        end
+                        bases_editor.open({ base = base })
+                    else
+                        -- No base name given — open Telescope bases picker
+                        local ok, picker = pcall(require, "telescope._extensions.vault.pickers.bases")
+                        if ok then
+                            picker():find()
+                        else
+                            vim.notify("[vault] Telescope bases picker not available: " .. tostring(picker), vim.log.levels.ERROR)
+                        end
                     end
-                    bases_editor.open({ base = base })
                     return
                 elseif filter == "empty-property" then
                     -- Fallback: use API which handles the complex logic
