@@ -42,6 +42,7 @@ local NS_DIFF    = vim.api.nvim_create_namespace("vault_oil_diff")
 ---@field base?         vault.Base       the Base object (if opened via base)
 ---@field display_names table<string, string>  col → header display name
 ---@field formula_cols  string[]         formula column names (read-only)
+---@field sort_by?      { col: string, dir: "asc"|"desc" }  current sort
 
 local buf_states = {}  -- [bufnr] = vault.OilEditState
 
@@ -591,6 +592,75 @@ local function build_records(notes_map, columns, base)
   return records
 end
 
+-- ─── Sorting ──────────────────────────────────────────────────────────────────
+
+--- Sort records by a column and direction.
+---@param records table[]
+---@param sort_by? { col: string, dir: "asc"|"desc" }
+---@return table[]  same table, sorted in place
+local function sort_records(records, sort_by)
+  if not sort_by or not sort_by.col then
+    table.sort(records, function(a, b) return a.slug < b.slug end)
+    return records
+  end
+
+  local col = sort_by.col
+  local desc = sort_by.dir == "desc"
+
+  -- Pre-compute sort keys to avoid non-deterministic fmt_value in comparator
+  local sort_keys = {}
+  for _, rec in ipairs(records) do
+    local v = rec.fields[col]
+    if v == nil or v == "" then
+      sort_keys[rec.slug] = nil
+    elseif type(v) == "table" then
+      sort_keys[rec.slug] = fmt_value(v, col):lower()
+    else
+      sort_keys[rec.slug] = tostring(v):lower()
+    end
+  end
+
+  table.sort(records, function(a, b)
+    local va = sort_keys[a.slug]
+    local vb = sort_keys[b.slug]
+
+    -- Nil/empty sorts last
+    if va == nil and vb == nil then return a.slug < b.slug end
+    if va == nil then return false end
+    if vb == nil then return true end
+
+    -- Numeric comparison if both are numbers
+    local na, nb = tonumber(va), tonumber(vb)
+    if na and nb then
+      if na == nb then return a.slug < b.slug end
+      if desc then return na > nb else return na < nb end
+    end
+
+    -- String comparison
+    if va == vb then return a.slug < b.slug end
+    if desc then return va > vb else return va < vb end
+  end)
+
+  return records
+end
+
+--- Extract sort_by from a base view definition.
+---@param base vault.Base
+---@return { col: string, dir: "asc"|"desc" }|nil
+local function sort_from_base(base)
+  if not base.data.views or not base.data.views[1] then return nil end
+  local view = base.data.views[1]
+  if not view.sort_by then return nil end
+
+  local sort = view.sort_by
+  local key = sort.key or sort[1]
+  if not key then return nil end
+
+  local col = base_key_to_col(key)
+  local dir = sort.direction or sort.dir or "asc"
+  return { col = col, dir = dir }
+end
+
 -- ─── Snapshot ─────────────────────────────────────────────────────────────────
 
 ---@param records table[]
@@ -627,10 +697,13 @@ end
 ---@param st vault.OilEditState
 ---@return table[] virt_lines  list of {chunks} for nvim_buf_set_extmark virt_lines
 local function build_header_virt_lines(st)
-  -- Header row (use display names if available)
+  -- Header row (use display names if available, with sort indicator)
   local hcells = {}
   for i, col in ipairs(st.columns) do
     local label = (st.display_names and st.display_names[col]) or col
+    if st.sort_by and st.sort_by.col == col then
+      label = label .. (st.sort_by.dir == "asc" and " ▲" or " ▼")
+    end
     table.insert(hcells, pad(label, st.col_widths[i]))
   end
   local header_text = table.concat(hcells, SEP)
@@ -1438,6 +1511,10 @@ function M.open(opts)
   -- Build records (pass base for formula evaluation)
   local records = build_records(notes_map, columns, base)
 
+  -- Apply sort (from base view or default)
+  local initial_sort = base and sort_from_base(base) or nil
+  sort_records(records, initial_sort)
+
   -- Create buffer
   local bufnr = vim.api.nvim_create_buf(true, false)
   local buf_name = "vault://process/" .. filter_desc:gsub("%s+", "-")
@@ -1464,6 +1541,7 @@ function M.open(opts)
     base          = base,
     display_names = display_names,
     formula_cols  = formula_cols,
+    sort_by       = initial_sort,
   }
   for _, rec in ipairs(records) do
     st.note_paths[rec.slug] = rec.path
@@ -1530,8 +1608,18 @@ function M.open(opts)
     callback = function() buf_states[bufnr] = nil end,
   })
 
+  -- Buffer-local keymaps
+  local kopts = { buffer = bufnr, silent = true }
+  vim.keymap.set("n", "gs", function() M.sort_by_cursor(bufnr) end,
+    vim.tbl_extend("force", kopts, { desc = "Vault: cycle sort on column" }))
+  vim.keymap.set("n", "gR", function() M.reload(bufnr) end,
+    vim.tbl_extend("force", kopts, { desc = "Vault: reload buffer" }))
+
+  local sort_desc = st.sort_by
+    and string.format(", sorted by %s %s", st.sort_by.col, st.sort_by.dir)
+    or ""
   vim.notify(
-    string.format("[vault] Processing %d notes (%s) — :w to apply changes", #records, filter_desc),
+    string.format("[vault] Processing %d notes (%s)%s — :w to apply, gs to sort", #records, filter_desc, sort_desc),
     vim.log.levels.INFO
   )
 end
@@ -1592,7 +1680,7 @@ function M.reload(bufnr)
     st.note_paths[slug] = nil
     if st.note_mtimes then st.note_mtimes[slug] = nil end
   end
-  table.sort(records, function(a, b) return a.slug < b.slug end)
+  sort_records(records, st.sort_by)
 
   -- Recompute + refresh mtimes
   st.col_widths = calc_col_widths(st.columns, records)
@@ -1608,6 +1696,62 @@ function M.reload(bufnr)
   apply_extmarks(bufnr, st, records)
   vim.api.nvim_buf_clear_namespace(bufnr, NS_DIFF, 0, -1)
   vim.bo[bufnr].modified = false
+end
+
+--- Cycle sort on a column: none → asc → desc → none.
+--- Re-renders the buffer with the new sort order.
+---@param bufnr integer
+---@param col_name string  column to sort by
+function M.cycle_sort(bufnr, col_name)
+  local st = buf_states[bufnr]
+  if not st then return end
+
+  local current = st.sort_by
+  if current and current.col == col_name then
+    if current.dir == "asc" then
+      st.sort_by = { col = col_name, dir = "desc" }
+    else
+      st.sort_by = nil  -- back to default (slug)
+    end
+  else
+    st.sort_by = { col = col_name, dir = "asc" }
+  end
+
+  M.reload(bufnr)
+
+  local desc = st.sort_by
+    and string.format("%s %s", st.sort_by.col, st.sort_by.dir)
+    or "default"
+  vim.notify("[vault] Sort: " .. desc, vim.log.levels.INFO)
+end
+
+--- Get the column name under the cursor.
+---@param bufnr integer
+---@return string|nil col_name
+local function col_under_cursor(bufnr)
+  local st = buf_states[bufnr]
+  if not st then return nil end
+
+  local col = vim.fn.virtcol(".")
+  local offset = 0
+  for i, w in ipairs(st.col_widths) do
+    local sep_width = (i > 1) and #SEP or 0
+    if col <= offset + w + sep_width then
+      return st.columns[i]
+    end
+    offset = offset + w + sep_width
+  end
+  return st.columns[#st.columns]
+end
+
+--- Sort by the column under the cursor (interactive keybind).
+---@param bufnr? integer  defaults to current buffer
+function M.sort_by_cursor(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local col_name = col_under_cursor(bufnr)
+  if col_name then
+    M.cycle_sort(bufnr, col_name)
+  end
 end
 
 --- Debug: expose buf_states for testing
