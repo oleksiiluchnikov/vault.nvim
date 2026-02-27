@@ -74,10 +74,11 @@ describe("bases.editor", function()
       end
 
       -- Simulate batch edit: replace status column on every line using set_lines
+      -- Column order: slug(1), title(2), status(3), tags(4)
       local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
       for i = 1, #lines do
         local parts = vim.split(lines[i], " │ ", { plain = true })
-        if parts[2] then parts[2] = "done         " end
+        if parts[3] then parts[3] = "done         " end
         local new_line = table.concat(parts, " │ ")
         vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, { new_line })
       end
@@ -133,10 +134,11 @@ describe("bases.editor", function()
       end
 
       -- Edit status on all lines
+      -- Column order: slug(1), title(2), status(3), tags(4)
       local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
       for i = 1, #lines do
         local parts = vim.split(lines[i], " │ ", { plain = true })
-        if parts[2] then parts[2] = "batch-test   " end
+        if parts[3] then parts[3] = "batch-test   " end
         vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, { table.concat(parts, " │ ") })
       end
 

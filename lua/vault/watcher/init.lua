@@ -176,9 +176,51 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug)
     local scanner = require("vault.scanner")
     local paths = scanner.paths()
 
+    -- Obsidian wikilinks typically use the stem (filename without extension
+    -- or directory), e.g. [[My Note]].  Some vaults use the full relative
+    -- path form [[Notes/My Note]].  We must handle both, but be careful:
+    -- stems can collide across directories (e.g. Notes/Foo and Clippings/Foo
+    -- both have stem "Foo").  Only match on the bare stem when it is unique
+    -- across the entire vault; otherwise restrict to the full-slug form to
+    -- avoid patching links that point to a *different* note with the same name.
+    local old_stem = vim.fn.fnamemodify(old_path, ":t:r")
+    local new_stem = vim.fn.fnamemodify(new_path, ":t:r")
+
+    -- Check stem uniqueness: count how many notes share the old stem.
+    local stem_count = 0
+    for slug, _ in pairs(paths) do
+        local s = slug:match("[^/]+$") -- last path component = stem
+        if s == old_stem then
+            stem_count = stem_count + 1
+            if stem_count > 1 then break end -- no need to keep counting
+        end
+    end
+    local stem_is_unique = (stem_count <= 1)
+
+    -- Build match patterns.  Full-slug form is always safe.
+    -- Stem-only form is only safe when the stem is unique across the vault.
+    local patterns = {}
+    local escaped_slug = vim.pesc(old_slug)
+    local escaped_stem = vim.pesc(old_stem)
+
+    -- Full-slug form: [[Notes/My Note]] or [[Notes/My Note|alias]]
+    table.insert(patterns, {
+        match = "%[%[" .. escaped_slug,
+        gsub_pat = "%[%[" .. escaped_slug .. "([^%]]*)%]%]",
+        replacement = "[[" .. new_stem .. "%1]]",
+    })
+    -- Stem-only form: [[My Note]] or [[My Note|alias]]
+    -- Only when stem is unique AND differs from slug (note is in a subdir)
+    if stem_is_unique and old_stem ~= old_slug then
+        table.insert(patterns, {
+            match = "%[%[" .. escaped_stem,
+            gsub_pat = "%[%[" .. escaped_stem .. "([^%]]*)%]%]",
+            replacement = "[[" .. new_stem .. "%1]]",
+        })
+    end
+
     -- First pass: collect pending changes without writing files so we can prompt
     local pending = {}
-    local escaped_old = vim.pesc(old_slug)
 
     for _, entry in pairs(paths) do
         local note_path = entry.path
@@ -187,15 +229,19 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug)
             local content = f:read("*all")
             f:close()
 
-            -- Fast check: bail if no [[old_slug
-            if not content:match("%[%[" .. escaped_old) then
-                goto continue_file
+            local total_n = 0
+            local cur = content
+            for _, pat in ipairs(patterns) do
+                if cur:match(pat.match) then
+                    local replaced, n = cur:gsub(pat.gsub_pat, pat.replacement)
+                    if n and n > 0 then
+                        cur = replaced
+                        total_n = total_n + n
+                    end
+                end
             end
-
-            local new_content, n =
-                content:gsub("%[%[" .. escaped_old .. "([^%]]*)%]%]", "[[" .. new_slug .. "%1]]")
-            if n and n > 0 then
-                pending[note_path] = { new_content = new_content, count = n }
+            if total_n > 0 then
+                pending[note_path] = { new_content = cur, count = total_n }
             end
         end
         ::continue_file::
