@@ -361,4 +361,111 @@ describe("bases.editor", function()
       end
     end)
   end)
+
+  describe("sorting", function()
+    after_each(function()
+      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+        local n = vim.api.nvim_buf_get_name(buf)
+        if n:match("vault://") then
+          pcall(vim.api.nvim_buf_delete, buf, { force = true })
+        end
+      end
+      vim.fn.system({ "git", "checkout", "--", "tests/fixtures/demo-vault/" })
+    end)
+
+    it("should sort records by a column ascending", function()
+      local Notes = require("vault.notes")
+      local notes = Notes()
+
+      editor.open({ notes = notes, filter_desc = "sort-asc-test" })
+
+      local bufnr = vim.api.nvim_get_current_buf()
+      local st = editor._buf_states[bufnr]
+
+      -- Sort by title ascending
+      editor.cycle_sort(bufnr, "title")
+      assert.truthy(st.sort_by)
+      assert.are.equal("title", st.sort_by.col)
+      assert.are.equal("asc", st.sort_by.dir)
+
+      -- Verify lines are sorted
+      local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+      local titles = {}
+      for _, line in ipairs(lines) do
+        local title = vim.trim((line:match("^(.-)  ") or line):match("^(.-)%s*│") or "")
+        table.insert(titles, title:lower())
+      end
+      for i = 2, #titles do
+        assert.truthy(titles[i - 1] <= titles[i],
+          string.format("Expected '%s' <= '%s'", titles[i - 1], titles[i]))
+      end
+    end)
+
+    it("should cycle sort: asc -> desc -> none", function()
+      local Notes = require("vault.notes")
+      local notes = Notes()
+
+      editor.open({ notes = notes, filter_desc = "sort-cycle-test" })
+
+      local bufnr = vim.api.nvim_get_current_buf()
+      local st = editor._buf_states[bufnr]
+
+      -- Cycle 1: asc
+      editor.cycle_sort(bufnr, "title")
+      assert.are.equal("asc", st.sort_by.dir)
+
+      -- Cycle 2: desc
+      editor.cycle_sort(bufnr, "title")
+      assert.are.equal("desc", st.sort_by.dir)
+
+      -- Cycle 3: none
+      editor.cycle_sort(bufnr, "title")
+      assert.is_nil(st.sort_by)
+    end)
+
+    it("should apply sort_by from base view", function()
+      local Base = require("vault.bases.base")
+      local base = Base({
+        name = "sort-test",
+        path = "/tmp/test.base",
+        properties = {
+          ["file.name"] = { displayName = "Name" },
+          status = { displayName = "Status" },
+        },
+        views = {
+          {
+            type = "table",
+            name = "Sorted",
+            order = { "file.name", "status" },
+            sort_by = { key = "file.name", direction = "desc" },
+          },
+        },
+      })
+
+      local Notes = require("vault.notes")
+      local notes = Notes()
+
+      editor.open({ notes = notes, base = base, filter_desc = "base-sort-test" })
+
+      local bufnr = vim.api.nvim_get_current_buf()
+      local st = editor._buf_states[bufnr]
+
+      -- Sort should be applied from the base
+      assert.truthy(st.sort_by)
+      assert.are.equal("title", st.sort_by.col)
+      assert.are.equal("desc", st.sort_by.dir)
+
+      -- Verify lines are sorted descending
+      local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+      local titles = {}
+      for _, line in ipairs(lines) do
+        local title = vim.trim((line:match("^(.-)  ") or line):match("^(.-)%s*│") or "")
+        table.insert(titles, title:lower())
+      end
+      for i = 2, #titles do
+        assert.truthy(titles[i - 1] >= titles[i],
+          string.format("Expected '%s' >= '%s' (desc sort)", titles[i - 1], titles[i]))
+      end
+    end)
+  end)
 end)
