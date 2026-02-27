@@ -18,6 +18,16 @@
 
 local M = {}
 
+-- ─── Highlight groups ─────────────────────────────────────────────────────────
+-- Define once on module load; users can override in their colorscheme.
+-- Use link-fallback so we work with any theme.
+-- Link to standard groups so the colorscheme controls the look.
+-- Users can override by defining these groups AFTER loading the plugin.
+vim.api.nvim_set_hl(0, "VaultProcessHeader",  { link = "Visual",   default = true })
+vim.api.nvim_set_hl(0, "VaultProcessSlug",    { link = "Title",    default = true })
+vim.api.nvim_set_hl(0, "VaultProcessFormula", { link = "Comment",  default = true })
+vim.api.nvim_set_hl(0, "VaultProcessSep",     { link = "NonText",  default = true })
+
 -- ─── Constants ────────────────────────────────────────────────────────────────
 
 local SEP        = " │ "
@@ -251,37 +261,20 @@ end
 ---@param records table[]  list of {slug, fields={col→value}}
 ---@return integer[]
 local function calc_col_widths(columns, records)
-  local uis = vim.api.nvim_list_uis()
-  local win_width = (uis[1] and uis[1].width) or 120
-  win_width = math.max(80, math.floor(win_width * 0.95)) - 2
-  local sep_total = (#columns - 1) * #SEP
-  local content_width = win_width - sep_total
-
-  local natural = {}
+  -- Each column gets exactly the width of its longest value (natural fit).
+  -- No artificial capping or scaling — columns are as wide as they need to be.
+  -- The buffer scrolls horizontally for overflow; winbar uses %< to clip.
+  local widths = {}
   for i, col in ipairs(columns) do
-    local w = vim.fn.strdisplaywidth(col)
+    local w = vim.fn.strdisplaywidth(col)  -- at least as wide as the header
     local sample = math.min(200, #records)
     for j = 1, sample do
       local cell = fmt_value(records[j].fields[col], col)
       w = math.max(w, vim.fn.strdisplaywidth(cell))
     end
-    natural[i] = math.max(w, 8)
+    widths[i] = math.max(w, 8)
   end
-
-  local total = 0
-  for _, w in ipairs(natural) do total = total + w end
-  if total <= content_width then
-    local surplus = content_width - total
-    local widths = {}
-    for i, w in ipairs(natural) do
-      widths[i] = w + math.floor(surplus * (w / total))
-    end
-    local used = 0
-    for _, w in ipairs(widths) do used = used + w end
-    widths[1] = widths[1] + (content_width - used)
-    return widths
-  end
-  return natural
+  return widths
 end
 
 -- ─── String helpers ───────────────────────────────────────────────────────────
@@ -722,18 +715,7 @@ end
 ---@param st vault.OilEditState
 ---@return table[] virt_lines  list of {chunks} for nvim_buf_set_extmark virt_lines
 local function build_header_virt_lines(st)
-  -- Header row (use display names if available, with sort indicator)
-  local hcells = {}
-  for i, col in ipairs(st.columns) do
-    local label = (st.display_names and st.display_names[col]) or col
-    if st.sort_by and st.sort_by.col == col then
-      label = label .. (st.sort_by.dir == "asc" and " ▲" or " ▼")
-    end
-    table.insert(hcells, pad(label, st.col_widths[i]))
-  end
-  local header_text = table.concat(hcells, SEP)
-
-  -- Separator row
+  -- Separator row only (header is now in winbar)
   local sep_parts = {}
   for i, _ in ipairs(st.columns) do
     table.insert(sep_parts, string.rep("─", st.col_widths[i]))
@@ -741,9 +723,106 @@ local function build_header_virt_lines(st)
   local sep_text = table.concat(sep_parts, "─┼─")
 
   return {
-    { { header_text, "Visual" } },
-    { { sep_text, "Visual" } },
+    { { sep_text, "Comment" } },
   }
+end
+
+--- Compute the gutter width (number column + sign column) for a window.
+---@param winid integer
+---@return integer textoff  number of screen columns used by gutter
+local function get_textoff(winid)
+  local textoff = 0
+  local wo = vim.wo[winid]
+  if wo.number or wo.relativenumber then
+    local bufnr_w = vim.api.nvim_win_get_buf(winid)
+    local line_count = vim.api.nvim_buf_line_count(bufnr_w)
+    local num_digits = math.max(wo.numberwidth or 4, #tostring(line_count) + 1)
+    textoff = textoff + num_digits
+  end
+  if wo.signcolumn == "yes" or wo.signcolumn == "auto" then
+    textoff = textoff + 2
+  end
+  return textoff
+end
+
+--- Build the full header as a list of {text, hl_group} chunks.
+--- Each chunk represents one cell label (padded) or a separator.
+--- The chunks are NOT escaped for winbar — they are plain text + hl names.
+---@param st vault.OilEditState
+---@return {text:string, hl:string}[]
+local function build_header_chunks(st)
+  local chunks = {}
+  local formula_set = {}
+  if st.formula_cols then
+    for _, fc in ipairs(st.formula_cols) do formula_set[fc] = true end
+  end
+  for i, col in ipairs(st.columns) do
+    local label = (st.display_names and st.display_names[col]) or col
+    if st.sort_by and st.sort_by.col == col then
+      label = label .. (st.sort_by.dir == "asc" and " ▲" or " ▼")
+    end
+    local padded = pad(label, st.col_widths[i])
+    local hl = col == "slug" and "VaultProcessSlug"
+           or formula_set[col] and "VaultProcessFormula"
+           or "VaultProcessHeader"
+    table.insert(chunks, { text = padded, hl = hl })
+    if i < #st.columns then
+      table.insert(chunks, { text = SEP, hl = "VaultProcessSep" })
+    end
+  end
+  return chunks
+end
+
+--- Build and set the winbar for the given window, respecting horizontal scroll.
+--- Called on open, reload, sort change, and WinScrolled/CursorMoved.
+---@param winid integer
+---@param st vault.OilEditState
+local function set_winbar(winid, st)
+  if not vim.api.nvim_win_is_valid(winid) then return end
+
+  local textoff = get_textoff(winid)
+  -- leftcol: how many screen columns the buffer has scrolled right
+  local leftcol = vim.api.nvim_win_call(winid, function()
+    return vim.fn.winsaveview().leftcol
+  end)
+
+  -- Build full header chunks then skip/trim based on leftcol
+  local chunks = build_header_chunks(st)
+
+  -- Walk chunks, skipping characters before leftcol
+  local skip = leftcol   -- screen columns still to skip
+  local winbar_parts = {}
+  for _, chunk in ipairs(chunks) do
+    local text = chunk.text
+    local w = vim.fn.strdisplaywidth(text)
+    if skip >= w then
+      -- entire chunk is off-screen to the left — skip it
+      skip = skip - w
+    elseif skip > 0 then
+      -- partial skip: trim leading characters
+      -- advance char-by-char until we've consumed `skip` display columns
+      local char_idx = 0
+      local consumed = 0
+      while consumed < skip do
+        char_idx = char_idx + 1
+        local ch = vim.fn.strcharpart(text, char_idx - 1, 1)
+        consumed = consumed + vim.fn.strdisplaywidth(ch)
+      end
+      text = vim.fn.strcharpart(text, char_idx)
+      skip = 0
+      local esc = text:gsub("%%", "%%%%")
+      table.insert(winbar_parts, "%#" .. chunk.hl .. "#" .. esc .. "%*")
+    else
+      local esc = text:gsub("%%", "%%%%")
+      table.insert(winbar_parts, "%#" .. chunk.hl .. "#" .. esc .. "%*")
+    end
+  end
+
+  local prefix = string.rep(" ", textoff)
+  local cells_str = table.concat(winbar_parts)
+  local winbar_str = "%#VaultProcessHeader#" .. prefix .. cells_str .. "%#VaultProcessHeader#%="
+
+  vim.wo[winid].winbar = winbar_str
 end
 
 --- Build data lines (no header — header is virtual).
@@ -1709,7 +1788,7 @@ function M.open(opts)
   vim.bo[bufnr].filetype = "vault_process"
   vim.bo[bufnr].swapfile = false
 
-  -- Compute layout
+  -- Compute layout: natural column widths based on longest value per column
   local col_widths = calc_col_widths(columns, records)
 
   -- Build state
@@ -1751,13 +1830,28 @@ function M.open(opts)
   vim.wo[winid].relativenumber = true
   vim.wo[winid].wrap = false
 
-  -- Apply extmarks: header virt_lines + slug identity on each data line
+  -- Apply extmarks: separator virt_line + slug identity on each data line
   apply_extmarks(bufnr, st, records)
+
+  -- Sticky winbar header (always visible, even when scrolled down)
+  set_winbar(winid, st)
 
   -- BufWriteCmd autocmd
   vim.api.nvim_create_autocmd("BufWriteCmd", {
     buffer = bufnr,
     callback = function() on_save(bufnr) end,
+  })
+
+  -- Scroll-sync: update winbar when the buffer scrolls horizontally.
+  -- WinScrolled fires on any scroll (vertical or horizontal).
+  vim.api.nvim_create_autocmd("WinScrolled", {
+    buffer = bufnr,
+    callback = function()
+      local s = buf_states[bufnr]
+      if s and s.winid and vim.api.nvim_win_is_valid(s.winid) then
+        set_winbar(s.winid, s)
+      end
+    end,
   })
 
   -- Live diff signs on TextChanged (no re-conceal needed — much cheaper)
@@ -1885,6 +1979,11 @@ function M.reload(bufnr)
   apply_extmarks(bufnr, st, records)
   vim.api.nvim_buf_clear_namespace(bufnr, NS_DIFF, 0, -1)
   vim.bo[bufnr].modified = false
+
+  -- Refresh winbar (col_widths or sort indicator may have changed)
+  if st.winid and vim.api.nvim_win_is_valid(st.winid) then
+    set_winbar(st.winid, st)
+  end
 end
 
 --- Cycle sort on a column: none → asc → desc → none.
