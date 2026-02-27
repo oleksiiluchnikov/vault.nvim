@@ -344,8 +344,17 @@ end
 --- @type table<string, fun(bufnr?: number, selections?: table<vault.TelescopeEntry>): nil>
 vault_actions.base = {}
 
---- Open Telescope picker for notes matched by a specific base
+--- Open the bases editor for the selected base
 function vault_actions.base.enter(bufnr)
+    local _, selection, _ = utils.get_picker_selection(bufnr)
+    vault_actions.close(bufnr)
+    --- @type vault.Base
+    local base = selection.value
+    require("vault.bases.editor").open({ base = base })
+end
+
+--- Open Telescope notes picker for notes matched by a specific base
+function vault_actions.base.notes(bufnr)
     local _, selection, _ = utils.get_picker_selection(bufnr)
     vault_actions.close(bufnr)
     --- @type vault.Base
