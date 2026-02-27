@@ -24,6 +24,7 @@ local SEP        = " │ "
 local EMPTY_CELL = "∅"
 local NS         = vim.api.nvim_create_namespace("vault_bases_editor")
 local NS_DIFF    = vim.api.nvim_create_namespace("vault_oil_diff")
+local NS_ERR     = vim.api.nvim_create_namespace("vault_bases_errors")
 
 -- ─── Per-buffer state ─────────────────────────────────────────────────────────
 
@@ -123,7 +124,7 @@ end
 
 -- ─── Default columns ──────────────────────────────────────────────────────────
 
-local DEFAULT_COLUMNS = { "title", "status", "tags", "dir" }
+local DEFAULT_COLUMNS = { "slug", "title", "status", "tags" }
 
 -- ─── Base property key mapping ────────────────────────────────────────────────
 
@@ -167,7 +168,10 @@ local function columns_from_base(base)
   -- Get display name map from base
   local base_display = base:display_names()
 
-  local seen = {}
+  -- slug is always first column
+  local seen = { slug = true }
+  columns[1] = "slug"
+
   for _, key in ipairs(order) do
     local col, is_formula = base_key_to_col(key)
     if not seen[col] then
@@ -362,14 +366,23 @@ end
 ---@return integer drift_count  number of rows where extmark was wrong
 ---@return integer reconciled_count  number of drifted rows successfully fixed
 local function reconcile_extmarks(bufnr, st, lines)
+  -- Find the slug column index (always present, always first)
+  local slug_col_idx = nil
   local title_col_idx = nil
   for i, col in ipairs(st.columns) do
-    if col == "title" then title_col_idx = i; break end
+    if col == "slug" then slug_col_idx = i end
+    if col == "title" then title_col_idx = i end
   end
 
-  -- Build reverse lookup: snapshot title → slug (for content matching)
-  -- Only used when extmark drift is detected.
-  local title_to_slugs = {}  -- title_text → list of slugs (handle duplicates)
+  -- Build reverse lookup: slug text → snapshot slug (for direct matching)
+  -- Since slug column shows the actual slug, this is the primary identity source.
+  local snapshot_slugs = {}  -- slug_text → true
+  for slug, _ in pairs(st.snapshot) do
+    snapshot_slugs[slug] = true
+  end
+
+  -- Build title reverse lookup as fallback
+  local title_to_slugs = {}
   if title_col_idx then
     for slug, snap in pairs(st.snapshot) do
       local title_rendered = vim.trim(pad(fmt_value(snap.title), st.col_widths[title_col_idx]))
@@ -380,10 +393,10 @@ local function reconcile_extmarks(bufnr, st, lines)
     end
   end
 
-  local row_to_slug = {}      -- final reconciled map
+  local row_to_slug = {}
   local drift_count = 0
   local reconciled_count = 0
-  local claimed_slugs = {}    -- slugs already assigned to a row (prevent duplicates)
+  local claimed_slugs = {}
   local line_count = #lines
 
   for row = 0, line_count - 1 do
@@ -393,27 +406,43 @@ local function reconcile_extmarks(bufnr, st, lines)
     local extmark_slug = get_line_slug(bufnr, row, st)
     local cells = split_cells(line)
 
-    if extmark_slug and st.snapshot[extmark_slug] then
-      -- Extmark claims this row is `extmark_slug`. Verify via title.
+    -- PRIMARY: use slug column text as identity (most reliable)
+    if slug_col_idx then
+      local cell_slug = vim.trim(cells[slug_col_idx] or "")
+      if cell_slug ~= "" and snapshot_slugs[cell_slug] and not claimed_slugs[cell_slug] then
+        -- Slug column text matches a known note — use it directly
+        if extmark_slug and extmark_slug ~= cell_slug then
+          drift_count = drift_count + 1
+          reconciled_count = reconciled_count + 1
+        end
+        row_to_slug[row] = cell_slug
+        claimed_slugs[cell_slug] = true
+        goto continue
+      end
+      -- Slug was edited (rename) — fall back to extmark
+      if extmark_slug and st.snapshot[extmark_slug] and not claimed_slugs[extmark_slug] then
+        row_to_slug[row] = extmark_slug
+        claimed_slugs[extmark_slug] = true
+        goto continue
+      end
+      -- Neither slug column nor extmark matched — try title fallback
+    end
+
+    -- FALLBACK: extmark + title verification (for buffers without slug column, or edge cases)
+    if extmark_slug and st.snapshot[extmark_slug] and not claimed_slugs[extmark_slug] then
       if title_col_idx then
         local expected_title = vim.trim(pad(
           fmt_value(st.snapshot[extmark_slug].title),
           st.col_widths[title_col_idx]
         ))
         local actual_title = cells[title_col_idx] or ""
-
-         if expected_title == actual_title then
-          -- Extmark is correct — use it
+        if expected_title == actual_title then
           row_to_slug[row] = extmark_slug
           claimed_slugs[extmark_slug] = true
         else
-          -- DRIFT DETECTED: extmark says one slug but title says another.
           drift_count = drift_count + 1
-
-          -- Try content-based reconciliation: look up by title
           local candidates = title_to_slugs[actual_title]
           if candidates then
-            -- Find a candidate that hasn't been claimed yet
             local matched = false
             for _, cand_slug in ipairs(candidates) do
               if not claimed_slugs[cand_slug] then
@@ -425,27 +454,19 @@ local function reconcile_extmarks(bufnr, st, lines)
               end
             end
             if not matched then
-              -- All candidates claimed — treat as drifted but unresolvable
-              -- Still use extmark slug as fallback (better than nil)
               row_to_slug[row] = extmark_slug
               claimed_slugs[extmark_slug] = true
             end
           else
-            -- Title was edited AND extmark drifted — can't distinguish
-            -- which note this was. Use extmark slug as best guess but
-            -- flag the drift so we can warn.
             row_to_slug[row] = extmark_slug
             claimed_slugs[extmark_slug] = true
           end
         end
       else
-        -- No title column — can't verify, trust the extmark
         row_to_slug[row] = extmark_slug
         claimed_slugs[extmark_slug] = true
       end
     elseif extmark_slug then
-      -- Extmark points to a slug not in snapshot (shouldn't happen normally)
-      -- Treat as a new line
       row_to_slug[row] = nil
     else
       -- No extmark at all. Try content-based recovery.
@@ -557,7 +578,9 @@ local function build_records(notes_map, columns, base)
       end
 
       for _, col in ipairs(columns) do
-        if col == "title" then
+        if col == "slug" then
+          fields.slug = slug
+        elseif col == "title" then
           local basename = slug:match("[^/]+$") or slug
           fields.title = fm.title or (note.data and note.data.stem) or basename
         elseif col == "dir" then
@@ -852,7 +875,7 @@ end
 ---@param st vault.OilEditState
 ---@return vault.OilEditDiff
 local function diff_buffer(bufnr, st)
-  local diff = { updates = {}, deletes = {}, creates = {} }
+  local diff = { updates = {}, deletes = {}, creates = {}, renames = {}, errors = {} }
   local line_count = vim.api.nvim_buf_line_count(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local seen = {}
@@ -895,13 +918,35 @@ local function diff_buffer(bufnr, st)
           for _, fc in ipairs(st.formula_cols) do formula_set[fc] = true end
         end
         for i, col in ipairs(st.columns) do
-          if formula_set[col] then goto next_col end  -- skip read-only formula columns
           local old_rendered = vim.trim(pad(fmt_value(orig[col], col), st.col_widths[i]))
           local new_text = cells[i] or ""
           if old_rendered ~= new_text then
-            -- If EITHER the old or new text is truncated (ends with …),
-            -- skip the field — truncated values cannot be reliably diffed.
+            -- Formula columns are read-only — warn but skip
+            if formula_set[col] then
+              table.insert(diff.errors, {
+                row = row, col_idx = i,
+                message = string.format("Column '%s' is read-only (computed formula) — edit ignored", col),
+              })
+              goto next_col
+            end
+            -- Truncated values cannot be reliably saved — warn but skip
             if old_rendered:match("…$") or new_text:match("…$") then
+              table.insert(diff.errors, {
+                row = row, col_idx = i,
+                message = string.format("Column '%s' is truncated — edit ignored (widen column or edit note directly)", col),
+              })
+              goto next_col
+            end
+            -- Slug column → rename operation
+            if col == "slug" then
+              local new_slug = vim.trim(new_text)
+              if new_slug ~= "" and new_slug ~= slug then
+                table.insert(diff.renames, {
+                  old_slug = slug,
+                  new_slug = new_slug,
+                  row = row,
+                })
+              end
               goto next_col
             end
             changed_fields[col] = parse_value(new_text, col)
@@ -1326,7 +1371,39 @@ local function on_save(bufnr)
     return
   end
 
-  local total = #diff.updates + #diff.deletes + #diff.creates
+  -- ── Validation warnings (formula/truncated edits) — show but proceed ──
+  if #diff.errors > 0 then
+    vim.api.nvim_buf_clear_namespace(bufnr, NS_ERR, 0, -1)
+    for _, err in ipairs(diff.errors) do
+      -- Place warning highlights on ignored cells
+      local line = vim.api.nvim_buf_get_lines(bufnr, err.row, err.row + 1, false)[1] or ""
+      local col_byte = 0
+      local sep_count = 0
+      for byte_pos = 1, #line do
+        if line:sub(byte_pos, byte_pos + 2) == " │ " then
+          sep_count = sep_count + 1
+          if sep_count == err.col_idx - 1 then
+            col_byte = byte_pos + 2
+            break
+          end
+        end
+      end
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, NS_ERR, err.row, col_byte, {
+        end_row = err.row,
+        end_col = #line,
+        hl_group = "DiagnosticUnderlineWarn",
+      })
+    end
+    vim.notify(
+      string.format("[vault] %d edit(s) ignored: %s (line %d)",
+        #diff.errors, diff.errors[1].message, diff.errors[1].row + 1),
+      vim.log.levels.WARN
+    )
+  else
+    vim.api.nvim_buf_clear_namespace(bufnr, NS_ERR, 0, -1)
+  end
+
+  local total = #diff.updates + #diff.deletes + #diff.creates + #diff.renames
   if total == 0 then
     vim.bo[bufnr].modified = false
     st.saving = false
@@ -1427,6 +1504,67 @@ local function on_save(bufnr)
         st.saving = false
       end)
       return
+    end
+  end
+
+  -- ── Process renames (slug column edits → file move + wikilink update) ───
+  if #diff.renames > 0 then
+    local Note = require("vault.notes.note")
+    local config = require("vault.config")
+    local vault_root = vim.fn.expand(config.options.root)
+    local n_renamed = 0
+    for _, ren in ipairs(diff.renames) do
+      local old_path = st.note_paths[ren.old_slug]
+      if not old_path then goto continue_rename end
+      local new_path = vault_root .. "/" .. ren.new_slug .. ".md"
+      -- Safety: refuse path escape
+      if ren.new_slug:match("%.%.") then
+        vim.notify(
+          string.format("[vault] SAFETY: Refusing rename '%s' — contains '..'", ren.new_slug),
+          vim.log.levels.ERROR
+        )
+        goto continue_rename
+      end
+      -- Safety: refuse collision
+      if vim.fn.filereadable(new_path) == 1 and old_path ~= new_path then
+        vim.notify(
+          string.format("[vault] SAFETY: Cannot rename to '%s' — file already exists", ren.new_slug),
+          vim.log.levels.ERROR
+        )
+        goto continue_rename
+      end
+      -- Execute rename via Note:move (handles wikilink patching)
+      local ok, note = pcall(Note, old_path)
+      if ok and note then
+        local move_ok, move_err = pcall(note.move, note, new_path, false, true)
+        if move_ok then
+          -- Update state maps
+          st.note_paths[ren.new_slug] = new_path
+          st.note_paths[ren.old_slug] = nil
+          if st.note_mtimes then
+            st.note_mtimes[ren.new_slug] = st.note_mtimes[ren.old_slug]
+            st.note_mtimes[ren.old_slug] = nil
+          end
+          n_renamed = n_renamed + 1
+        else
+          vim.notify(
+            string.format("[vault] Failed to rename '%s': %s", ren.old_slug, tostring(move_err)),
+            vim.log.levels.ERROR
+          )
+        end
+      else
+        vim.notify(
+          string.format("[vault] Failed to load note '%s' for rename", ren.old_slug),
+          vim.log.levels.ERROR
+        )
+      end
+      ::continue_rename::
+    end
+    if n_renamed > 0 then
+      vim.notify(
+        string.format("[vault] Renamed %d note%s (wikilinks updated)", n_renamed, n_renamed == 1 and "" or "s"),
+        vim.log.levels.INFO
+      )
     end
   end
 
@@ -1696,7 +1834,9 @@ function M.reload(bufnr)
       local fm = read_frontmatter_fields(path, st.columns)
       local fields = {}
       for _, col in ipairs(st.columns) do
-        if col == "title" then
+        if col == "slug" then
+          fields.slug = slug
+        elseif col == "title" then
           local basename = slug:match("[^/]+$") or slug
           fields.title = fm.title or basename
         elseif col == "dir" then

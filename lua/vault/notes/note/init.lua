@@ -581,8 +581,16 @@ end
 --- @param new_path string New absolute path for the note
 --- @param force? boolean Force move even if target exists (default: false)
 --- @param verbose? boolean Show detailed notifications (default: true)
-function Note:move(new_path, force, verbose)
+--- Move/rename a note to a new path.
+--- @param new_path string Absolute path for the new location.
+--- @param force? boolean Overwrite target if it exists (default false).
+--- @param verbose? boolean Show notification (default true).
+--- @param opts? { update_links?: boolean } Extra options.
+---   update_links: whether to patch wikilinks across the vault.
+---     Defaults to `config.options.watcher.auto_update_links` (true).
+function Note:move(new_path, force, verbose, opts)
     local uv = vim.uv or vim.loop
+    opts = opts or {}
 
     if type(new_path) ~= "string" or new_path == "" then
         error("Note:move() requires a non-empty string path, got " .. type(new_path))
@@ -615,12 +623,23 @@ function Note:move(new_path, force, verbose)
         error("Note:move() fs_rename failed: " .. tostring(err))
     end
 
-    -- Update all wikilink references across the vault via the Watcher
-    local Watcher = require("vault.watcher")
-    local watcher = Watcher()
-    -- Disable prompts for programmatic moves and skip oil guard
-    watcher:disable_oil_guard()
-    local patched = watcher:handle_rename(old_path, new_path)
+    -- Determine whether to update wikilinks.
+    -- Explicit opts.update_links overrides; otherwise fall back to config.
+    local update_links = opts.update_links
+    if update_links == nil then
+        local watcher_conf = (config.options and config.options.watcher) or {}
+        update_links = watcher_conf.auto_update_links
+        if update_links == nil then update_links = true end
+    end
+
+    local patched = 0
+    if update_links then
+        local Watcher = require("vault.watcher")
+        local watcher = Watcher()
+        -- Disable prompts for programmatic moves and skip oil guard
+        watcher:disable_oil_guard()
+        patched = watcher:handle_rename(old_path, new_path) or 0
+    end
 
     -- Update internal data to reflect the new path
     self.data.path = new_path
@@ -628,15 +647,12 @@ function Note:move(new_path, force, verbose)
     self.data.relpath = utils.path_to_relpath(new_path)
 
     if verbose ~= false then
-        vim.notify(
-            string.format(
-                "[vault] Moved note: %s -> %s (%d files patched)",
-                utils.path_to_slug(old_path),
-                self.data.slug,
-                patched or 0
-            ),
-            vim.log.levels.INFO
-        )
+        local msg = update_links
+            and string.format("[vault] Moved note: %s -> %s (%d files patched)",
+                utils.path_to_slug(old_path), self.data.slug, patched)
+            or string.format("[vault] Moved note: %s -> %s (wikilink update skipped)",
+                utils.path_to_slug(old_path), self.data.slug)
+        vim.notify(msg, vim.log.levels.INFO)
     end
 end
 
