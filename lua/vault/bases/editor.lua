@@ -953,8 +953,9 @@ end
 
 ---@param bufnr integer
 ---@param st vault.OilEditState
+---@param silent? boolean  if true, suppress drift notifications (used during on_save)
 ---@return vault.OilEditDiff
-local function diff_buffer(bufnr, st)
+local function diff_buffer(bufnr, st, silent)
   local diff = { updates = {}, deletes = {}, creates = {}, renames = {}, errors = {} }
   local line_count = vim.api.nvim_buf_line_count(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -963,7 +964,10 @@ local function diff_buffer(bufnr, st)
   -- ── Reconcile extmark drift before diffing ──────────────────────────────
   local row_to_slug, drift_count, reconciled_count = reconcile_extmarks(bufnr, st, lines)
 
-  if drift_count > 0 then
+  -- Drift during a save is expected (user edited a slug cell — the cell text
+  -- changed but extmarks still hold the old slug until reload).  Suppress the
+  -- notification in that case; only surface it during background diff checks.
+  if drift_count > 0 and not silent then
     vim.notify(
       string.format(
         "[vault] Extmark drift detected on %d row%s (%d reconciled via title matching)",
@@ -1444,7 +1448,7 @@ local function on_save(bufnr)
   if st.saving then return end
   st.saving = true
 
-  local diff = diff_buffer(bufnr, st)
+  local diff = diff_buffer(bufnr, st, true)  -- silent: drift during save is expected
 
   -- Integrity error — diff_buffer already notified the user
   if diff._integrity_error then
@@ -1878,7 +1882,7 @@ function M.open(opts)
         vim.bo[bufnr].modified = false
         return
       end
-      local d = diff_buffer(bufnr, s)
+      local d = diff_buffer(bufnr, s, true)  -- silent: quit check, no need to surface drift
       if d._integrity_error or (#d.updates == 0 and #d.deletes == 0 and #d.creates == 0) then
         vim.bo[bufnr].modified = false
       end
