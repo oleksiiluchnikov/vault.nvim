@@ -28,17 +28,20 @@ local NS_DIFF    = vim.api.nvim_create_namespace("vault_oil_diff")
 -- ─── Per-buffer state ─────────────────────────────────────────────────────────
 
 ---@class vault.OilEditState
----@field bufnr        integer
----@field winid        integer
----@field columns      string[]         ordered column names
----@field col_widths   integer[]        display width per column
----@field snapshot     table<string, table<string, string>>  slug → {col → value}
----@field note_paths   table<string, string>  slug → absolute path
----@field mark_to_slug table<integer, string>  extmark_id → slug
----@field slug_to_mark table<string, integer>  slug → extmark_id
----@field note_mtimes  table<string, integer>  slug → mtime at snapshot time
----@field filter_desc  string           human description of the filter used
----@field saving       boolean
+---@field bufnr         integer
+---@field winid         integer
+---@field columns       string[]         ordered column names
+---@field col_widths    integer[]        display width per column
+---@field snapshot      table<string, table<string, string>>  slug → {col → value}
+---@field note_paths    table<string, string>  slug → absolute path
+---@field mark_to_slug  table<integer, string>  extmark_id → slug
+---@field slug_to_mark  table<string, integer>  slug → extmark_id
+---@field note_mtimes   table<string, integer>  slug → mtime at snapshot time
+---@field filter_desc   string           human description of the filter used
+---@field saving        boolean
+---@field base?         vault.Base       the Base object (if opened via base)
+---@field display_names table<string, string>  col → header display name
+---@field formula_cols  string[]         formula column names (read-only)
 
 local buf_states = {}  -- [bufnr] = vault.OilEditState
 
@@ -121,20 +124,100 @@ end
 
 local DEFAULT_COLUMNS = { "title", "status", "tags", "dir" }
 
+-- ─── Base property key mapping ────────────────────────────────────────────────
+
+--- Map a base property key (e.g. "file.name") to the internal column name
+--- used by the editor. Returns the internal name and whether the column is
+--- a formula (computed, read-only).
+---@param key string  Base property key like "file.name", "formula.x", "tags"
+---@return string col_name  Internal column name for build_records
+---@return boolean is_formula
+local function base_key_to_col(key)
+  if key == "file.name" then return "title", false end
+  if key == "file.folder" then return "dir", false end
+  if key:match("^formula%.") then return key, true end
+  -- Everything else maps directly (e.g. "status", "tags", "priority", etc.)
+  return key, false
+end
+
+--- Extract columns and display names from a Base object.
+--- Uses the first view's order if available, otherwise properties keys.
+---@param base vault.Base
+---@return string[] columns  Internal column names
+---@return table<string, string> display_names  col → display name
+---@return string[] formula_cols  List of formula column names (read-only)
+local function columns_from_base(base)
+  local columns = {}
+  local display_names = {}
+  local formula_cols = {}
+
+  -- Determine column order: first view's order > properties keys > default
+  local order = nil
+  if base.data.views and base.data.views[1] and base.data.views[1].order then
+    order = base.data.views[1].order
+  end
+  if not order then
+    order = base.data.properties and vim.tbl_keys(base.data.properties) or {}
+  end
+  if #order == 0 then
+    return DEFAULT_COLUMNS, {}, {}
+  end
+
+  -- Get display name map from base
+  local base_display = base:display_names()
+
+  local seen = {}
+  for _, key in ipairs(order) do
+    local col, is_formula = base_key_to_col(key)
+    if not seen[col] then
+      seen[col] = true
+      table.insert(columns, col)
+      display_names[col] = base_display[key] or col
+      if is_formula then
+        table.insert(formula_cols, col)
+      end
+    end
+  end
+
+  return columns, display_names, formula_cols
+end
+
 -- ─── Value formatting ─────────────────────────────────────────────────────────
 
 ---@param value any
+---@param col_name? string  column name for context-aware formatting
 ---@return string
-local function fmt_value(value)
+local function fmt_value(value, col_name)
   if value == nil or value == "" then return EMPTY_CELL end
+  if type(value) == "boolean" then return value and "true" or "false" end
   if type(value) == "table" then
-    local parts = {}
-    for _, v in ipairs(value) do
-      if type(v) == "string" and v ~= "" then
-        table.insert(parts, v:match("^#") and v or ("#" .. v))
-      end
+    -- Date wrapper from evaluator
+    if value._type == "date" then
+      return os.date("%Y-%m-%d", value.epoch) or EMPTY_CELL
     end
-    return #parts > 0 and table.concat(parts, " ") or EMPTY_CELL
+    -- Duration wrapper
+    if value._type == "duration" then
+      return tostring(value.seconds) .. "s"
+    end
+    -- Tag list (tags column or list of strings)
+    if col_name == "tags" then
+      local parts = {}
+      for _, v in ipairs(value) do
+        if type(v) == "string" and v ~= "" then
+          table.insert(parts, v:match("^#") and v or ("#" .. v))
+        end
+      end
+      return #parts > 0 and table.concat(parts, " ") or EMPTY_CELL
+    end
+    -- Generic list
+    if #value > 0 then
+      local parts = {}
+      for _, v in ipairs(value) do
+        table.insert(parts, tostring(v))
+      end
+      return table.concat(parts, ", ")
+    end
+    return EMPTY_CELL
   end
   return tostring(value)
 end
@@ -174,7 +257,7 @@ local function calc_col_widths(columns, records)
     local w = vim.fn.strdisplaywidth(col)
     local sample = math.min(200, #records)
     for j = 1, sample do
-      local cell = fmt_value(records[j].fields[col])
+      local cell = fmt_value(records[j].fields[col], col)
       w = math.max(w, vim.fn.strdisplaywidth(cell))
     end
     natural[i] = math.max(w, 8)
@@ -451,8 +534,9 @@ end
 --- Build records from vault scanner data.
 ---@param notes_map table  slug → Note object (or paths map)
 ---@param columns string[]
+---@param base? vault.Base  optional Base for formula evaluation
 ---@return table[]  list of {slug, path, fields={col→value}}
-local function build_records(notes_map, columns)
+local function build_records(notes_map, columns, base)
   local records = {}
   local skipped = 0
   for slug, note in pairs(notes_map) do
@@ -463,6 +547,13 @@ local function build_records(notes_map, columns)
 
       local fm = read_frontmatter_fields(path, columns)
       local fields = {}
+
+      -- Evaluate formulas once per note if base has them
+      local formula_results = {}
+      if base and base:has_formulas() then
+        formula_results = base:evaluate_formulas(note)
+      end
+
       for _, col in ipairs(columns) do
         if col == "title" then
           fields.title = fm.title or (note.data and note.data.stem) or slug
@@ -472,7 +563,12 @@ local function build_records(notes_map, columns)
           fields.dir = dir ~= "" and dir or "/"
         elseif col == "tags" then
           fields.tags = fm.tags or (note.data and note.data.frontmatter and note.data.frontmatter.tags) or nil
+        elseif col:match("^formula%.") then
+          -- Formula column: use precomputed result
+          local formula_name = col:match("^formula%.(.+)")
+          fields[col] = formula_results[formula_name]
         else
+          -- Generic frontmatter key
           fields[col] = fm[col]
         end
       end
@@ -521,7 +617,7 @@ end
 local function render_record_line(rec, columns, widths)
   local cells = {}
   for i, col in ipairs(columns) do
-    local cell = fmt_value(rec.fields[col])
+    local cell = fmt_value(rec.fields[col], col)
     table.insert(cells, pad(cell, widths[i]))
   end
   return table.concat(cells, SEP)
@@ -531,10 +627,11 @@ end
 ---@param st vault.OilEditState
 ---@return table[] virt_lines  list of {chunks} for nvim_buf_set_extmark virt_lines
 local function build_header_virt_lines(st)
-  -- Header row
+  -- Header row (use display names if available)
   local hcells = {}
   for i, col in ipairs(st.columns) do
-    table.insert(hcells, pad(col, st.col_widths[i]))
+    local label = (st.display_names and st.display_names[col]) or col
+    table.insert(hcells, pad(label, st.col_widths[i]))
   end
   local header_text = table.concat(hcells, SEP)
 
@@ -717,7 +814,13 @@ local function diff_buffer(bufnr, st)
       if orig then
         local changed_fields = {}
         local has_changes = false
+        -- Build formula set for quick lookup
+        local formula_set = {}
+        if st.formula_cols then
+          for _, fc in ipairs(st.formula_cols) do formula_set[fc] = true end
+        end
         for i, col in ipairs(st.columns) do
+          if formula_set[col] then goto next_col end  -- skip read-only formula columns
           local old_rendered = vim.trim(pad(fmt_value(orig[col]), st.col_widths[i]))
           local new_text = cells[i] or ""
           if old_rendered ~= new_text then
@@ -730,6 +833,7 @@ local function diff_buffer(bufnr, st)
             changed_fields[col] = parse_value(new_text, col)
             has_changes = true
           end
+          ::next_col::
         end
         if has_changes then
           table.insert(diff.updates, { slug = slug, fields = changed_fields })
@@ -1285,11 +1389,20 @@ end
 -- ─── Public API ───────────────────────────────────────────────────────────────
 
 --- Open a vault process buffer.
----@param opts? { notes?: vault.Notes, columns?: string[], filter_desc?: string }
+---@param opts? { notes?: vault.Notes, columns?: string[], filter_desc?: string, base?: vault.Base }
 function M.open(opts)
   opts = opts or {}
+  local base = opts.base
   local columns = opts.columns or DEFAULT_COLUMNS
+  local display_names = {}
+  local formula_cols = {}
   local filter_desc = opts.filter_desc or "all notes"
+
+  -- If a base is provided, derive columns/filters/formulas from it
+  if base then
+    columns, display_names, formula_cols = columns_from_base(base)
+    filter_desc = opts.filter_desc or ("base:" .. (base.data.name or "unnamed"))
+  end
 
   -- Prevent duplicate process buffers: if one exists, switch to it
   for bufnr, st in pairs(buf_states) do
@@ -1304,7 +1417,7 @@ function M.open(opts)
     end
   end
 
-  -- Get notes
+  -- Get notes: if base has filters, use them to select matching notes
   local notes
   if opts.notes then
     notes = opts.notes
@@ -1313,13 +1426,17 @@ function M.open(opts)
   end
 
   local notes_map = notes.map or {}
+  if base and base:has_filters() then
+    notes_map = base:match_notes(notes_map)
+  end
+
   if not next(notes_map) then
-    vim.notify("[vault] No notes to process", vim.log.levels.INFO)
+    vim.notify("[vault] No notes match" .. (base and (" base '" .. base.data.name .. "'") or ""), vim.log.levels.INFO)
     return
   end
 
-  -- Build records
-  local records = build_records(notes_map, columns)
+  -- Build records (pass base for formula evaluation)
+  local records = build_records(notes_map, columns, base)
 
   -- Create buffer
   local bufnr = vim.api.nvim_create_buf(true, false)
@@ -1334,16 +1451,19 @@ function M.open(opts)
 
   -- Build state
   local st = {
-    bufnr        = bufnr,
-    columns      = columns,
-    col_widths   = col_widths,
-    snapshot     = build_snapshot(records, columns),
-    note_paths   = {},
-    note_mtimes  = {},
-    mark_to_slug = {},
-    slug_to_mark = {},
-    filter_desc  = filter_desc,
-    saving       = false,
+    bufnr         = bufnr,
+    columns       = columns,
+    col_widths    = col_widths,
+    snapshot      = build_snapshot(records, columns),
+    note_paths    = {},
+    note_mtimes   = {},
+    mark_to_slug  = {},
+    slug_to_mark  = {},
+    filter_desc   = filter_desc,
+    saving        = false,
+    base          = base,
+    display_names = display_names,
+    formula_cols  = formula_cols,
   }
   for _, rec in ipairs(records) do
     st.note_paths[rec.slug] = rec.path
@@ -1422,6 +1542,23 @@ function M.reload(bufnr)
   local st = buf_states[bufnr]
   if not st then return end
 
+  -- Check if we need Note objects for formula evaluation
+  local has_formulas = st.formula_cols and #st.formula_cols > 0
+  local formula_results_by_slug = {}
+
+  if has_formulas and st.base then
+    -- Re-create Note objects for formula evaluation
+    local Note = require("vault.notes.note")
+    for slug, path in pairs(st.note_paths) do
+      if vim.fn.filereadable(path) == 1 then
+        local ok, note = pcall(Note, path)
+        if ok and note then
+          formula_results_by_slug[slug] = st.base:evaluate_formulas(note)
+        end
+      end
+    end
+  end
+
   -- Re-scan notes
   local records = {}
   local dead_slugs = {}
@@ -1438,6 +1575,10 @@ function M.reload(bufnr)
           fields.dir = dir
         elseif col == "tags" then
           fields.tags = fm.tags
+        elseif col:match("^formula%.") then
+          local formula_name = col:match("^formula%.(.+)")
+          local results = formula_results_by_slug[slug]
+          fields[col] = results and results[formula_name] or nil
         else
           fields[col] = fm[col]
         end

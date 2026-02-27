@@ -559,6 +559,17 @@ local function build_subcommands()
                         mode = "all",
                     })
                     desc = "tag:" .. args[2]
+                elseif filter == "base" and args[2] then
+                    -- Open editor for a specific .base file
+                    local Bases = require("vault.bases")
+                    local bases = Bases()
+                    local base = bases:get(args[2])
+                    if not base then
+                        vim.notify("[vault] Base not found: " .. args[2], vim.log.levels.ERROR)
+                        return
+                    end
+                    bases_editor.open({ base = base })
+                    return
                 elseif filter == "empty-property" then
                     -- Fallback: use API which handles the complex logic
                     require("vault.api").open_picker_notes_with_empty_property_value(args[2], args[3])
@@ -571,8 +582,19 @@ local function build_subcommands()
 
                 bases_editor.open({ notes = notes, filter_desc = desc })
             end,
-            complete = function(prefix)
-                local subs = { "orphans", "leaves", "empty", "no-frontmatter", "dir", "tag", "empty-property" }
+            complete = function(prefix, line)
+                -- If previous arg was "base", complete with base names
+                if line and line:match("process%s+base%s+") then
+                    local ok, Bases = pcall(require, "vault.bases")
+                    if ok then
+                        local bases = Bases()
+                        local names = bases:names()
+                        local sub = line:match("process%s+base%s+(.*)") or ""
+                        return vim.tbl_filter(function(s) return s:find(sub, 1, true) == 1 end, names)
+                    end
+                    return {}
+                end
+                local subs = { "base", "orphans", "leaves", "empty", "no-frontmatter", "dir", "tag", "empty-property" }
                 return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
             end,
         },

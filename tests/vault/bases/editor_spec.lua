@@ -168,4 +168,197 @@ describe("bases.editor", function()
       vim.fn.system({ "git", "checkout", "--", "tests/fixtures/demo-vault/" })
     end)
   end)
+
+  describe("base-driven editor", function()
+    after_each(function()
+      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+        local n = vim.api.nvim_buf_get_name(buf)
+        if n:match("vault://") then
+          pcall(vim.api.nvim_buf_delete, buf, { force = true })
+        end
+      end
+      vim.fn.system({ "git", "checkout", "--", "tests/fixtures/demo-vault/" })
+    end)
+
+    it("should derive columns and display names from base properties", function()
+      local Base = require("vault.bases.base")
+      -- Create a synthetic base with known columns but no filters
+      local base = Base({
+        name = "test-columns",
+        path = "/tmp/test.base",
+        formulas = {
+          greeting = '"Hello " + file.name',
+        },
+        properties = {
+          ["file.name"] = { displayName = "Name" },
+          status = { displayName = "Status" },
+          ["formula.greeting"] = { displayName = "Greeting" },
+        },
+        views = {
+          { type = "table", name = "Test", order = { "file.name", "status", "formula.greeting" } },
+        },
+      })
+
+      local Notes = require("vault.notes")
+      local notes = Notes()
+
+      editor.open({ notes = notes, base = base, filter_desc = "base-cols-test" })
+
+      local bufnr = vim.api.nvim_get_current_buf()
+      local st = editor._buf_states[bufnr]
+      assert.truthy(st, "state should exist")
+      assert.truthy(st.base, "state should reference the base")
+
+      -- Columns from synthetic base view: file.name, status, formula.greeting
+      assert.truthy(vim.tbl_contains(st.columns, "title"), "should have title column (from file.name)")
+      assert.truthy(vim.tbl_contains(st.columns, "status"), "should have status column")
+
+      -- Display names
+      assert.are.equal("Name", st.display_names["title"])
+      assert.are.equal("Status", st.display_names["status"])
+
+      -- Formula columns
+      assert.are.equal(1, #st.formula_cols, "should have 1 formula column")
+      assert.truthy(vim.tbl_contains(st.formula_cols, "formula.greeting"))
+      assert.are.equal("Greeting", st.display_names["formula.greeting"])
+    end)
+
+    it("should evaluate formula columns in the buffer", function()
+      local Base = require("vault.bases.base")
+      local base = Base({
+        name = "test-formulas",
+        path = "/tmp/test.base",
+        formulas = {
+          name_upper = "file.name.upper()",
+        },
+        properties = {
+          ["file.name"] = { displayName = "Name" },
+          ["formula.name_upper"] = { displayName = "UPPER" },
+        },
+        views = {
+          { type = "table", name = "Test", order = { "file.name", "formula.name_upper" } },
+        },
+      })
+
+      local Notes = require("vault.notes")
+      local notes = Notes()
+
+      editor.open({ notes = notes, base = base, filter_desc = "formula-eval-test" })
+
+      local bufnr = vim.api.nvim_get_current_buf()
+      local st = editor._buf_states[bufnr]
+      local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+
+      -- Find the name_upper formula column
+      local name_upper_idx = nil
+      for i, col in ipairs(st.columns) do
+        if col == "formula.name_upper" then
+          name_upper_idx = i
+          break
+        end
+      end
+      assert.truthy(name_upper_idx, "should have formula.name_upper column")
+
+      -- At least one line should have an uppercased value
+      local found_value = false
+      for _, line in ipairs(lines) do
+        local cells = vim.split(line, " │ ", { plain = true })
+        local cell = vim.trim(cells[name_upper_idx] or "")
+        if cell ~= "" and cell ~= "∅" then
+          found_value = true
+          -- Verify it's actually uppercased
+          assert.are.equal(cell, cell:upper(), "formula should produce uppercased name")
+          break
+        end
+      end
+      assert.truthy(found_value, "formula.name_upper should produce non-empty values")
+    end)
+
+    it("should apply base filters to select matching notes", function()
+      local Bases = require("vault.bases")
+      local bases = Bases()
+
+      -- all-notes base has no filters — should show all notes
+      local base = bases:get("all-notes")
+      assert.truthy(base, "all-notes base should exist")
+      assert.falsy(base:has_filters(), "all-notes should have no filters")
+
+      local Notes = require("vault.notes")
+      local notes = Notes()
+      local total = vim.tbl_count(notes.map)
+
+      editor.open({ notes = notes, base = base })
+
+      local bufnr = vim.api.nvim_get_current_buf()
+      local line_count = vim.api.nvim_buf_line_count(bufnr)
+      assert.are.equal(total, line_count, "all-notes base should show all notes")
+    end)
+
+    it("should skip formula columns when saving edits", function()
+      local Base = require("vault.bases.base")
+      local base = Base({
+        name = "test-skip",
+        path = "/tmp/test.base",
+        formulas = { greeting = '"Hello"' },
+        properties = {
+          ["file.name"] = { displayName = "Name" },
+          status = { displayName = "Status" },
+          ["formula.greeting"] = { displayName = "Greeting" },
+        },
+        views = {
+          { type = "table", name = "Test", order = { "file.name", "status", "formula.greeting" } },
+        },
+      })
+
+      local Notes = require("vault.notes")
+      local notes = Notes()
+
+      editor.open({ notes = notes, base = base, filter_desc = "formula-skip-test" })
+
+      local bufnr = vim.api.nvim_get_current_buf()
+      local st = editor._buf_states[bufnr]
+
+      -- Edit a formula cell — this should NOT be written to disk
+      local lines = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)
+      local parts = vim.split(lines[1], " │ ", { plain = true })
+      -- Find formula column index
+      local formula_idx = nil
+      for i, col in ipairs(st.columns) do
+        if col:match("^formula%.") then formula_idx = i; break end
+      end
+      if formula_idx and parts[formula_idx] then
+        parts[formula_idx] = "HACKED          "
+        vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, { table.concat(parts, " │ ") })
+      end
+
+      -- Also edit status (should be saved)
+      local status_idx = nil
+      for i, col in ipairs(st.columns) do
+        if col == "status" then status_idx = i; break end
+      end
+      if status_idx then
+        lines = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)
+        parts = vim.split(lines[1], " │ ", { plain = true })
+        parts[status_idx] = "formula-test    "
+        vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, { table.concat(parts, " │ ") })
+      end
+
+      vim.cmd("w")
+
+      -- The file should have status: formula-test but NOT formula.name_upper: HACKED
+      local slug = nil
+      for s, _ in pairs(st.snapshot) do slug = s; break end
+      if slug then
+        local path = st.note_paths[slug]
+        if path and vim.fn.filereadable(path) == 1 then
+          local file_lines = vim.fn.readfile(path, "", 30)
+          local has_hacked = false
+          for _, l in ipairs(file_lines) do
+            if l:match("HACKED") then has_hacked = true end
+          end
+          assert.falsy(has_hacked, "formula value should NOT be written to disk")
+        end
+      end
+    end)
+  end)
 end)
