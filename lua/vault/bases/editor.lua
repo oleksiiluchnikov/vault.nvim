@@ -1,5 +1,5 @@
--- lua/vault/oil_edit.lua
--- Oil.nvim-style editable buffer for vault note metadata.
+-- lua/vault/bases/editor.lua
+-- Obsidian Bases-style editable buffer for vault note metadata.
 --
 -- Architecture:
 --   1. Each data line is pure visible text: "title │ status │ #tags │ dir/"
@@ -22,7 +22,7 @@ local M = {}
 
 local SEP        = " │ "
 local EMPTY_CELL = "∅"
-local NS         = vim.api.nvim_create_namespace("vault_oil_edit")
+local NS         = vim.api.nvim_create_namespace("vault_bases_editor")
 local NS_DIFF    = vim.api.nvim_create_namespace("vault_oil_diff")
 
 -- ─── Per-buffer state ─────────────────────────────────────────────────────────

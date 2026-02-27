@@ -525,10 +525,10 @@ local function build_subcommands()
             end,
         },
 
-        -- :Vault process [filter] — oil-style metadata editing buffer
+        -- :Vault process [filter] — Bases-style metadata editing buffer
         process = {
             run = function(args)
-                local oil_edit = require("vault.oil_edit")
+                local bases_editor = require("vault.bases.editor")
                 local filter = args[1]
                 local notes, desc
 
@@ -569,7 +569,7 @@ local function build_subcommands()
                     desc = "filter:" .. filter
                 end
 
-                oil_edit.open({ notes = notes, filter_desc = desc })
+                bases_editor.open({ notes = notes, filter_desc = desc })
             end,
             complete = function(prefix)
                 local subs = { "orphans", "leaves", "empty", "no-frontmatter", "dir", "tag", "empty-property" }
