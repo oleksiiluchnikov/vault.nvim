@@ -2,7 +2,7 @@
 --- for Obsidian Bases filter trees and formula expressions.
 ---
 --- Covers ALL Obsidian Bases functions:
----   File:   file.hasTag, file.hasLink, file.inFolder, file.asLink
+---   File:   file.hasTag, file.hasLink, file.hasProperty, file.inFolder, file.asLink
 ---   String: .contains, .containsAll, .containsAny, .startsWith, .endsWith,
 ---           .lower, .split, .replace, .trim, .title, .slice, .isEmpty, .length
 ---   Number: .abs, .ceil, .floor, .round, .toFixed, .isEmpty
@@ -554,6 +554,8 @@ local function resolve_file_member(file_ref, member)
 
     if member == "name" then
         return note.data.stem or vim.fn.fnamemodify(note.data.path, ":t:r")
+    elseif member == "basename" then
+        return vim.fn.fnamemodify(note.data.path, ":t")
     elseif member == "folder" then
         local relpath = note.data.relpath or ""
         return vim.fn.fnamemodify(relpath, ":h")
@@ -715,6 +717,19 @@ local function eval_method(obj, method, args, ctx)
                         end
                     end
                 end
+            end
+            return false
+        end
+
+        if method == "hasProperty" then
+            local prop_name = args[1]
+            if not prop_name then return false end
+            if note.data.frontmatter then
+                local fm = note.data.frontmatter
+                -- Check raw table
+                if fm[prop_name] ~= nil then return true end
+                -- Check fm.data (VaultNoteFrontmatter object)
+                if type(fm.data) == "table" and fm.data[prop_name] ~= nil then return true end
             end
             return false
         end

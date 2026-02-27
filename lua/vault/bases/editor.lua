@@ -10,7 +10,7 @@
 --   6. After mutations complete, re-scan and re-render.
 --
 -- Extmark design:
---   NS namespace — one extmark per data line at col 0, right_gravity=false.
+--   NS namespace — one extmark per data line at col 0, right_gravity=true.
 --   State maps extmark_id → slug and slug → extmark_id.
 --   Lines without a slug extmark → new note (CREATE).
 --   Slugs in snapshot whose extmark is gone → note trashed (DELETE).
@@ -338,7 +338,7 @@ end
 ---@return integer mark_id
 local function set_line_slug(bufnr, row, slug, st)
   local mark_id = vim.api.nvim_buf_set_extmark(bufnr, NS, row, 0, {
-    right_gravity = false,
+    right_gravity = true,
   })
   st.mark_to_slug[mark_id] = slug
   st.slug_to_mark[slug] = mark_id
@@ -789,7 +789,7 @@ local function apply_extmarks(bufnr, st, records)
     vim.api.nvim_buf_set_extmark(bufnr, NS, 0, 0, {
       virt_lines_above = true,
       virt_lines = virt_lines,
-      right_gravity = false,
+    right_gravity = true,
       -- This extmark is just for the header; don't track it as a slug
     })
   end
@@ -1943,7 +1943,8 @@ function M.sort_by_cursor(bufnr)
   end
 end
 
---- Debug: expose buf_states for testing
+--- Debug: expose buf_states and diff_buffer for testing
 M._buf_states = buf_states
+M._diff_buffer = diff_buffer
 
 return M

@@ -109,7 +109,7 @@ end
 function Base:match_notes(notes)
     if not self:has_filters() then
         -- No filters means all notes match
-        return vim.deepcopy(notes)
+        return notes
     end
 
     local evaluator = require("vault.bases.evaluator")
