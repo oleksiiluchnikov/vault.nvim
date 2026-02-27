@@ -1,0 +1,1 @@
+- when work on bases verify it is up to date to https://help.obsidian.md/bases

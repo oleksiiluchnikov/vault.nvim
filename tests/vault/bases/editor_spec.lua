@@ -364,6 +364,193 @@ describe("bases.editor", function()
     end)
   end)
 
+  describe("dd (delete line)", function()
+    after_each(function()
+      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+        local n = vim.api.nvim_buf_get_name(buf)
+        if n:match("vault://") then
+          pcall(vim.api.nvim_buf_delete, buf, { force = true })
+        end
+      end
+      vim.fn.system({ "git", "checkout", "--", "tests/fixtures/demo-vault/" })
+    end)
+
+    it("should detect deleted line as a delete in diff_buffer", function()
+      local Notes = require("vault.notes")
+      local notes = Notes()
+
+      editor.open({ notes = notes, filter_desc = "test-dd" })
+
+      local bufnr = vim.api.nvim_get_current_buf()
+      local st = editor._buf_states[bufnr]
+      local NS = vim.api.nvim_create_namespace("vault_bases_editor")
+      local original_count = vim.api.nvim_buf_line_count(bufnr)
+
+      -- Record slug on first line via extmark
+      local marks = vim.api.nvim_buf_get_extmarks(bufnr, NS, { 0, 0 }, { 0, -1 }, {})
+      local deleted_slug = nil
+      for _, mk in ipairs(marks) do
+        if st.mark_to_slug[mk[1]] then
+          deleted_slug = st.mark_to_slug[mk[1]]
+          break
+        end
+      end
+      assert.truthy(deleted_slug, "first line should have a slug extmark")
+
+      -- Simulate 'dd' on first line
+      vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, {})
+
+      -- Buffer should have one fewer line
+      assert.are.equal(original_count - 1, vim.api.nvim_buf_line_count(bufnr))
+
+      -- diff_buffer should detect the missing slug as a delete
+      local diff = editor._diff_buffer(bufnr, st)
+      assert.truthy(vim.tbl_contains(diff.deletes, deleted_slug),
+        "deleted slug should appear in diff.deletes")
+      assert.are.equal(0, #diff.creates, "no creates expected")
+    end)
+
+    it("should preserve extmark identity on remaining lines after dd", function()
+      local Notes = require("vault.notes")
+      local notes = Notes()
+
+      editor.open({ notes = notes, filter_desc = "test-dd-identity" })
+
+      local bufnr = vim.api.nvim_get_current_buf()
+      local st = editor._buf_states[bufnr]
+      local NS = vim.api.nvim_create_namespace("vault_bases_editor")
+      local original_count = vim.api.nvim_buf_line_count(bufnr)
+
+      -- Record all slugs by row
+      local original_slugs = {}
+      for row = 0, original_count - 1 do
+        local marks = vim.api.nvim_buf_get_extmarks(bufnr, NS, { row, 0 }, { row, -1 }, {})
+        for _, mk in ipairs(marks) do
+          if st.mark_to_slug[mk[1]] then
+            original_slugs[row] = st.mark_to_slug[mk[1]]
+          end
+        end
+      end
+
+      -- Delete first line
+      vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, {})
+
+      -- Remaining lines should have shifted up but kept their slugs
+      for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+        local marks = vim.api.nvim_buf_get_extmarks(bufnr, NS, { row, 0 }, { row, -1 }, {})
+        local slug = nil
+        for _, mk in ipairs(marks) do
+          if st.mark_to_slug[mk[1]] then slug = st.mark_to_slug[mk[1]] end
+        end
+        -- This slug should match what was originally at row+1
+        assert.are.equal(original_slugs[row + 1], slug,
+          string.format("row %d should have slug from original row %d", row, row + 1))
+      end
+    end)
+  end)
+
+  describe("o/O (insert line)", function()
+    after_each(function()
+      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+        local n = vim.api.nvim_buf_get_name(buf)
+        if n:match("vault://") then
+          pcall(vim.api.nvim_buf_delete, buf, { force = true })
+        end
+      end
+      vim.fn.system({ "git", "checkout", "--", "tests/fixtures/demo-vault/" })
+    end)
+
+    it("should detect inserted line as a create in diff_buffer", function()
+      local Notes = require("vault.notes")
+      local notes = Notes()
+
+      editor.open({ notes = notes, filter_desc = "test-insert" })
+
+      local bufnr = vim.api.nvim_get_current_buf()
+      local st = editor._buf_states[bufnr]
+      local original_count = vim.api.nvim_buf_line_count(bufnr)
+
+      -- Build a new line that matches column layout: slug │ title │ status │ tags
+      -- We need to match the column widths from state
+      local new_cells = {}
+      for i, col in ipairs(st.columns) do
+        local width = st.col_widths[i]
+        local val = ""
+        if col == "slug" then val = "Notes/brand-new-note" end
+        if col == "title" then val = "Brand New Note" end
+        if col == "status" then val = "draft" end
+        table.insert(new_cells, string.format("%-" .. width .. "s", val))
+      end
+      local new_line = table.concat(new_cells, " │ ")
+
+      -- Insert between line 0 and 1 (simulates 'o' on first line)
+      vim.api.nvim_buf_set_lines(bufnr, 1, 1, false, { new_line })
+
+      assert.are.equal(original_count + 1, vim.api.nvim_buf_line_count(bufnr))
+
+      -- diff_buffer should detect the new line as a create
+      local diff = editor._diff_buffer(bufnr, st)
+      assert.are.equal(0, #diff.deletes, "no deletes expected")
+      assert.truthy(#diff.creates >= 1, "should have at least 1 create")
+
+      -- The created fields should have our title
+      local found = false
+      for _, cr in ipairs(diff.creates) do
+        if cr.fields.title == "Brand New Note" then found = true end
+      end
+      assert.truthy(found, "create should contain 'Brand New Note'")
+    end)
+
+    it("should preserve identity of lines below insertion point", function()
+      local Notes = require("vault.notes")
+      local notes = Notes()
+
+      editor.open({ notes = notes, filter_desc = "test-insert-shift" })
+
+      local bufnr = vim.api.nvim_get_current_buf()
+      local st = editor._buf_states[bufnr]
+      local NS = vim.api.nvim_create_namespace("vault_bases_editor")
+      local original_count = vim.api.nvim_buf_line_count(bufnr)
+
+      -- Record slug at row 2
+      local slug_at_2 = nil
+      local marks = vim.api.nvim_buf_get_extmarks(bufnr, NS, { 2, 0 }, { 2, -1 }, {})
+      for _, mk in ipairs(marks) do
+        if st.mark_to_slug[mk[1]] then slug_at_2 = st.mark_to_slug[mk[1]] end
+      end
+      assert.truthy(slug_at_2, "row 2 should have a slug")
+
+      -- Insert a blank line at row 1 (pushes row 2 → row 3)
+      vim.api.nvim_buf_set_lines(bufnr, 1, 1, false, { "" })
+
+      -- The slug that was at row 2 should now be at row 3
+      marks = vim.api.nvim_buf_get_extmarks(bufnr, NS, { 3, 0 }, { 3, -1 }, {})
+      local slug_at_3 = nil
+      for _, mk in ipairs(marks) do
+        if st.mark_to_slug[mk[1]] then slug_at_3 = st.mark_to_slug[mk[1]] end
+      end
+      assert.are.equal(slug_at_2, slug_at_3,
+        "slug should follow its line when a line is inserted above")
+    end)
+
+    it("should ignore empty inserted lines in diff_buffer", function()
+      local Notes = require("vault.notes")
+      local notes = Notes()
+
+      editor.open({ notes = notes, filter_desc = "test-empty-insert" })
+
+      local bufnr = vim.api.nvim_get_current_buf()
+      local st = editor._buf_states[bufnr]
+
+      -- Insert an empty line
+      vim.api.nvim_buf_set_lines(bufnr, 1, 1, false, { "" })
+
+      local diff = editor._diff_buffer(bufnr, st)
+      assert.are.equal(0, #diff.creates, "empty lines should not create notes")
+      assert.are.equal(0, #diff.deletes, "empty lines should not cause deletes")
+    end)
+  end)
+
   describe("sorting", function()
     after_each(function()
       for _, buf in ipairs(vim.api.nvim_list_bufs()) do
