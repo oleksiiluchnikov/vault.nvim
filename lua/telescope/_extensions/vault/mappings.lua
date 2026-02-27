@@ -125,8 +125,17 @@ M.bases = function(_, map)
     map("i", "<C-c>", vault_actions.close)
     map("n", "<C-c>", vault_actions.close)
 
+    -- Enter: open bases editor (table view)
     map("i", "<CR>", vault_actions.base.enter)
     map("n", "<CR>", vault_actions.base.enter)
+
+    -- C-n: drill into notes picker (Telescope)
+    map("i", "<C-n>", vault_actions.base.notes)
+    map("n", "<C-n>", vault_actions.base.notes)
+
+    -- C-e: edit the .base file
+    map("i", "<C-e>", vault_actions.base.edit)
+    map("n", "<C-e>", vault_actions.base.edit)
 
     map("i", "<C-s>", vault_actions.resort)
     map("n", "<C-s>", vault_actions.resort)
