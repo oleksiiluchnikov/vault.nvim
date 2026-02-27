@@ -263,11 +263,12 @@ end
 local function calc_col_widths(columns, records)
   -- Each column gets exactly the width of its longest value (natural fit).
   -- No artificial capping or scaling — columns are as wide as they need to be.
-  -- The buffer scrolls horizontally for overflow; winbar uses %< to clip.
+  -- The buffer scrolls horizontally for overflow; winbar clips.
+  -- slug column always scans ALL records — truncated slugs break identity.
   local widths = {}
   for i, col in ipairs(columns) do
     local w = vim.fn.strdisplaywidth(col)  -- at least as wide as the header
-    local sample = math.min(200, #records)
+    local sample = (col == "slug") and #records or math.min(200, #records)
     for j = 1, sample do
       local cell = fmt_value(records[j].fields[col], col)
       w = math.max(w, vim.fn.strdisplaywidth(cell))
@@ -1008,15 +1009,9 @@ local function diff_buffer(bufnr, st)
               })
               goto next_col
             end
-            -- Truncated values cannot be reliably saved — warn but skip
-            if old_rendered:match("…$") or new_text:match("…$") then
-              table.insert(diff.errors, {
-                row = row, col_idx = i,
-                message = string.format("Column '%s' is truncated — edit ignored (widen column or edit note directly)", col),
-              })
-              goto next_col
-            end
-            -- Slug column → rename operation
+            -- Slug column → rename operation (checked before truncation guard;
+            -- slug col_width covers all records so truncation shouldn't happen,
+            -- but even if it did we must not silently drop a rename intent).
             if col == "slug" then
               local new_slug = vim.trim(new_text)
               if new_slug ~= "" and new_slug ~= slug then
@@ -1026,6 +1021,14 @@ local function diff_buffer(bufnr, st)
                   row = row,
                 })
               end
+              goto next_col
+            end
+            -- Truncated values cannot be reliably saved — warn but skip
+            if old_rendered:match("…$") or new_text:match("…$") then
+              table.insert(diff.errors, {
+                row = row, col_idx = i,
+                message = string.format("Column '%s' is truncated — edit ignored (widen column or edit note directly)", col),
+              })
               goto next_col
             end
             changed_fields[col] = parse_value(new_text, col)
