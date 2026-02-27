@@ -36,6 +36,7 @@ function utils.path_to_relpath(path)
     if not root_dir then
         error("`VaultConfig.root` is not set.")
     end
+    root_dir = vim.fn.expand(root_dir)
     local prefix = root_dir .. "/"
     if path:sub(1, #prefix) == prefix then
         return path:sub(#prefix + 1)
