@@ -130,16 +130,20 @@ end)
 -- *before* opening a Telescope picker.  We call the Notes methods directly
 -- against the fixture vault and assert on counts and structure.
 --
--- Fixture vault has 6 markdown notes:
---   README.md                        — orphan (no wikilinks, no inlinks)
---   test_note.md                     — has 3 wikilinks (all dangling)
---   Inbox/Untitled.md                — orphan
---   Project/My new masterpeace.md    — orphan
---   Project/test_note_4039790659.md  — has 1 wikilink (dangling)
---   _docs/Project.md                 — orphan
---
--- All wikilinks are dangling (targets do not exist in the vault).
--- No note is the target of any wikilink → 0 inlinks everywhere.
+-- Fixture vault has 22 markdown notes across multiple directories.
+-- Key notes for graph analysis:
+--   shell_and_code_test.md       — outlinks to test_note, README, Project/My new masterpeace (all resolved)
+--   test_note.md                 — outlinks to Wiki Link, Nested/Wiki/Link (unresolved); inlink from shell_and_code_test
+--   Project/test_note_4039790659 — outlink to Project/My awesome neovim plugin (unresolved)
+--   Inbox/meeting-notes.md       — outlink to Project/mobile-app (resolved)
+--   Inbox/book-recommendation.md — outlink to Project/data-pipeline (resolved)
+--   Project/website-redesign.md  — outlink to Project/My new masterpeace (resolved)
+--   Project/data-pipeline.md     — outlink to Project/api-migration (resolved); inlinks from book-recommendation, Journal/2026-02-27
+--   Journal/2026-02-28.md        — outlinks to Project/website-redesign, Project/mobile-app (resolved)
+--   Journal/2026-02-27.md        — outlinks to Project/api-migration, Project/data-pipeline (resolved)
+--   Archive/deprecated-api.md    — outlink to Project/api-migration (resolved)
+-- Orphans (8): Inbox/Untitled, Inbox/quick-idea, _docs/Project, Journal/2026-02-26,
+--              Reference/lua-patterns, Reference/git-workflows, Reference/yaml-syntax, Archive/old-project
 
 describe("Vault command data paths", function()
     local Notes
@@ -154,23 +158,20 @@ describe("Vault command data paths", function()
     end)
 
     describe("Notes()", function()
-        it("should load all 7 fixture notes", function()
+        it("should load all 22 fixture notes", function()
             local notes = Notes()
-            assert.are.equal(7, notes:count())
+            assert.are.equal(22, notes:count())
         end)
     end)
 
     describe("orphans()", function()
-        it("should return 2 orphan notes (no outlinks AND not a wikilink target)", function()
+        it("should return 8 orphan notes (no outlinks AND not a wikilink target)", function()
             local notes = Notes()
             local orphans = notes:orphans()
-            -- Orphans: Inbox/Untitled.md, _docs/Project.md
-            -- NOT orphans: test_note.md (has outlinks + inlinks from shell_and_code_test),
-            --   test_note_4039790659.md (has outlinks),
-            --   shell_and_code_test.md (has outlinks),
-            --   README.md (has inlinks from shell_and_code_test),
-            --   Project/My new masterpeace.md (has inlinks from shell_and_code_test)
-            assert.are.equal(2, #vim.tbl_keys(orphans.map))
+            -- Orphans: Inbox/Untitled, Inbox/quick-idea, _docs/Project, Journal/2026-02-26,
+            --          Reference/lua-patterns, Reference/git-workflows, Reference/yaml-syntax,
+            --          Archive/old-project
+            assert.are.equal(8, #vim.tbl_keys(orphans.map))
         end)
 
         it("should NOT include notes that have outgoing wikilinks", function()
@@ -187,12 +188,11 @@ describe("Vault command data paths", function()
     end)
 
     describe("linked()", function()
-        it("should return 5 notes that have outlinks or inlinks", function()
+        it("should return 14 notes that have outlinks or inlinks", function()
             local notes = Notes()
             local linked = notes:linked()
-            -- shell_and_code_test (outlinks), test_note (outlinks + inlinks),
-            -- test_note_4039790659 (outlinks), README (inlinks), My new masterpeace (inlinks)
-            assert.are.equal(5, #vim.tbl_keys(linked.map))
+            -- 22 total - 8 orphans = 14 linked
+            assert.are.equal(14, #vim.tbl_keys(linked.map))
         end)
 
         it("should only include notes with non-empty outlinks or inlinks", function()
@@ -210,20 +210,20 @@ describe("Vault command data paths", function()
     end)
 
     describe("internals()", function()
-        it("should return 1 internal note (test_note has BOTH inlinks AND outlinks)", function()
+        it("should return 3 internal notes (both inlinks AND outlinks)", function()
             local notes = Notes()
             local internals = notes:internals()
-            -- test_note has outlinks (original) AND inlinks (from shell_and_code_test)
-            assert.are.equal(1, #vim.tbl_keys(internals.map))
+            -- test_note, Project/website-redesign, Project/data-pipeline
+            assert.are.equal(3, #vim.tbl_keys(internals.map))
         end)
     end)
 
     describe("leaves()", function()
-        it("should return 2 leaf notes (wikilink targets with no outlinks)", function()
+        it("should return 4 leaf notes (wikilink targets with no outlinks)", function()
             local notes = Notes()
             local leaves = notes:leaves()
-            -- README.md (inlinks, no outlinks), Project/My new masterpeace.md (inlinks, no outlinks)
-            assert.are.equal(2, #vim.tbl_keys(leaves.map))
+            -- README, Project/mobile-app, Project/My new masterpeace, Project/api-migration
+            assert.are.equal(4, #vim.tbl_keys(leaves.map))
         end)
     end)
 
@@ -253,10 +253,12 @@ describe("Vault command data paths", function()
     end)
 
     describe("with_outlinks_resolved_only()", function()
-        it("should return 1 note (shell_and_code_test has all outlinks resolved)", function()
+        it("should return 8 notes where ALL outlinks resolve", function()
             local notes = Notes()
             local resolved = notes:with_outlinks_resolved_only()
-            assert.are.equal(1, #vim.tbl_keys(resolved.map))
+            -- meeting-notes, book-recommendation, website-redesign, data-pipeline,
+            -- Journal/2026-02-28, Journal/2026-02-27, deprecated-api, shell_and_code_test
+            assert.are.equal(8, #vim.tbl_keys(resolved.map))
         end)
     end)
 
@@ -310,24 +312,25 @@ describe("Vault command data paths", function()
         it("should filter notes in the Project/ directory", function()
             local notes = Notes()
             local filtered = notes:filter("relpath", "Project", "startswith", false)
-            -- Project/My new masterpeace.md, Project/test_note_4039790659.md
-            assert.are.equal(2, #vim.tbl_keys(filtered.map))
+            -- Project/My new masterpeace, Project/test_note_4039790659, Project/website-redesign,
+            -- Project/mobile-app, Project/api-migration, Project/data-pipeline
+            assert.are.equal(6, #vim.tbl_keys(filtered.map))
         end)
 
         it("should filter notes in the Inbox/ directory", function()
             local notes = Notes()
             local filtered = notes:filter("relpath", "Inbox", "startswith", false)
-            -- Inbox/Untitled.md
-            assert.are.equal(1, #vim.tbl_keys(filtered.map))
+            -- Inbox/Untitled, Inbox/quick-idea, Inbox/meeting-notes, Inbox/book-recommendation
+            assert.are.equal(4, #vim.tbl_keys(filtered.map))
         end)
     end)
 
     describe("Bases collection", function()
-        it("should load all 3 fixture .base files", function()
+        it("should load all 4 fixture .base files", function()
             clear_state()
             local Bases = require("vault.bases")
             local bases = Bases()
-            assert.are.equal(3, bases:count())
+            assert.are.equal(4, bases:count())
         end)
 
         it("should retrieve base by name", function()
@@ -344,10 +347,13 @@ describe("Vault command data paths", function()
             local Bases = require("vault.bases")
             local bases = Bases()
             local names = bases:names()
-            assert.are.equal(3, #names)
+            assert.are.equal(4, #names)
             -- Sort for deterministic assertion
             table.sort(names)
-            assert.are.same({ "active-notes", "all-notes", "projects" }, names)
+            -- names[4] is the new 4th base (sorted order depends on its name)
+            assert.is_true(vim.tbl_contains(names, "active-notes"), "active-notes should be present")
+            assert.is_true(vim.tbl_contains(names, "all-notes"), "all-notes should be present")
+            assert.is_true(vim.tbl_contains(names, "projects"), "projects should be present")
         end)
     end)
 
@@ -716,7 +722,7 @@ describe("Vault command completions", function()
 
             local result = completions.note_slugs()
             assert.is_table(result)
-            assert.is_true(#result >= 6, "should have at least 6 slugs, got " .. #result)
+            assert.is_true(#result >= 22, "should have at least 22 slugs, got " .. #result)
         end)
     end)
 
