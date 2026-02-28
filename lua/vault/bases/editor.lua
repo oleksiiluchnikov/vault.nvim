@@ -2307,6 +2307,7 @@ function M.open(opts)
   vim.api.nvim_set_current_buf(bufnr)
   local winid = vim.api.nvim_get_current_win()
   st.winid = winid
+  st._last_line_count = #records
 
   -- Window options
   vim.wo[winid].signcolumn = "yes"
@@ -2353,8 +2354,18 @@ function M.open(opts)
     callback = function()
       local s = buf_states[bufnr]
       if s and not s.saving then
-        -- Refresh conceal on all lines (incremental would need tracking changed lines)
-        apply_conceal(bufnr)
+        -- Refresh conceal only on changed lines (full refresh is too slow for 8k+ lines).
+        -- Conceal extmarks survive in-place edits; only new/pasted lines need them.
+        local line_count = vim.api.nvim_buf_line_count(bufnr)
+        if line_count ~= (s._last_line_count or line_count) then
+          -- Line count changed (insert/delete/paste) — refresh all conceal
+          apply_conceal(bufnr)
+        else
+          -- In-place edit — refresh conceal on current line only
+          local cursor_row = vim.api.nvim_win_get_cursor(0)[1] - 1
+          apply_conceal_line(bufnr, cursor_row)
+        end
+        s._last_line_count = line_count
         update_diff_signs(bufnr, s)
         update_validation(bufnr, s)
       end
