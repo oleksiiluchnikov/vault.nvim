@@ -1,0 +1,36 @@
+filters:
+  or:
+    - file.hasTag("project")
+    - file.hasTag("active")
+
+formulas:
+  name_upper: "file.name.upper()"
+  has_due: 'if(due, "yes", "no")'
+
+properties:
+  file.name:
+    displayName: "Name"
+  status:
+    displayName: "Status"
+  priority:
+    displayName: "Priority"
+  tags:
+    displayName: "Tags"
+  formula.name_upper:
+    displayName: "NAME (UPPER)"
+  formula.has_due:
+    displayName: "Has Due?"
+
+views:
+  - type: table
+    name: "Process Test"
+    order:
+      - file.name
+      - status
+      - priority
+      - tags
+      - formula.name_upper
+      - formula.has_due
+    sort_by:
+      key: status
+      direction: asc
