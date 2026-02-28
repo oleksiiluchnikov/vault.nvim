@@ -1130,8 +1130,11 @@ local function update_diff_signs(bufnr, st)
     if not seen[slug] then deleted = deleted + 1 end
   end
   if deleted > 0 and line_count > 0 then
+    local del_text = deleted > 99 and "##" or tostring(deleted)
+    -- sign_text must be 1-2 display cells; truncate for large numbers
+    if #del_text > 2 then del_text = del_text:sub(1, 2) end
     vim.api.nvim_buf_set_extmark(bufnr, NS_DIFF, 0, 0, {
-      sign_text = tostring(deleted), sign_hl_group = "DiffDelete", priority = 30,
+      sign_text = del_text, sign_hl_group = "DiffDelete", priority = 30,
     })
   end
 end
@@ -1733,9 +1736,14 @@ local function apply_mutations(diff, st, on_done)
 
   -- Creates
   for _, create in ipairs(diff.creates) do
+    -- Derive filename from slug column first (primary identity), then title, then "untitled"
+    local raw_slug = create.fields.slug
     local title = create.fields.title
-    if not title or title == "" then goto continue end
-    local slug = title:lower():gsub("%s+", "-"):gsub("[%c%[%]#|^]", "")
+    local source = raw_slug and raw_slug ~= "" and raw_slug ~= EMPTY_CELL and raw_slug
+      or title and title ~= "" and title ~= EMPTY_CELL and title
+      or nil
+    if not source then goto continue end
+    local slug = source:lower():gsub("%s+", "-"):gsub("[%c%[%]#|^]", "")
     if slug == "" then slug = "untitled" end
     local config = require("vault.config")
     local dir = create.fields.dir or ""
