@@ -159,19 +159,51 @@ function M.open_conflict_picker(slug_a, slug_b, conflicts, on_resolve)
   local choices = {} -- index → "a" or "b"
   for i = 1, #conflicts do choices[i] = "a" end -- default: pick A
 
+  -- Pre-compute column widths for alignment
+  local MAX_VAL = 38  -- max display width for each value column
+  local function val_str(v)
+    return type(v) == "table" and table.concat(v, ", ") or tostring(v)
+  end
+  local function truncate(s, max)
+    if #s <= max then return s end
+    return s:sub(1, max - 1) .. "…"
+  end
+
+  -- Field-name column width: longest "fieldname:" + 1 space
+  local field_w = 0
+  for _, c in ipairs(conflicts) do
+    field_w = math.max(field_w, #c.field + 1)  -- +1 for ":"
+  end
+  field_w = field_w + 1  -- trailing space after colon
+
+  -- Value column width: capped at MAX_VAL
+  local val_a_w = 0
+  local val_b_w = 0
+  for _, c in ipairs(conflicts) do
+    val_a_w = math.max(val_a_w, math.min(#val_str(c.val_a), MAX_VAL))
+    val_b_w = math.max(val_b_w, math.min(#val_str(c.val_b), MAX_VAL))
+  end
+
+  -- marker (●/○) is 1 display cell + 1 space = 2 before value
+  -- layout: " " + field_col + "  " + marker + " " + val_a_col + "  |  " + marker + " " + val_b_col
+  local total_w = 1 + field_w + 2 + 2 + val_a_w + 5 + 2 + val_b_w
+  local width = math.max(total_w, 60)
+
   local function render_lines()
-    local lines = {
-      string.format(" Merge: %s ← %s", slug_a, slug_b),
-      " ─────────────────────────────────────────",
-    }
+    local header = string.format(" Merge: %s ← %s", slug_a, slug_b)
+    local sep_line = " " .. string.rep("─", width - 2)
+    local lines = { header, sep_line }
     for i, c in ipairs(conflicts) do
-      local a_str = type(c.val_a) == "table" and table.concat(c.val_a, ", ") or tostring(c.val_a)
-      local b_str = type(c.val_b) == "table" and table.concat(c.val_b, ", ") or tostring(c.val_b)
+      local a_str = truncate(val_str(c.val_a), MAX_VAL)
+      local b_str = truncate(val_str(c.val_b), MAX_VAL)
       local marker_a = choices[i] == "a" and "●" or "○"
       local marker_b = choices[i] == "b" and "●" or "○"
+      -- Pad field name and value columns for alignment
+      local field_col = string.format("%-" .. field_w .. "s", c.field .. ":")
+      local val_a_col = string.format("%-" .. val_a_w .. "s", a_str)
       table.insert(lines, string.format(
         " %s  %s %s  |  %s %s",
-        c.field .. ":", marker_a, a_str, marker_b, b_str
+        field_col, marker_a, val_a_col, marker_b, b_str
       ))
     end
     table.insert(lines, "")
@@ -184,7 +216,6 @@ function M.open_conflict_picker(slug_a, slug_b, conflicts, on_resolve)
   vim.bo[buf].modifiable = false
   vim.bo[buf].bufhidden = "wipe"
 
-  local width = 80
   local height = #conflicts + 5
   local win = vim.api.nvim_open_win(buf, true, {
     relative = "editor",
