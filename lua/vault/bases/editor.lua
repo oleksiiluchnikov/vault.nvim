@@ -177,10 +177,13 @@ end
 
 --- Extract columns and display names from a Base object.
 --- Uses the first view's order if available, otherwise properties keys.
+--- Slug is included only if explicitly listed in the order; otherwise it
+--- will be added internally but kept hidden (metadata-only identity).
 ---@param base vault.Base
----@return string[] columns  Internal column names
+---@return string[] columns  Internal column names (always includes "slug")
 ---@return table<string, string> display_names  col → display name
 ---@return string[] formula_cols  List of formula column names (read-only)
+---@return string[] visible_columns  Columns the user actually wants rendered
 local function columns_from_base(base)
   local columns = {}
   local display_names = {}
@@ -195,18 +198,18 @@ local function columns_from_base(base)
     order = base.data.properties and vim.tbl_keys(base.data.properties) or {}
   end
   if #order == 0 then
-    return DEFAULT_COLUMNS, {}, {}
+    return DEFAULT_COLUMNS, {}, {}, DEFAULT_COLUMNS
   end
 
   -- Get display name map from base
   local base_display = base:display_names()
 
-  -- slug is always first column
-  local seen = { slug = true }
-  columns[1] = "slug"
+  local seen = {}
+  local has_slug = false
 
   for _, key in ipairs(order) do
     local col, is_formula = base_key_to_col(key)
+    if col == "slug" then has_slug = true end
     if not seen[col] then
       seen[col] = true
       table.insert(columns, col)
@@ -217,7 +220,15 @@ local function columns_from_base(base)
     end
   end
 
-  return columns, display_names, formula_cols
+  -- visible_columns = what the user specified (preserving their order)
+  local visible_columns = vim.list_slice(columns, 1)
+
+  -- Ensure slug is always in the internal columns list (for identity)
+  if not has_slug then
+    table.insert(columns, 1, "slug")
+  end
+
+  return columns, display_names, formula_cols, visible_columns
 end
 
 -- ─── Value formatting ─────────────────────────────────────────────────────────
@@ -384,10 +395,12 @@ end
 ---@return integer drift_count  number of rows where extmark was wrong
 ---@return integer reconciled_count  number of drifted rows successfully fixed
 local function reconcile_extmarks(bufnr, st, lines)
-  -- Find the slug column index (always present, always first)
+  -- Find the slug/title column index in the VISIBLE columns (what's in the buffer)
+  local vis_cols = st.visible_columns or st.columns
+  local vis_widths = st.visible_col_widths or st.col_widths
   local slug_col_idx = nil
   local title_col_idx = nil
-  for i, col in ipairs(st.columns) do
+  for i, col in ipairs(vis_cols) do
     if col == "slug" then slug_col_idx = i end
     if col == "title" then title_col_idx = i end
   end
@@ -403,7 +416,7 @@ local function reconcile_extmarks(bufnr, st, lines)
   local title_to_slugs = {}
   if title_col_idx then
     for slug, snap in pairs(st.snapshot) do
-      local title_rendered = vim.trim(pad(fmt_value(snap.title), st.col_widths[title_col_idx]))
+      local title_rendered = vim.trim(pad(fmt_value(snap.title), vis_widths[title_col_idx]))
       if not title_to_slugs[title_rendered] then
         title_to_slugs[title_rendered] = {}
       end
@@ -412,13 +425,13 @@ local function reconcile_extmarks(bufnr, st, lines)
   end
 
   -- Build full-row fingerprint lookup for disambiguation when slug/title collide.
-  -- Fingerprint = concatenation of all non-slug cell values from snapshot.
+  -- Fingerprint = concatenation of all non-slug visible cell values from snapshot.
   local fingerprint_to_slug = {}
   for slug, snap in pairs(st.snapshot) do
     local parts = {}
-    for i, col in ipairs(st.columns) do
+    for i, col in ipairs(vis_cols) do
       if col ~= "slug" then
-        table.insert(parts, vim.trim(pad(fmt_value(snap[col], col), st.col_widths[i])))
+        table.insert(parts, vim.trim(pad(fmt_value(snap[col], col), vis_widths[i])))
       end
     end
     local fp = table.concat(parts, "|")
@@ -468,7 +481,7 @@ local function reconcile_extmarks(bufnr, st, lines)
       if title_col_idx then
         local expected_title = vim.trim(pad(
           fmt_value(st.snapshot[extmark_slug].title),
-          st.col_widths[title_col_idx]
+          vis_widths[title_col_idx]
         ))
         local actual_title = cells[title_col_idx] or ""
         if expected_title == actual_title then
@@ -522,7 +535,7 @@ local function reconcile_extmarks(bufnr, st, lines)
         -- If no candidate found, try full-row fingerprint disambiguation
       if not row_to_slug[row] then
         local parts = {}
-        for ci, col in ipairs(st.columns) do
+        for ci, col in ipairs(vis_cols) do
           if col ~= "slug" then
             table.insert(parts, vim.trim(cells[ci] or ""))
           end
@@ -781,8 +794,8 @@ end
 -- ─── Rendering ────────────────────────────────────────────────────────────────
 
 ---@param rec table
----@param columns string[]
----@param widths integer[]
+---@param columns string[]  visible columns only
+---@param widths integer[]  widths matching visible columns
 ---@return string
 local function render_record_line(rec, columns, widths)
   local cells = {}
@@ -798,9 +811,11 @@ end
 ---@return table[] virt_lines  list of {chunks} for nvim_buf_set_extmark virt_lines
 local function build_header_virt_lines(st)
   -- Separator row only (header is now in winbar)
+  local vis_widths = st.visible_col_widths or st.col_widths
+  local vis_cols = st.visible_columns or st.columns
   local sep_parts = {}
-  for i, _ in ipairs(st.columns) do
-    table.insert(sep_parts, string.rep("─", st.col_widths[i]))
+  for i, _ in ipairs(vis_cols) do
+    table.insert(sep_parts, string.rep("─", vis_widths[i]))
   end
   local sep_text = table.concat(sep_parts, "─┼─")
 
@@ -833,12 +848,14 @@ end
 ---@param st vault.OilEditState
 ---@return {text:string, hl:string}[]
 local function build_header_chunks(st)
+  local vis_cols = st.visible_columns or st.columns
+  local vis_widths = st.visible_col_widths or st.col_widths
   local chunks = {}
   local formula_set = {}
   if st.formula_cols then
     for _, fc in ipairs(st.formula_cols) do formula_set[fc] = true end
   end
-  for i, col in ipairs(st.columns) do
+  for i, col in ipairs(vis_cols) do
     local label = (st.display_names and st.display_names[col]) or col
     -- Add lock icon for formula (read-only) columns
     if formula_set[col] then
@@ -855,12 +872,12 @@ local function build_header_chunks(st)
     elseif st.sort_by and st.sort_by.col == col then
       label = label .. (st.sort_by.dir == "asc" and " ▲" or " ▼")
     end
-    local padded = pad(label, st.col_widths[i])
+    local padded = pad(label, vis_widths[i])
     local hl = col == "slug" and "VaultProcessSlug"
            or formula_set[col] and "VaultProcessFormula"
            or "VaultProcessHeader"
     table.insert(chunks, { text = padded, hl = hl })
-    if i < #st.columns then
+    if i < #vis_cols then
       table.insert(chunks, { text = SEP_DISPLAY, hl = "VaultProcessSep" })
     end
   end
@@ -920,13 +937,16 @@ local function set_winbar(winid, st)
 end
 
 --- Build data lines (no header — header is virtual).
+--- Uses visible_columns for rendering (slug may be hidden).
 ---@param st vault.OilEditState
 ---@param records table[]
 ---@return string[]
 local function build_data_lines(st, records)
+  local vis_cols = st.visible_columns or st.columns
+  local vis_widths = st.visible_col_widths or st.col_widths
   local lines = {}
   for _, rec in ipairs(records) do
-    table.insert(lines, render_record_line(rec, st.columns, st.col_widths))
+    table.insert(lines, render_record_line(rec, vis_cols, vis_widths))
   end
   return lines
 end
@@ -1032,15 +1052,17 @@ local function highlight_formula_cells(bufnr, st)
   local formula_set = {}
   for _, fc in ipairs(st.formula_cols) do formula_set[fc] = true end
 
-  -- Compute byte offsets for each formula column
+  -- Compute byte offsets for each formula column (visible columns only)
+  local vis_cols = st.visible_columns or st.columns
+  local vis_widths = st.visible_col_widths or st.col_widths
   local formula_ranges = {}  -- list of { col_idx, byte_start, byte_end }
-  for i, col in ipairs(st.columns) do
+  for i, col in ipairs(vis_cols) do
     if formula_set[col] then
       local byte_start = 0
       for j = 1, i - 1 do
-        byte_start = byte_start + st.col_widths[j] + #SEP
+        byte_start = byte_start + vis_widths[j] + #SEP
       end
-      local byte_end = byte_start + st.col_widths[i]
+      local byte_end = byte_start + vis_widths[i]
       table.insert(formula_ranges, { idx = i, start = byte_start, finish = byte_end })
     end
   end
@@ -1090,13 +1112,15 @@ local function update_validation(bufnr, st)
 
     local cells = split_cells(line)
     local byte_offset = 0
+    local vis_cols = st.visible_columns or st.columns
+    local vis_widths = st.visible_col_widths or st.col_widths
 
-    for i, col in ipairs(st.columns) do
+    for i, col in ipairs(vis_cols) do
       local cell_text = cells[i] or ""
-      local old_rendered = vim.trim(pad(fmt_value(orig[col], col), st.col_widths[i]))
+      local old_rendered = vim.trim(pad(fmt_value(orig[col], col), vis_widths[i]))
       local sep_len = (i > 1) and #SEP or 0
       local col_start = byte_offset + sep_len
-      local col_end = col_start + st.col_widths[i]
+      local col_end = col_start + vis_widths[i]
 
       if old_rendered ~= cell_text then
         if formula_set[col] then
@@ -1160,8 +1184,10 @@ local function update_diff_signs(bufnr, st)
       if orig then
         local cells = split_cells(line)
         local changed = false
-        for i, col in ipairs(st.columns) do
-          local old_rendered = vim.trim(pad(fmt_value(orig[col], col), st.col_widths[i]))
+        local vis_cols_d = st.visible_columns or st.columns
+        local vis_widths_d = st.visible_col_widths or st.col_widths
+        for i, col in ipairs(vis_cols_d) do
+          local old_rendered = vim.trim(pad(fmt_value(orig[col], col), vis_widths_d[i]))
           if old_rendered ~= (cells[i] or "") then changed = true; break end
         end
         if changed then
@@ -1247,8 +1273,11 @@ local function diff_buffer(bufnr, st, silent)
         if st.formula_cols then
           for _, fc in ipairs(st.formula_cols) do formula_set[fc] = true end
         end
-        for i, col in ipairs(st.columns) do
-          local old_rendered = vim.trim(pad(fmt_value(orig[col], col), st.col_widths[i]))
+        -- Compare visible columns (what's in the buffer) against snapshot
+        local vis_cols = st.visible_columns or st.columns
+        local vis_widths = st.visible_col_widths or st.col_widths
+        for i, col in ipairs(vis_cols) do
+          local old_rendered = vim.trim(pad(fmt_value(orig[col], col), vis_widths[i]))
           local new_text = cells[i] or ""
           if old_rendered ~= new_text then
             -- Formula columns are read-only — warn but skip
@@ -1259,9 +1288,7 @@ local function diff_buffer(bufnr, st, silent)
               })
               goto next_col
             end
-            -- Slug column → rename operation (checked before truncation guard;
-            -- slug col_width covers all records so truncation shouldn't happen,
-            -- but even if it did we must not silently drop a rename intent).
+            -- Slug column → rename operation (only when slug is visible)
             if col == "slug" then
               local new_slug = vim.trim(new_text)
               if new_slug ~= "" and new_slug ~= slug then
@@ -1298,7 +1325,8 @@ local function diff_buffer(bufnr, st, silent)
       if st.formula_cols then
         for _, fc in ipairs(st.formula_cols) do formula_set[fc] = true end
       end
-      for i, col in ipairs(st.columns) do
+      local vis_cols = st.visible_columns or st.columns
+      for i, col in ipairs(vis_cols) do
         if formula_set[col] then goto next_create_col end  -- skip formula columns
         local text = cells[i] or ""
         if text ~= "" and text ~= EMPTY_CELL then
@@ -2261,15 +2289,35 @@ function M.open(opts)
   end
 
   local base = opts.base
-  local columns = opts.columns or DEFAULT_COLUMNS
   local display_names = {}
   local formula_cols = {}
   local filter_desc = opts.filter_desc or "all notes"
+  local visible_columns  -- what the user wants rendered in the buffer
 
-  -- If a base is provided, derive columns/filters/formulas from it
+  -- Determine columns via fallback chain:
+  -- 1. opts.columns (inline CLI spec or programmatic)
+  -- 2. base file's view order (if base provided)
+  -- 3. config.options.process.columns (user setup default)
+  -- 4. DEFAULT_COLUMNS (hardcoded fallback)
+  local columns
   if base then
-    columns, display_names, formula_cols = columns_from_base(base)
+    local vis
+    columns, display_names, formula_cols, vis = columns_from_base(base)
+    visible_columns = opts.columns or vis
     filter_desc = opts.filter_desc or ("base:" .. (base.data.name or "unnamed"))
+  else
+    local cfg = require("vault.config")
+    local cfg_cols = cfg.options and cfg.options.process and cfg.options.process.columns
+    visible_columns = opts.columns or cfg_cols or DEFAULT_COLUMNS
+    -- Internal columns = visible + slug if not already present
+    local has_slug = false
+    for _, c in ipairs(visible_columns) do
+      if c == "slug" then has_slug = true; break end
+    end
+    columns = vim.list_slice(visible_columns, 1)
+    if not has_slug then
+      table.insert(columns, 1, "slug")
+    end
   end
 
   -- Prevent duplicate process buffers: if one exists, switch to it
@@ -2318,25 +2366,29 @@ function M.open(opts)
   vim.bo[bufnr].filetype = "vault_process"
   vim.bo[bufnr].swapfile = false
 
-  -- Compute layout: natural column widths based on longest value per column
+  -- Compute layout: widths for all internal columns (needed for snapshot comparison)
+  -- and for visible columns (needed for rendering)
   local col_widths = calc_col_widths(columns, records)
+  local visible_col_widths = calc_col_widths(visible_columns, records)
 
   -- Build state
   local st = {
-    bufnr         = bufnr,
-    columns       = columns,
-    col_widths    = col_widths,
-    snapshot      = build_snapshot(records, columns),
-    note_paths    = {},
-    note_mtimes   = {},
-    mark_to_slug  = {},
-    slug_to_mark  = {},
-    filter_desc   = filter_desc,
-    saving        = false,
-    base          = base,
-    display_names = display_names,
-    formula_cols  = formula_cols,
-    sort_by       = initial_sort,
+    bufnr              = bufnr,
+    columns            = columns,            -- ALL columns (always includes slug)
+    col_widths         = col_widths,          -- widths for all internal columns
+    visible_columns    = visible_columns,     -- columns rendered in the buffer
+    visible_col_widths = visible_col_widths,  -- widths for visible columns
+    snapshot           = build_snapshot(records, columns),
+    note_paths         = {},
+    note_mtimes        = {},
+    mark_to_slug       = {},
+    slug_to_mark       = {},
+    filter_desc        = filter_desc,
+    saving             = false,
+    base               = base,
+    display_names      = display_names,
+    formula_cols       = formula_cols,
+    sort_by            = initial_sort,
   }
   for _, rec in ipairs(records) do
     st.note_paths[rec.slug] = rec.path
@@ -2729,6 +2781,7 @@ function M.reload(bufnr)
 
   -- Recompute + refresh mtimes
   st.col_widths = calc_col_widths(st.columns, records)
+  st.visible_col_widths = calc_col_widths(st.visible_columns or st.columns, records)
   st.snapshot = build_snapshot(records, st.columns)
   st.note_mtimes = {}
   for _, rec in ipairs(records) do
@@ -2823,16 +2876,18 @@ local function col_under_cursor(bufnr)
   local st = buf_states[bufnr]
   if not st then return nil end
 
+  local vis_cols = st.visible_columns or st.columns
+  local vis_widths = st.visible_col_widths or st.col_widths
   local col = vim.fn.virtcol(".")
   local offset = 0
-  for i, w in ipairs(st.col_widths) do
+  for i, w in ipairs(vis_widths) do
     local sep_width = (i > 1) and SEP_DISPLAY_WIDTH or 0
     if col <= offset + w + sep_width then
-      return st.columns[i]
+      return vis_cols[i]
     end
     offset = offset + w + sep_width
   end
-  return st.columns[#st.columns]
+  return vis_cols[#vis_cols]
 end
 
 --- Sort by the column under the cursor (interactive keybind).
@@ -2976,6 +3031,16 @@ function M.resize_column(bufnr, col_name, delta)
   local st = buf_states[bufnr]
   if not st then return end
 
+  -- Resize in visible columns (what the user sees)
+  local vis_cols = st.visible_columns or st.columns
+  local vis_widths = st.visible_col_widths or st.col_widths
+  for i, col in ipairs(vis_cols) do
+    if col == col_name then
+      vis_widths[i] = math.max(4, vis_widths[i] + delta)
+      break
+    end
+  end
+  -- Also update internal widths if the column is there
   for i, col in ipairs(st.columns) do
     if col == col_name then
       st.col_widths[i] = math.max(4, st.col_widths[i] + delta)
@@ -3006,20 +3071,21 @@ function M.move_column(bufnr, col_name, direction)
   local st = buf_states[bufnr]
   if not st then return end
 
+  -- Move in visible columns (what the user sees)
+  local vis_cols = st.visible_columns or st.columns
+  local vis_widths = st.visible_col_widths or st.col_widths
   local idx = nil
-  for i, col in ipairs(st.columns) do
+  for i, col in ipairs(vis_cols) do
     if col == col_name then idx = i; break end
   end
   if not idx then return end
 
-  -- Don't move slug column (always first)
-  if col_name == "slug" then return end
   local new_idx = idx + direction
-  if new_idx < 2 or new_idx > #st.columns then return end  -- 2 because slug is at 1
+  if new_idx < 1 or new_idx > #vis_cols then return end
 
-  -- Swap columns and widths
-  st.columns[idx], st.columns[new_idx] = st.columns[new_idx], st.columns[idx]
-  st.col_widths[idx], st.col_widths[new_idx] = st.col_widths[new_idx], st.col_widths[idx]
+  -- Swap in visible columns and widths
+  vis_cols[idx], vis_cols[new_idx] = vis_cols[new_idx], vis_cols[idx]
+  vis_widths[idx], vis_widths[new_idx] = vis_widths[new_idx], vis_widths[idx]
 
   M.reload(bufnr)
 end

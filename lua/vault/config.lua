@@ -150,6 +150,9 @@ local DEFAULT_OPTIONS = {
         },
     },
     search_tool = "rg", -- The search tool to use. Default: "rg"
+    process = {
+        columns = { "slug", "title", "status", "tags" }, -- Default columns for :Vault process
+    },
     notify = {
         on_write = true,
     },

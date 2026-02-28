@@ -532,6 +532,22 @@ local function build_subcommands()
                 local filter = args[1]
                 local notes, desc
 
+                -- Inline column spec: if first arg contains a comma, treat as columns
+                -- e.g. :Vault process title,status,tags
+                -- e.g. :Vault process title,status,tags orphans
+                local columns_arg = nil
+                if filter and filter:find(",") then
+                    columns_arg = vim.split(filter, ",", { plain = true })
+                    for i, c in ipairs(columns_arg) do
+                        columns_arg[i] = vim.trim(c)
+                    end
+                    -- Remove empty entries from trailing commas
+                    columns_arg = vim.tbl_filter(function(c) return c ~= "" end, columns_arg)
+                    -- Shift: next arg becomes the filter
+                    filter = args[2]
+                    args = vim.list_slice(args, 2)
+                end
+
                 if filter == "undo" then
                     bases_editor.undo()
                     return
@@ -573,7 +589,7 @@ local function build_subcommands()
                             vim.notify("[vault] Base not found: " .. base_name, vim.log.levels.ERROR)
                             return
                         end
-                        bases_editor.open({ base = base })
+                        bases_editor.open({ base = base, columns = columns_arg })
                     else
                         -- No base name given — open Telescope bases picker
                         local ok, picker = pcall(require, "telescope._extensions.vault.pickers.bases")
@@ -594,7 +610,7 @@ local function build_subcommands()
                     desc = "filter:" .. filter
                 end
 
-                bases_editor.open({ notes = notes, filter_desc = desc })
+                bases_editor.open({ notes = notes, filter_desc = desc, columns = columns_arg })
             end,
             complete = function(prefix, line)
                 -- If previous arg was "base", complete with base names
@@ -607,6 +623,35 @@ local function build_subcommands()
                         return vim.tbl_filter(function(s) return s:find(sub, 1, true) == 1 end, names)
                     end
                     return {}
+                end
+                -- If first arg has a comma, complete column names after last comma
+                local col_arg = line and line:match("process%s+([^%s]*,[^%s]*)$")
+                if col_arg then
+                    local last_comma = col_arg:match(".*,()")
+                    local col_prefix = last_comma and col_arg:sub(last_comma) or ""
+                    local builtin = { "slug", "title", "dir", "tags", "status" }
+                    -- Also try to get frontmatter field names from vault_core
+                    local ok_core, core = pcall(require, "vault_core")
+                    if ok_core and core.fields then
+                        local cfg = require("vault.config")
+                        local ok_f, fields = pcall(core.fields,
+                            cfg.options and cfg.options.root or "",
+                            cfg.options and cfg.options.ignore or {})
+                        if ok_f and type(fields) == "table" then
+                            for k, _ in pairs(fields) do
+                                if not vim.tbl_contains(builtin, k) then
+                                    table.insert(builtin, k)
+                                end
+                            end
+                        end
+                    end
+                    -- Filter by prefix after last comma
+                    local matches = vim.tbl_filter(function(s)
+                        return s:find(col_prefix, 1, true) == 1
+                    end, builtin)
+                    -- Return full arg with the completion replacing after last comma
+                    local base_part = last_comma and col_arg:sub(1, last_comma - 1) or ""
+                    return vim.tbl_map(function(s) return base_part .. s end, matches)
                 end
                 local subs = { "base", "undo", "orphans", "leaves", "empty", "no-frontmatter", "dir", "tag", "empty-property" }
                 return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
