@@ -2554,34 +2554,65 @@ function M.open(opts)
       return
     end
 
-    -- Open telescope notes picker; selecting a note triggers the merge
-    local ok_tele, tele_ok = pcall(function()
+    -- Score candidates using Rust engine + optional cluster proximity
+    local scoring = require("vault.scoring")
+
+    -- Extract current note's tags from snapshot
+    local snap_a = st.snapshot and st.snapshot[slug_a]
+    local tags_a = {}
+    if snap_a and snap_a.tags then
+      if type(snap_a.tags) == "table" then
+        tags_a = snap_a.tags
+      elseif type(snap_a.tags) == "string" and snap_a.tags ~= "" and snap_a.tags ~= EMPTY_CELL then
+        tags_a = vim.split(snap_a.tags, ",")
+        for i, t in ipairs(tags_a) do tags_a[i] = vim.trim(t) end
+      end
+    end
+
+    -- Build candidate list with tags
+    local candidates = {}
+    for slug, path in pairs(st.note_paths) do
+      if slug ~= slug_a then
+        local snap = st.snapshot and st.snapshot[slug]
+        local tags = {}
+        if snap and snap.tags then
+          if type(snap.tags) == "table" then
+            tags = snap.tags
+          elseif type(snap.tags) == "string" and snap.tags ~= "" and snap.tags ~= EMPTY_CELL then
+            tags = vim.split(snap.tags, ",")
+            for i, t in ipairs(tags) do tags[i] = vim.trim(t) end
+          end
+        end
+        table.insert(candidates, { slug = slug, path = path, tags = tags })
+      end
+    end
+
+    -- Score and rank
+    local scored = scoring.score_merge_candidates(slug_a, tags_a, candidates, { limit = 200 })
+
+    -- Open telescope with ranked results
+    local ok_tele, _ = pcall(function()
       local actions      = require("telescope.actions")
       local action_state = require("telescope.actions.state")
       local finders      = require("telescope.finders")
       local pickers      = require("telescope.pickers")
       local sorters      = require("telescope.sorters")
-      local conf = require("telescope.config").values
-
-      -- Build entries from note_paths (already loaded in buf_state)
-      local entries = {}
-      for slug, path in pairs(st.note_paths) do
-        if slug ~= slug_a then  -- exclude current note
-          table.insert(entries, { slug = slug, path = path })
-        end
-      end
-      table.sort(entries, function(a, b) return a.slug < b.slug end)
+      local conf         = require("telescope.config").values
 
       pickers.new({}, {
         prompt_title = string.format("Merge into: %s ← ?", slug_a),
         finder = finders.new_table({
-          results = entries,
+          results = scored,
           entry_maker = function(e)
+            local pct = math.floor(e.score * 100 + 0.5)
+            local display_str = pct > 0
+              and string.format("%s (%d%%)", e.slug, pct)
+              or e.slug
             return {
-              value   = e,
-              display = e.slug,
-              ordinal = e.slug,
-              path    = e.path,
+              value    = e,
+              display  = display_str,
+              ordinal  = e.slug,
+              path     = e.path,
               filename = e.path,
             }
           end,
@@ -2604,7 +2635,7 @@ function M.open(opts)
       }):find()
     end)
     if not ok_tele then
-      vim.notify("[vault] gJ requires telescope.nvim", vim.log.levels.WARN)
+      vim.notify("[vault] gJ requires telescope.nvim: " .. tostring(_), vim.log.levels.WARN)
     end
   end, vim.tbl_extend("force", kopts, { desc = "Vault: pick any note to merge into current" }))
   vim.keymap.set("n", "g>", function() M.resize_cursor_column(bufnr, 5) end,
