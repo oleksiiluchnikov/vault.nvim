@@ -611,10 +611,21 @@ local function build_subcommands()
         },
 
         -- :Vault today — today's journal
+        -- :Vault today append <text> — append a line
         today = {
             run = function()
                 callbacks.today()
             end,
+            append = {
+                run = function(args)
+                    local text = table.concat(args, " ")
+                    if text == "" then
+                        vim.notify("[vault] Usage: :Vault today append <text>", vim.log.levels.WARN)
+                        return
+                    end
+                    callbacks.daily_append(text)
+                end,
+            },
         },
 
         -- :Vault yesterday — yesterday's journal
@@ -1005,6 +1016,25 @@ function callbacks.today()
         vim.notify("[vault] Initializing today's journal note", vim.log.levels.INFO)
     end
     vim.cmd("e " .. vim.fn.fnameescape(path))
+end
+
+--- Appends a line to today's daily note without opening it.
+--- @param text string  Line text to append (a "- " prefix is added automatically)
+--- @return nil
+function callbacks.daily_append(text)
+    local config = require("vault.config")
+    local today = os.date("%Y-%m-%d %A")
+    if type(today) ~= "string" then return end
+    local daily_dir = config.dir("journal.daily")
+    if not daily_dir then
+        vim.notify("[vault] Journal daily directory not configured (dirs.journal.daily)", vim.log.levels.ERROR)
+        return
+    end
+    local path = string.format("%s/%s%s", daily_dir, today, config.options.ext)
+    local Note = require("vault.notes.note")
+    local note = Note(path)
+    note:append("- " .. text)
+    vim.notify("[vault] Appended to " .. today, vim.log.levels.INFO)
 end
 
 function callbacks.open_properties_picker(args)

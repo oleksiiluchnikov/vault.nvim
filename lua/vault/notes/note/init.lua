@@ -272,6 +272,21 @@ function Note:write(path, force)
     end
 end
 
+--- Append a line to the note file on disk.
+--- Creates the file (with parent dirs) if it doesn't exist yet.
+---
+--- @param line string  Text to append (written as-is, no prefix added)
+function Note:append(line)
+    local path = self.data.path
+    local parent = vim.fn.fnamemodify(path, ":h")
+    if vim.fn.isdirectory(parent) == 0 then
+        vim.fn.mkdir(parent, "p")
+    end
+    local lines = vim.fn.filereadable(path) == 1 and vim.fn.readfile(path) or {}
+    table.insert(lines, line)
+    vim.fn.writefile(lines, path)
+end
+
 --- Edit note
 ---
 --- @class vault.Note
