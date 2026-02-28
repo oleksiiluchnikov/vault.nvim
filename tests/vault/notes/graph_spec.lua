@@ -7,16 +7,26 @@
 --- Ground truth was independently verified with a Python script using
 --- obsidiantools-style basename resolution (see Clippings for details).
 ---
---- Demo vault link graph:
----   shell_and_code_test → [[test_note]] ✓, [[README]] ✓, [[Project/My new masterpeace]] ✓
----   test_note           → [[Wiki Link]] ✗, [[Nested/Wiki/Link]] ✗
----   test_note_4039790659 → [[Project/My awesome neovim plugin]] ✗
----   Others: no outlinks
+--- Demo vault link graph (22 notes total):
+---   shell_and_code_test   → [[test_note]] ✓, [[README]] ✓, [[Project/My new masterpeace]] ✓
+---   test_note             → [[Wiki Link]] ✗, [[Nested/Wiki/Link]] ✗
+---   test_note_4039790659  → [[Project/My awesome neovim plugin]] ✗
+---   Inbox/meeting-notes   → [[Project/mobile-app]] ✓
+---   Inbox/book-recommendation → [[Project/data-pipeline]] ✓
+---   Project/website-redesign → [[Project/My new masterpeace]] ✓
+---   Project/data-pipeline → [[Project/api-migration]] ✓
+---   Journal/2026-02-28   → [[Project/website-redesign]] ✓, [[Project/mobile-app]] ✓
+---   Journal/2026-02-27   → [[Project/api-migration]] ✓, [[Project/data-pipeline]] ✓
+---   Archive/deprecated-api → [[Project/api-migration]] ✓
 ---
 --- Inlinks (from resolved wikilinks):
----   test_note              ← shell_and_code_test
----   README                 ← shell_and_code_test
----   Project/My new masterpeace ← shell_and_code_test
+---   test_note                  ← shell_and_code_test
+---   README                     ← shell_and_code_test
+---   Project/My new masterpeace ← shell_and_code_test, Project/website-redesign
+---   Project/mobile-app         ← Inbox/meeting-notes, Journal/2026-02-28
+---   Project/data-pipeline      ← Inbox/book-recommendation, Journal/2026-02-27
+---   Project/api-migration      ← Project/data-pipeline, Journal/2026-02-27, Archive/deprecated-api
+---   Project/website-redesign   ← Journal/2026-02-28
 
 local assert = require("luassert")
 
@@ -53,9 +63,9 @@ describe("Graph analysis (demo vault)", function()
         Notes = require("vault.notes")
     end)
 
-    it("should have exactly 7 notes", function()
+    it("should have exactly 22 notes", function()
         local notes = Notes()
-        assert.are.equal(7, notes:count())
+        assert.are.equal(22, notes:count())
     end)
 
     -- ========================================================================
@@ -115,9 +125,10 @@ describe("Graph analysis (demo vault)", function()
         it("should return notes with no outlinks AND no inlinks", function()
             local orphans = Notes():orphans()
             local count = vim.tbl_count(orphans.map)
-            -- Inbox/Untitled and _docs/Project have no links at all
-            assert.are.equal(2, count,
-                "Expected 2 orphans (Untitled, _docs/Project), got " .. count)
+            -- Inbox/Untitled, _docs/Project, Journal/2026-02-26, Reference/lua-patterns,
+            -- Reference/git-workflows, Reference/yaml-syntax, Archive/old-project, Inbox/quick-idea
+            assert.are.equal(8, count,
+                "Expected 8 orphans, got " .. count)
         end)
 
         it("should contain Inbox/Untitled", function()
@@ -134,9 +145,9 @@ describe("Graph analysis (demo vault)", function()
         it("should return notes with inlinks but no outlinks", function()
             local leaves = Notes():leaves()
             local count = vim.tbl_count(leaves.map)
-            -- README and Project/My new masterpeace are linked to but have no outlinks
-            assert.are.equal(2, count,
-                "Expected 2 leaves (README, My new masterpeace), got " .. count)
+            -- README, Project/mobile-app, Project/My new masterpeace, Project/api-migration
+            assert.are.equal(4, count,
+                "Expected 4 leaves (README, mobile-app, My new masterpeace, api-migration), got " .. count)
         end)
     end)
 
@@ -144,9 +155,11 @@ describe("Graph analysis (demo vault)", function()
         it("should return notes with both inlinks AND outlinks", function()
             local internals = Notes():internals()
             local count = vim.tbl_count(internals.map)
-            -- test_note has inlinks (from shell_and_code_test) and outlinks (unresolved)
-            assert.are.equal(1, count,
-                "Expected 1 internal (test_note), got " .. count)
+            -- test_note (in: shell_and_code_test; out: Wiki Link, Nested/Wiki/Link),
+            -- Project/website-redesign (in: Journal/2026-02-28; out: My new masterpeace),
+            -- Project/data-pipeline (in: book-recommendation, Journal/2026-02-27; out: api-migration)
+            assert.are.equal(3, count,
+                "Expected 3 internals (test_note, website-redesign, data-pipeline), got " .. count)
         end)
     end)
 
@@ -154,10 +167,9 @@ describe("Graph analysis (demo vault)", function()
         it("should return notes with any connections", function()
             local linked = Notes():linked()
             local count = vim.tbl_count(linked.map)
-            -- shell_and_code_test (out), test_note (both), test_note_4039790659 (out),
-            -- README (in), My new masterpeace (in) = 5
-            assert.are.equal(5, count,
-                "Expected 5 linked notes, got " .. count)
+            -- 22 total - 8 orphans = 14 linked
+            assert.are.equal(14, count,
+                "Expected 14 linked notes, got " .. count)
         end)
     end)
 
@@ -181,9 +193,10 @@ describe("Graph analysis (demo vault)", function()
         it("should return notes where ALL outlinks resolve", function()
             local resolved = Notes():with_outlinks_resolved_only()
             local count = vim.tbl_count(resolved.map)
-            -- shell_and_code_test has 3 outlinks, all resolved (bash false-positives now filtered)
-            assert.are.equal(1, count,
-                "Expected 1 note with all outlinks resolved, got " .. count)
+            -- meeting-notes, book-recommendation, website-redesign, data-pipeline,
+            -- Journal/2026-02-28, Journal/2026-02-27, deprecated-api, shell_and_code_test
+            assert.are.equal(8, count,
+                "Expected 8 notes with all outlinks resolved, got " .. count)
         end)
     end)
 

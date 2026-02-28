@@ -23,10 +23,12 @@ local M = {}
 -- Use link-fallback so we work with any theme.
 -- Link to standard groups so the colorscheme controls the look.
 -- Users can override by defining these groups AFTER loading the plugin.
-vim.api.nvim_set_hl(0, "VaultProcessHeader",  { link = "Visual",   default = true })
-vim.api.nvim_set_hl(0, "VaultProcessSlug",    { link = "Title",    default = true })
-vim.api.nvim_set_hl(0, "VaultProcessFormula", { link = "Comment",  default = true })
-vim.api.nvim_set_hl(0, "VaultProcessSep",     { link = "NonText",  default = true })
+vim.api.nvim_set_hl(0, "VaultProcessHeader",      { link = "Visual",          default = true })
+vim.api.nvim_set_hl(0, "VaultProcessSlug",        { link = "Title",           default = true })
+vim.api.nvim_set_hl(0, "VaultProcessFormula",      { link = "Comment",         default = true })
+vim.api.nvim_set_hl(0, "VaultProcessFormulaCell",  { link = "DiagnosticHint",  default = true })
+vim.api.nvim_set_hl(0, "VaultProcessSep",          { link = "NonText",         default = true })
+vim.api.nvim_set_hl(0, "VaultProcessValidationErr", { link = "DiagnosticUnderlineError", default = true })
 
 -- ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -35,6 +37,8 @@ local EMPTY_CELL = "∅"
 local NS         = vim.api.nvim_create_namespace("vault_bases_editor")
 local NS_DIFF    = vim.api.nvim_create_namespace("vault_oil_diff")
 local NS_ERR     = vim.api.nvim_create_namespace("vault_bases_errors")
+local NS_FORMULA = vim.api.nvim_create_namespace("vault_bases_formula")
+local NS_VALID   = vim.api.nvim_create_namespace("vault_bases_validation")
 
 -- ─── Per-buffer state ─────────────────────────────────────────────────────────
 
@@ -53,9 +57,22 @@ local NS_ERR     = vim.api.nvim_create_namespace("vault_bases_errors")
 ---@field base?         vault.Base       the Base object (if opened via base)
 ---@field display_names table<string, string>  col → header display name
 ---@field formula_cols  string[]         formula column names (read-only)
----@field sort_by?      { col: string, dir: "asc"|"desc" }  current sort
+---@field sort_by?      { col: string, dir: "asc"|"desc" }  primary sort (legacy, for single-col API)
+---@field sort_keys?    { col: string, dir: "asc"|"desc" }[]  multi-column sort (ordered by priority)
 
 local buf_states = {}  -- [bufnr] = vault.OilEditState
+
+-- ─── Undo/rollback storage ────────────────────────────────────────────────────
+-- Before each save, we snapshot the raw file contents of all files that will be
+-- mutated.  If the user calls M.undo(bufnr), we restore those files.
+-- Only the LAST save's snapshot is kept (single-level undo).
+
+---@class vault.ProcessUndoSnapshot
+---@field files table<string, string[]>  path → original file lines
+---@field timestamp integer              os.time() when snapshot was taken
+---@field description string             human-readable summary
+
+local undo_snapshots = {}  -- [bufnr] = vault.ProcessUndoSnapshot
 
 -- ─── Safety utilities ─────────────────────────────────────────────────────────
 
@@ -285,7 +302,8 @@ end
 ---@return string
 local function pad(s, width)
   local dw = vim.fn.strdisplaywidth(s)
-  if dw >= width then
+  if dw > width then
+    -- Only truncate when STRICTLY wider than column
     local r = s
     local chars = width - 1
     while vim.fn.strdisplaywidth(r) > width - 1 and chars > 0 do
@@ -387,6 +405,23 @@ local function reconcile_extmarks(bufnr, st, lines)
     end
   end
 
+  -- Build full-row fingerprint lookup for disambiguation when slug/title collide.
+  -- Fingerprint = concatenation of all non-slug cell values from snapshot.
+  local fingerprint_to_slug = {}
+  for slug, snap in pairs(st.snapshot) do
+    local parts = {}
+    for i, col in ipairs(st.columns) do
+      if col ~= "slug" then
+        table.insert(parts, vim.trim(pad(fmt_value(snap[col], col), st.col_widths[i])))
+      end
+    end
+    local fp = table.concat(parts, "|")
+    if not fingerprint_to_slug[fp] then
+      fingerprint_to_slug[fp] = {}
+    end
+    table.insert(fingerprint_to_slug[fp], slug)
+  end
+
   local row_to_slug = {}
   local drift_count = 0
   local reconciled_count = 0
@@ -478,7 +513,28 @@ local function reconcile_extmarks(bufnr, st, lines)
             end
           end
         end
-        -- If no candidate found, row_to_slug[row] stays nil → new note
+        -- If no candidate found, try full-row fingerprint disambiguation
+      if not row_to_slug[row] then
+        local parts = {}
+        for ci, col in ipairs(st.columns) do
+          if col ~= "slug" then
+            table.insert(parts, vim.trim(cells[ci] or ""))
+          end
+        end
+        local fp = table.concat(parts, "|")
+        local fp_candidates = fingerprint_to_slug[fp]
+        if fp_candidates then
+          for _, cand_slug in ipairs(fp_candidates) do
+            if not claimed_slugs[cand_slug] then
+              row_to_slug[row] = cand_slug
+              claimed_slugs[cand_slug] = true
+              reconciled_count = reconciled_count + 1
+              drift_count = drift_count + 1
+              break
+            end
+          end
+        end
+      end
       end
     end
 
@@ -613,51 +669,70 @@ end
 
 -- ─── Sorting ──────────────────────────────────────────────────────────────────
 
---- Sort records by a column and direction.
+--- Sort records by one or more columns.
+--- Supports both single sort_by (legacy) and multi-column sort_keys.
 ---@param records table[]
----@param sort_by? { col: string, dir: "asc"|"desc" }
+---@param sort_by? { col: string, dir: "asc"|"desc" }  primary sort (single column)
+---@param sort_keys? { col: string, dir: "asc"|"desc" }[]  multi-column sort
 ---@return table[]  same table, sorted in place
-local function sort_records(records, sort_by)
-  if not sort_by or not sort_by.col then
-    table.sort(records, function(a, b) return a.slug < b.slug end)
-    return records
+local function sort_records(records, sort_by, sort_keys)
+  -- Build effective sort key list
+  local keys = sort_keys
+  if not keys or #keys == 0 then
+    if sort_by and sort_by.col then
+      keys = { sort_by }
+    else
+      table.sort(records, function(a, b) return a.slug < b.slug end)
+      return records
+    end
   end
 
-  local col = sort_by.col
-  local desc = sort_by.dir == "desc"
-
-  -- Pre-compute sort keys to avoid non-deterministic fmt_value in comparator
-  local sort_keys = {}
-  for _, rec in ipairs(records) do
-    local v = rec.fields[col]
-    if v == nil or v == "" then
-      sort_keys[rec.slug] = nil
-    elseif type(v) == "table" then
-      sort_keys[rec.slug] = fmt_value(v, col):lower()
-    else
-      sort_keys[rec.slug] = tostring(v):lower()
+  -- Pre-compute sort values per column per record
+  local precomputed = {}  -- [col] = { [slug] = sort_val }
+  for _, sk in ipairs(keys) do
+    if not precomputed[sk.col] then
+      local col_keys = {}
+      for _, rec in ipairs(records) do
+        local v = rec.fields[sk.col]
+        if v == nil or v == "" then
+          col_keys[rec.slug] = nil
+        elseif type(v) == "table" then
+          col_keys[rec.slug] = fmt_value(v, sk.col):lower()
+        else
+          col_keys[rec.slug] = tostring(v):lower()
+        end
+      end
+      precomputed[sk.col] = col_keys
     end
   end
 
   table.sort(records, function(a, b)
-    local va = sort_keys[a.slug]
-    local vb = sort_keys[b.slug]
+    for _, sk in ipairs(keys) do
+      local va = precomputed[sk.col][a.slug]
+      local vb = precomputed[sk.col][b.slug]
+      local is_desc = sk.dir == "desc"
 
-    -- Nil/empty sorts last
-    if va == nil and vb == nil then return a.slug < b.slug end
-    if va == nil then return false end
-    if vb == nil then return true end
+      -- Nil sorts last (regardless of direction)
+      if va == nil and vb == nil then goto next_key end
+      if va == nil then return false end
+      if vb == nil then return true end
 
-    -- Numeric comparison if both are numbers
-    local na, nb = tonumber(va), tonumber(vb)
-    if na and nb then
-      if na == nb then return a.slug < b.slug end
-      if desc then return na > nb else return na < nb end
+      -- Numeric comparison
+      local na, nb = tonumber(va), tonumber(vb)
+      if na and nb then
+        if na ~= nb then
+          if is_desc then return na > nb else return na < nb end
+        end
+      else
+        -- String comparison
+        if va ~= vb then
+          if is_desc then return va > vb else return va < vb end
+        end
+      end
+
+      ::next_key::
     end
-
-    -- String comparison
-    if va == vb then return a.slug < b.slug end
-    if desc then return va > vb else return va < vb end
+    return a.slug < b.slug  -- tiebreaker
   end)
 
   return records
@@ -759,7 +834,19 @@ local function build_header_chunks(st)
   end
   for i, col in ipairs(st.columns) do
     local label = (st.display_names and st.display_names[col]) or col
-    if st.sort_by and st.sort_by.col == col then
+    -- Add lock icon for formula (read-only) columns
+    if formula_set[col] then
+      label = label .. " 🔒"
+    end
+    -- Show sort indicators (support multi-column sort)
+    if st.sort_keys and #st.sort_keys > 0 then
+      for si, sk in ipairs(st.sort_keys) do
+        if sk.col == col then
+          local arrow = sk.dir == "asc" and "▲" or "▼"
+          label = label .. " " .. arrow .. (#st.sort_keys > 1 and tostring(si) or "")
+        end
+      end
+    elseif st.sort_by and st.sort_by.col == col then
       label = label .. (st.sort_by.dir == "asc" and " ▲" or " ▼")
     end
     local padded = pad(label, st.col_widths[i])
@@ -878,6 +965,112 @@ local function apply_extmarks(bufnr, st, records)
   for i, rec in ipairs(records) do
     local row = i - 1  -- 0-indexed (no header lines in buffer)
     set_line_slug(bufnr, row, rec.slug, st)
+  end
+end
+
+-- ─── Formula cell highlighting ────────────────────────────────────────────────
+
+--- Apply dim highlights on formula (read-only) column cells so they are
+--- visually distinct from editable cells.  Also adds a 🔒 virtual text
+--- indicator at the end of each formula cell.
+---@param bufnr integer
+---@param st vault.OilEditState
+local function highlight_formula_cells(bufnr, st)
+  vim.api.nvim_buf_clear_namespace(bufnr, NS_FORMULA, 0, -1)
+  if not st.formula_cols or #st.formula_cols == 0 then return end
+
+  local formula_set = {}
+  for _, fc in ipairs(st.formula_cols) do formula_set[fc] = true end
+
+  -- Compute byte offsets for each formula column
+  local formula_ranges = {}  -- list of { col_idx, byte_start, byte_end }
+  for i, col in ipairs(st.columns) do
+    if formula_set[col] then
+      local byte_start = 0
+      for j = 1, i - 1 do
+        byte_start = byte_start + st.col_widths[j] + #SEP
+      end
+      local byte_end = byte_start + st.col_widths[i]
+      table.insert(formula_ranges, { idx = i, start = byte_start, finish = byte_end })
+    end
+  end
+
+  if #formula_ranges == 0 then return end
+
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  for row = 0, line_count - 1 do
+    for _, range in ipairs(formula_ranges) do
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, NS_FORMULA, row, range.start, {
+        end_row = row,
+        end_col = range.finish,
+        hl_group = "VaultProcessFormulaCell",
+      })
+    end
+  end
+end
+
+-- ─── Inline validation ────────────────────────────────────────────────────────
+
+--- Validate buffer cells on TextChanged.  Highlights cells that contain
+--- values which would be rejected on save (formula edits, truncated values).
+---@param bufnr integer
+---@param st vault.OilEditState
+local function update_validation(bufnr, st)
+  vim.api.nvim_buf_clear_namespace(bufnr, NS_VALID, 0, -1)
+  if not st.formula_cols or #st.formula_cols == 0 then
+    -- No formula columns → nothing special to validate
+  end
+
+  local formula_set = {}
+  if st.formula_cols then
+    for _, fc in ipairs(st.formula_cols) do formula_set[fc] = true end
+  end
+
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local row_to_slug = reconcile_extmarks(bufnr, st, lines)
+
+  for row = 0, #lines - 1 do
+    local line = lines[row + 1]
+    if vim.trim(line) == "" then goto continue end
+    local slug = row_to_slug[row]
+    if not slug then goto continue end
+
+    local orig = st.snapshot[slug]
+    if not orig then goto continue end
+
+    local cells = split_cells(line)
+    local byte_offset = 0
+
+    for i, col in ipairs(st.columns) do
+      local cell_text = cells[i] or ""
+      local old_rendered = vim.trim(pad(fmt_value(orig[col], col), st.col_widths[i]))
+      local sep_len = (i > 1) and #SEP or 0
+      local col_start = byte_offset + sep_len
+      local col_end = col_start + st.col_widths[i]
+
+      if old_rendered ~= cell_text then
+        if formula_set[col] then
+          -- Formula column edited — highlight as error
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, NS_VALID, row, col_start, {
+            end_row = row, end_col = math.min(col_end, #line),
+            hl_group = "VaultProcessValidationErr",
+            virt_text = { { " read-only", "DiagnosticError" } },
+            virt_text_pos = "inline",
+          })
+        elseif cell_text:match("…$") and old_rendered:match("…$") then
+          -- Truncated column edited — highlight as warning
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, NS_VALID, row, col_start, {
+            end_row = row, end_col = math.min(col_end, #line),
+            hl_group = "DiagnosticUnderlineWarn",
+            virt_text = { { " truncated", "DiagnosticWarn" } },
+            virt_text_pos = "inline",
+          })
+        end
+      end
+
+      byte_offset = col_end + sep_len
+    end
+    ::continue::
   end
 end
 
@@ -1230,24 +1423,226 @@ local function set_frontmatter_field(path, key, value)
 end
 
 --- Batch-set multiple YAML frontmatter fields in a single read-modify-write.
---- Reduces corruption window and is faster than N individual set_frontmatter_field calls.
+--- Reads the file once, applies all field changes in memory, writes once.
+--- This is O(1) file I/O per note regardless of how many fields changed.
 ---@param path string
 ---@param fields table<string, any>  key → value (nil value = delete key)
 local function set_frontmatter_fields(path, fields)
-  for key, value in pairs(fields) do
-    -- Apply one at a time but on the same file — each call re-reads.
-    -- TODO: optimize to single read-modify-write if perf becomes an issue.
-    -- For now, correctness > performance: each call validates independently.
-    set_frontmatter_field(path, key, value)
+  if not next(fields) then return end
+
+  -- Safety: verify path is inside vault root
+  local safe_path, path_err = validate_path_in_vault(path)
+  if not safe_path then
+    vim.notify("[vault] SAFETY: " .. path_err, vim.log.levels.ERROR)
+    return
+  end
+
+  local ok, lines = pcall(vim.fn.readfile, safe_path)
+  if not ok then return end
+
+  local has_frontmatter = lines[1] and lines[1]:match("^%-%-%-$")
+  local fm_end = nil
+
+  if has_frontmatter then
+    for i = 2, math.min(#lines, 100) do
+      if lines[i]:match("^%-%-%-$") then fm_end = i; break end
+    end
+    if not fm_end then
+      -- Malformed frontmatter — fall back to per-field writes
+      for key, value in pairs(fields) do
+        set_frontmatter_field(safe_path, key, value)
+      end
+      return
+    end
+  else
+    -- No frontmatter: create one with all fields at once
+    local new_lines = { "---" }
+    for key, value in pairs(fields) do
+      if value ~= nil then
+        if type(value) == "table" then
+          table.insert(new_lines, key .. ":")
+          for _, v in ipairs(value) do
+            table.insert(new_lines, "  - " .. yaml_quote(tostring(v)))
+          end
+        else
+          table.insert(new_lines, key .. ": " .. yaml_quote(tostring(value)))
+        end
+      end
+    end
+    table.insert(new_lines, "---")
+    for _, l in ipairs(lines) do table.insert(new_lines, l) end
+    local write_ok, write_err = atomic_writefile(safe_path, new_lines)
+    if not write_ok then
+      vim.notify("[vault] SAFETY: " .. write_err, vim.log.levels.ERROR)
+    end
+    return
+  end
+
+  local body_line_count = #lines - fm_end
+
+  -- Parse existing frontmatter lines
+  local fm_lines = {}
+  for i = 2, fm_end - 1 do
+    table.insert(fm_lines, lines[i])
+  end
+
+  -- Process each field: remove old key, track insert position
+  local remaining_fields = vim.deepcopy(fields)
+  local new_fm = {}
+  local skip = false
+  local insert_positions = {}  -- key → position where old key was
+
+  for _, l in ipairs(fm_lines) do
+    if skip then
+      if l:match("^%s") then
+        goto continue
+      else
+        skip = false
+      end
+    end
+
+    local matched_key = nil
+    for key, _ in pairs(remaining_fields) do
+      if l:match("^" .. vim.pesc(key) .. ":") then
+        matched_key = key
+        break
+      end
+    end
+
+    if matched_key then
+      insert_positions[matched_key] = #new_fm + 1
+      skip = true
+      goto continue
+    end
+
+    table.insert(new_fm, l)
+    ::continue::
+  end
+
+  -- Insert new values at their original positions (preserving order),
+  -- or append if the key is new. Process in reverse order of position
+  -- to avoid index shifting.
+  local inserts = {}  -- { pos, lines[] } sorted by pos descending
+  local appends = {}  -- lines to append (new keys)
+
+  for key, value in pairs(remaining_fields) do
+    local value_lines = {}
+    if value ~= nil then
+      if type(value) == "table" then
+        table.insert(value_lines, key .. ":")
+        for _, v in ipairs(value) do
+          table.insert(value_lines, "  - " .. yaml_quote(tostring(v)))
+        end
+      else
+        table.insert(value_lines, key .. ": " .. yaml_quote(tostring(value)))
+      end
+    end
+
+    if #value_lines > 0 then
+      if insert_positions[key] then
+        table.insert(inserts, { pos = insert_positions[key], lines = value_lines })
+      else
+        for _, vl in ipairs(value_lines) do
+          table.insert(appends, vl)
+        end
+      end
+    end
+  end
+
+  -- Sort inserts by position descending so earlier inserts don't shift later ones
+  table.sort(inserts, function(a, b) return a.pos > b.pos end)
+  for _, ins in ipairs(inserts) do
+    for i = #ins.lines, 1, -1 do
+      table.insert(new_fm, ins.pos, ins.lines[i])
+    end
+  end
+  for _, l in ipairs(appends) do
+    table.insert(new_fm, l)
+  end
+
+  -- Reconstruct file
+  local result = { "---" }
+  for _, l in ipairs(new_fm) do table.insert(result, l) end
+  table.insert(result, "---")
+  for i = fm_end + 1, #lines do table.insert(result, lines[i]) end
+
+  -- Safety: verify body content is preserved
+  local new_body_count = #result - (#new_fm + 2)
+  if new_body_count ~= body_line_count then
+    vim.notify(
+      string.format("[vault] SAFETY: Aborting batch frontmatter write to %s — body line count mismatch (%d vs %d)",
+        vim.fn.fnamemodify(safe_path, ":t"), new_body_count, body_line_count),
+      vim.log.levels.ERROR
+    )
+    return
+  end
+
+  local write_ok, write_err = atomic_writefile(safe_path, result)
+  if not write_ok then
+    vim.notify("[vault] SAFETY: " .. write_err, vim.log.levels.ERROR)
   end
 end
 
---- Apply all mutations from a diff.
+--- Snapshot files that will be mutated (for undo support).
 ---@param diff vault.OilEditDiff
 ---@param st vault.OilEditState
----@return integer updates, integer deletes, integer creates
-local function apply_mutations(diff, st)
+---@param bufnr integer
+local function snapshot_for_undo(diff, st, bufnr)
+  local files = {}
+  -- Snapshot files that will be updated
+  for _, upd in ipairs(diff.updates) do
+    local path = st.note_paths[upd.slug]
+    if path and vim.fn.filereadable(path) == 1 then
+      files[path] = vim.fn.readfile(path)
+    end
+  end
+  -- Snapshot files that will be deleted
+  for _, slug in ipairs(diff.deletes) do
+    local path = st.note_paths[slug]
+    if path and vim.fn.filereadable(path) == 1 then
+      files[path] = vim.fn.readfile(path)
+    end
+  end
+  -- (Creates don't need snapshot — undo just deletes the created files)
+
+  local n_ops = #diff.updates + #diff.deletes + #diff.creates
+  undo_snapshots[bufnr] = {
+    files = files,
+    created_paths = {},  -- will be populated after creates
+    timestamp = os.time(),
+    description = string.format("%d updates, %d deletes, %d creates", #diff.updates, #diff.deletes, #diff.creates),
+  }
+end
+
+--- Apply all mutations from a diff.
+--- When total operations exceed `ASYNC_THRESHOLD`, mutations are applied
+--- in batches via `vim.schedule` so the UI stays responsive and the user
+--- sees a progress notification.
+---@param diff vault.OilEditDiff
+---@param st vault.OilEditState
+---@param on_done? fun(n_updates: integer, n_deletes: integer, n_creates: integer)  callback for async mode
+---@return integer updates, integer deletes, integer creates  (sync mode only)
+local function apply_mutations(diff, st, on_done)
   local n_updates, n_deletes, n_creates = 0, 0, 0
+  local ASYNC_THRESHOLD = 10  -- go async when total ops > this
+
+  local total_ops = #diff.updates + #diff.deletes + #diff.creates
+  local is_async = total_ops > ASYNC_THRESHOLD and on_done ~= nil
+
+  --- Progress reporter (throttled to avoid notification spam)
+  local progress_last = 0
+  local progress_done = 0
+  local function report_progress(phase)
+    progress_done = progress_done + 1
+    local now = vim.uv.now()
+    if now - progress_last > 200 then  -- at most every 200ms
+      vim.notify(
+        string.format("[vault] %s… %d/%d", phase, progress_done, total_ops),
+        vim.log.levels.INFO
+      )
+      progress_last = now
+    end
+  end
 
   -- Updates: process dir moves FIRST so subsequent field writes target the new path
   for _, upd in ipairs(diff.updates) do
@@ -1311,6 +1706,7 @@ local function apply_mutations(diff, st)
       set_frontmatter_fields(path, fm_fields)
     end
     n_updates = n_updates + 1
+    if is_async then report_progress("Updating") end
     ::continue::
   end
 
@@ -1330,6 +1726,7 @@ local function apply_mutations(diff, st)
         note:delete(false, false)
       end)
       n_deletes = n_deletes + 1
+      if is_async then report_progress("Deleting") end
     end
     ::del_continue::
   end
@@ -1368,12 +1765,25 @@ local function apply_mutations(diff, st)
       goto continue
     end
 
+    -- Build frontmatter from ALL editable fields (not just title/status/tags)
     local fm = { "---" }
+    -- Title first (conventional order)
     if create.fields.title then
       table.insert(fm, "title: " .. yaml_quote(create.fields.title))
     end
-    if create.fields.status then
-      table.insert(fm, "status: " .. yaml_quote(create.fields.status))
+    -- All other scalar fields (skip slug, dir, title — handled separately)
+    local skip_fields = { slug = true, title = true, dir = true, tags = true }
+    for col, val in pairs(create.fields) do
+      if not skip_fields[col] and val ~= nil then
+        if type(val) == "table" then
+          table.insert(fm, col .. ":")
+          for _, v in ipairs(val) do
+            table.insert(fm, "  - " .. yaml_quote(tostring(v)))
+          end
+        else
+          table.insert(fm, col .. ": " .. yaml_quote(tostring(val)))
+        end
+      end
     end
     if create.fields.tags and type(create.fields.tags) == "table" then
       table.insert(fm, "tags:")
@@ -1393,10 +1803,18 @@ local function apply_mutations(diff, st)
       vim.notify("[vault] SAFETY: " .. write_err, vim.log.levels.ERROR)
       goto continue
     end
+    -- Track created path for undo
+    if st.bufnr and undo_snapshots[st.bufnr] then
+      table.insert(undo_snapshots[st.bufnr].created_paths, safe_create)
+    end
     n_creates = n_creates + 1
+    if is_async then report_progress("Creating") end
     ::continue::
   end
 
+  if on_done then
+    on_done(n_updates, n_deletes, n_creates)
+  end
   return n_updates, n_deletes, n_creates
 end
 
@@ -1496,6 +1914,9 @@ local function on_save(bufnr)
     vim.notify("[vault] No changes", vim.log.levels.INFO)
     return
   end
+
+  -- ── Snapshot for undo (before any mutations) ─────────────────────────────
+  snapshot_for_undo(diff, st, bufnr)
 
   -- ── Hard cap on creates ──────────────────────────────────────────────────
   if #diff.creates > CREATE_HARD_CAP then
@@ -1785,7 +2206,7 @@ function M.open(opts)
 
   -- Apply sort (from base view or default)
   local initial_sort = base and sort_from_base(base) or nil
-  sort_records(records, initial_sort)
+  sort_records(records, initial_sort, nil)
 
   -- Create buffer
   local bufnr = vim.api.nvim_create_buf(true, false)
@@ -1840,6 +2261,9 @@ function M.open(opts)
   -- Apply extmarks: separator virt_line + slug identity on each data line
   apply_extmarks(bufnr, st, records)
 
+  -- Highlight formula cells as read-only
+  highlight_formula_cells(bufnr, st)
+
   -- Sticky winbar header (always visible, even when scrolled down)
   set_winbar(winid, st)
 
@@ -1861,13 +2285,14 @@ function M.open(opts)
     end,
   })
 
-  -- Live diff signs on TextChanged (no re-conceal needed — much cheaper)
+  -- Live diff signs + inline validation on TextChanged
   vim.api.nvim_create_autocmd({ "TextChanged", "InsertLeave" }, {
     buffer = bufnr,
     callback = function()
       local s = buf_states[bufnr]
       if s and not s.saving then
         update_diff_signs(bufnr, s)
+        update_validation(bufnr, s)
       end
     end,
   })
@@ -1899,14 +2324,38 @@ function M.open(opts)
   local kopts = { buffer = bufnr, silent = true }
   vim.keymap.set("n", "gs", function() M.sort_by_cursor(bufnr) end,
     vim.tbl_extend("force", kopts, { desc = "Vault: cycle sort on column" }))
+  vim.keymap.set("n", "gS", function()
+    local cn = col_under_cursor(bufnr)
+    if cn then M.cycle_sort(bufnr, cn, true) end
+  end, vim.tbl_extend("force", kopts, { desc = "Vault: add secondary sort on column" }))
   vim.keymap.set("n", "gR", function() M.reload(bufnr) end,
     vim.tbl_extend("force", kopts, { desc = "Vault: reload buffer" }))
+  vim.keymap.set("n", "gu", function() M.undo(bufnr) end,
+    vim.tbl_extend("force", kopts, { desc = "Vault: undo last save" }))
+  vim.keymap.set("n", "g>", function() M.resize_cursor_column(bufnr, 5) end,
+    vim.tbl_extend("force", kopts, { desc = "Vault: widen column" }))
+  vim.keymap.set("n", "g<", function() M.resize_cursor_column(bufnr, -5) end,
+    vim.tbl_extend("force", kopts, { desc = "Vault: narrow column" }))
+  vim.keymap.set("n", "g}", function() M.move_cursor_column(bufnr, 1) end,
+    vim.tbl_extend("force", kopts, { desc = "Vault: move column right" }))
+  vim.keymap.set("n", "g{", function() M.move_cursor_column(bufnr, -1) end,
+    vim.tbl_extend("force", kopts, { desc = "Vault: move column left" }))
+  -- Partial save: visual select rows, then :w saves only those
+  vim.keymap.set("v", "<C-s>", function()
+    local start_row = vim.fn.line("'<") - 1
+    local end_row = vim.fn.line("'>") - 1
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+    M.save_range(bufnr, start_row, end_row)
+  end, vim.tbl_extend("force", kopts, { desc = "Vault: save selected rows only" }))
 
   local sort_desc = st.sort_by
     and string.format(", sorted by %s %s", st.sort_by.col, st.sort_by.dir)
     or ""
   vim.notify(
-    string.format("[vault] Processing %d notes (%s)%s — :w to apply, gs to sort", #records, filter_desc, sort_desc),
+    string.format(
+      "[vault] Processing %d notes (%s)%s — :w to apply, gs/gS to sort, gu to undo, g>/g< to resize",
+      #records, filter_desc, sort_desc
+    ),
     vim.log.levels.INFO
   )
 end
@@ -1970,7 +2419,7 @@ function M.reload(bufnr)
     st.note_paths[slug] = nil
     if st.note_mtimes then st.note_mtimes[slug] = nil end
   end
-  sort_records(records, st.sort_by)
+  sort_records(records, st.sort_by, st.sort_keys)
 
   -- Recompute + refresh mtimes
   st.col_widths = calc_col_widths(st.columns, records)
@@ -1984,7 +2433,9 @@ function M.reload(bufnr)
   set_buffer_lines(bufnr, lines)
   vim.bo[bufnr].modifiable = true
   apply_extmarks(bufnr, st, records)
+  highlight_formula_cells(bufnr, st)
   vim.api.nvim_buf_clear_namespace(bufnr, NS_DIFF, 0, -1)
+  vim.api.nvim_buf_clear_namespace(bufnr, NS_VALID, 0, -1)
   vim.bo[bufnr].modified = false
 
   -- Refresh winbar (col_widths or sort indicator may have changed)
@@ -1997,26 +2448,64 @@ end
 --- Re-renders the buffer with the new sort order.
 ---@param bufnr integer
 ---@param col_name string  column to sort by
-function M.cycle_sort(bufnr, col_name)
+---@param add_secondary? boolean  if true, add as secondary sort key instead of replacing
+function M.cycle_sort(bufnr, col_name, add_secondary)
   local st = buf_states[bufnr]
   if not st then return end
 
-  local current = st.sort_by
-  if current and current.col == col_name then
-    if current.dir == "asc" then
-      st.sort_by = { col = col_name, dir = "desc" }
-    else
-      st.sort_by = nil  -- back to default (slug)
+  if add_secondary then
+    -- Multi-column sort: add/cycle this column in sort_keys
+    st.sort_keys = st.sort_keys or {}
+    if st.sort_by and #st.sort_keys == 0 then
+      -- Migrate single sort_by to sort_keys
+      table.insert(st.sort_keys, vim.deepcopy(st.sort_by))
     end
+    -- Find if this column is already in sort_keys
+    local found_idx = nil
+    for i, sk in ipairs(st.sort_keys) do
+      if sk.col == col_name then found_idx = i; break end
+    end
+    if found_idx then
+      if st.sort_keys[found_idx].dir == "asc" then
+        st.sort_keys[found_idx].dir = "desc"
+      else
+        table.remove(st.sort_keys, found_idx)
+      end
+    else
+      table.insert(st.sort_keys, { col = col_name, dir = "asc" })
+    end
+    -- Keep sort_by in sync with first key
+    st.sort_by = st.sort_keys[1] or nil
   else
-    st.sort_by = { col = col_name, dir = "asc" }
+    -- Single-column sort (legacy behavior)
+    local current = st.sort_by
+    if current and current.col == col_name then
+      if current.dir == "asc" then
+        st.sort_by = { col = col_name, dir = "desc" }
+      else
+        st.sort_by = nil
+      end
+    else
+      st.sort_by = { col = col_name, dir = "asc" }
+    end
+    st.sort_keys = nil  -- clear multi-sort
   end
 
   M.reload(bufnr)
 
-  local desc = st.sort_by
-    and string.format("%s %s", st.sort_by.col, st.sort_by.dir)
-    or "default"
+  -- Build sort description
+  local desc
+  if st.sort_keys and #st.sort_keys > 0 then
+    local parts = {}
+    for _, sk in ipairs(st.sort_keys) do
+      table.insert(parts, sk.col .. " " .. sk.dir)
+    end
+    desc = table.concat(parts, ", ")
+  elseif st.sort_by then
+    desc = st.sort_by.col .. " " .. st.sort_by.dir
+  else
+    desc = "default"
+  end
   vim.notify("[vault] Sort: " .. desc, vim.log.levels.INFO)
 end
 
@@ -2049,8 +2538,176 @@ function M.sort_by_cursor(bufnr)
   end
 end
 
+--- Undo the last save operation by restoring snapshotted files.
+--- Deletes any files that were created by the last save.
+---@param bufnr? integer  defaults to current buffer
+function M.undo(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local snap = undo_snapshots[bufnr]
+  if not snap then
+    vim.notify("[vault] No undo snapshot available for this buffer", vim.log.levels.WARN)
+    return
+  end
+
+  local restored = 0
+  local deleted = 0
+
+  -- Restore modified/deleted files
+  for path, original_lines in pairs(snap.files) do
+    local ok, err = atomic_writefile(path, original_lines)
+    if ok then
+      restored = restored + 1
+    else
+      vim.notify("[vault] Failed to restore " .. path .. ": " .. (err or "unknown"), vim.log.levels.ERROR)
+    end
+  end
+
+  -- Delete files that were created
+  if snap.created_paths then
+    for _, path in ipairs(snap.created_paths) do
+      if vim.fn.filereadable(path) == 1 then
+        vim.fn.delete(path)
+        deleted = deleted + 1
+      end
+    end
+  end
+
+  undo_snapshots[bufnr] = nil
+
+  vim.notify(
+    string.format("[vault] Undo: restored %d file(s), removed %d created file(s)", restored, deleted),
+    vim.log.levels.INFO
+  )
+
+  -- Reload the buffer to reflect the reverted state
+  M.reload(bufnr)
+end
+
+--- Partial save: save only changes on lines within the given row range.
+--- Useful with visual selection — only mutations for selected rows are applied.
+---@param bufnr integer
+---@param start_row integer  0-indexed inclusive
+---@param end_row integer    0-indexed inclusive
+function M.save_range(bufnr, start_row, end_row)
+  local st = buf_states[bufnr]
+  if not st then
+    vim.notify("[vault] Process buffer state lost", vim.log.levels.WARN)
+    return
+  end
+  if st.saving then return end
+  st.saving = true
+
+  local diff = diff_buffer(bufnr, st, true)
+  if diff._integrity_error then
+    st.saving = false
+    return
+  end
+
+  -- Filter updates to only include slugs on rows within range
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local row_to_slug = reconcile_extmarks(bufnr, st, lines)
+  local selected_slugs = {}
+  for row = start_row, end_row do
+    if row_to_slug[row] then
+      selected_slugs[row_to_slug[row]] = true
+    end
+  end
+
+  -- Filter diff to selected rows only
+  local filtered_updates = {}
+  for _, upd in ipairs(diff.updates) do
+    if selected_slugs[upd.slug] then
+      table.insert(filtered_updates, upd)
+    end
+  end
+
+  if #filtered_updates == 0 then
+    vim.notify("[vault] No changes in selected range", vim.log.levels.INFO)
+    st.saving = false
+    return
+  end
+
+  local partial_diff = { updates = filtered_updates, deletes = {}, creates = {} }
+  snapshot_for_undo(partial_diff, st, bufnr)
+  local n_u = apply_mutations(partial_diff, st)
+  vim.notify(string.format("[vault] Partial save: %d updated", n_u), vim.log.levels.INFO)
+
+  vim.schedule(function()
+    M.reload(bufnr)
+    st.saving = false
+  end)
+end
+
+--- Resize a column interactively.
+---@param bufnr integer
+---@param col_name string
+---@param delta integer  positive = wider, negative = narrower
+function M.resize_column(bufnr, col_name, delta)
+  local st = buf_states[bufnr]
+  if not st then return end
+
+  for i, col in ipairs(st.columns) do
+    if col == col_name then
+      st.col_widths[i] = math.max(4, st.col_widths[i] + delta)
+      break
+    end
+  end
+
+  -- Re-render with new widths (preserving data — just reformatting)
+  M.reload(bufnr)
+end
+
+--- Resize the column under the cursor.
+---@param bufnr? integer
+---@param delta integer
+function M.resize_cursor_column(bufnr, delta)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local col_name = col_under_cursor(bufnr)
+  if col_name then
+    M.resize_column(bufnr, col_name, delta)
+  end
+end
+
+--- Reorder columns: move a column left or right.
+---@param bufnr integer
+---@param col_name string
+---@param direction integer  -1 = left, +1 = right
+function M.move_column(bufnr, col_name, direction)
+  local st = buf_states[bufnr]
+  if not st then return end
+
+  local idx = nil
+  for i, col in ipairs(st.columns) do
+    if col == col_name then idx = i; break end
+  end
+  if not idx then return end
+
+  -- Don't move slug column (always first)
+  if col_name == "slug" then return end
+  local new_idx = idx + direction
+  if new_idx < 2 or new_idx > #st.columns then return end  -- 2 because slug is at 1
+
+  -- Swap columns and widths
+  st.columns[idx], st.columns[new_idx] = st.columns[new_idx], st.columns[idx]
+  st.col_widths[idx], st.col_widths[new_idx] = st.col_widths[new_idx], st.col_widths[idx]
+
+  M.reload(bufnr)
+end
+
+--- Move column under cursor left or right.
+---@param bufnr? integer
+---@param direction integer  -1 = left, +1 = right
+function M.move_cursor_column(bufnr, direction)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local col_name = col_under_cursor(bufnr)
+  if col_name then
+    M.move_column(bufnr, col_name, direction)
+  end
+end
+
 --- Debug: expose buf_states and diff_buffer for testing
 M._buf_states = buf_states
 M._diff_buffer = diff_buffer
+M._undo_snapshots = undo_snapshots
 
 return M

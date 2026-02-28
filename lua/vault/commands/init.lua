@@ -532,7 +532,10 @@ local function build_subcommands()
                 local filter = args[1]
                 local notes, desc
 
-                if not filter or filter == "" then
+                if filter == "undo" then
+                    bases_editor.undo()
+                    return
+                elseif not filter or filter == "" then
                     notes = require("vault.notes")()
                     desc = "all notes"
                 elseif filter == "orphans" then
@@ -605,7 +608,7 @@ local function build_subcommands()
                     end
                     return {}
                 end
-                local subs = { "base", "orphans", "leaves", "empty", "no-frontmatter", "dir", "tag", "empty-property" }
+                local subs = { "base", "undo", "orphans", "leaves", "empty", "no-frontmatter", "dir", "tag", "empty-property" }
                 return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
             end,
         },
