@@ -38,7 +38,8 @@
 ### Dangerous vim motions in process buffers
 
 - `J` (join lines): Merges two note rows into one malformed line with double separators. Causes phantom deletes.
-- `f│x` (delete separator char): Breaks column parsing for that line. The line becomes unparseable.
+- `f│x` (delete separator char): **Mitigated** by `\x1f` conceal refactor — user types `f│` but the buffer contains `\x1f`, so `f` can't find it. However `J` still merges lines regardless.
+- `D` (delete to EOL): Clears the last cell. Acceptable — detected as an update.
 - `:%s/pattern/replacement/g`: Works correctly but is a footgun — it can rename slugs (triggering file moves + wikilink patches) if the pattern matches the slug column. Always preview with `:%s/pattern/replacement/gc` (confirm each).
 - `ggdG` (clear buffer): Safety cap refuses to delete more than 100 notes. Safe.
 
@@ -49,3 +50,48 @@
 - `ddp` (swap lines) is safe — extmarks follow the lines, no data diff detected.
 - `yyp` (paste) creates lines without extmarks → detected as new notes (creates).
 - Editing the slug column triggers **rename detection** (file move + wikilink patch), not an update.
+- **Create+delete false pairing**: Inserting a new line can cause nearby extmarks to drift. If the diff sees 1 create and 1 delete (counts ≤5 and equal), it pairs them as a rename. This can cause an unrelated note to be renamed. `gu` correctly reverses it, but the save itself is destructive. Be aware when testing creates near other notes.
+
+### Scanner caching after undo/restore
+
+- The vault scanner caches file paths. After `gu` restores a deleted/renamed file, the scanner cache may not include it. The `M.reload(bufnr)` after undo rescans, but the count can be off by 1 if the scanner was stale.
+- **Solution**: When testing undo→reopen flows, clear the scanner cache too: `package.loaded["vault.scanner"] = nil` before reopening.
+- Clearing ALL `vault.*` modules works but is heavy. Prefer clearing only `vault.bases.editor` + `vault.scanner`.
+
+### nvim_lua tool does not return values
+
+- The `nvim_lua` MCP tool returns `"OK"` on success — the Lua return value is discarded. You cannot `return 42` and read it.
+- **Solution**: Write results to `vim.g._test_result` from Lua, then read with `nvim_eval('g:_test_result')`. This is the reliable pattern for extracting data from Lua execution.
+- **Gotcha**: If the Lua code errors partway through, `vim.g._test_result` keeps its previous value — making it look like the assignment never ran. Always set a sentinel value (e.g. `vim.g._test_result = "BEFORE"`) at the top to detect silent failures.
+
+### nvim_lua silent failures
+
+- Multi-statement Lua blocks passed to `nvim_lua` abort at the first error, with no error message returned. The tool still reports `"OK"`. The only signal is that `vim.g._test_result` didn't update.
+- Common causes: `vim.cmd('normal! f...')` blocks waiting for a character; `vim.fn.search()` errors; `vim.api.nvim_buf_set_lines` triggers a TextChanged autocmd that errors.
+- **Solution**: Break multi-step operations into individual `nvim_lua` calls. Set `vim.g._test_result` after each step to identify where it failed.
+
+### Using remote-send for real user motions
+
+- `nvim_lua` with `vim.cmd('normal! h')` does trigger CursorMoved, but chaining multiple operations in one `nvim_lua` block can fail silently if any autocmd errors.
+- `nvim --server /tmp/nvim-server.sock --remote-send 'gg0253l'` is more reliable for simulating real user input — it sends keystrokes that process through the full Neovim event loop including all autocmds.
+- **Avoid** `--remote-send ':command\r'` — this types into the command line and leaves artifacts. Use normal-mode keystrokes or `nvim_cmd` instead.
+- After `--remote-send`, add `sleep 0.3` before querying state — keystrokes are async.
+
+### vim.fn.confirm blocks during :write
+
+- Delete operations trigger `vim.fn.confirm()` during BufWriteCmd. This blocks the entire RPC socket.
+- **Solution**: Schedule the write, then answer the dialog:
+  ```lua
+  vim.schedule(function() pcall(vim.cmd, 'write') end)
+  ```
+  Then from Bash: `sleep 2 && nvim --server /tmp/nvim-server.sock --remote-send 'Y'`
+- The confirm uses `&Yes, trash them\n&No, skip deletes\n&Cancel`. Send `Y` for yes.
+
+### Undo system (gu) architecture
+
+- `gu` is plugin-level undo, NOT vim's `u`. Vim undo doesn't work after `:w` because the buffer is reloaded from disk (all lines replaced).
+- `snapshot_for_undo` captures raw file content BEFORE mutations. `M.undo` restores those files + reverses renames + deletes created files.
+- Renames: snapshot includes the renamed file AND all files containing wikilinks to the old slug (scanned before rename). Undo reverses the `fs_rename` and restores all patched files.
+- Deletes: snapshot captures the file. Undo writes it back to original path. The `.trash/` copy becomes an orphan (harmless).
+- Creates: no snapshot needed. Undo deletes the created file.
+- `atomic_writefile` adds a trailing newline — undo may introduce a minor whitespace diff on files that lacked a final newline.
