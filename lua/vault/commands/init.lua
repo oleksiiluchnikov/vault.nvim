@@ -1064,9 +1064,11 @@ function callbacks.today_dictate()
         and table.concat(vim.fn.readfile(path), "\n")
         or ""
     local Note = require("vault.notes.note")
+    -- Pass context via stdin ("--context -") to avoid argument-length limits
+    -- and to correctly handle multiline/special-char note content.
     vim.system(
-        { "ask", "--dictate", "--json", "--context", ctx, "--placeholder", "Say something…" },
-        {},
+        { "ask", "--dictate", "--json", "--context", "-", "--placeholder", "Say something…" },
+        { stdin = ctx },
         function(out)
             if out.code ~= 0 then return end
             vim.schedule(function()
