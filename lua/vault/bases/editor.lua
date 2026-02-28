@@ -2538,6 +2538,75 @@ function M.open(opts)
       end,
     })
   end, vim.tbl_extend("force", kopts, { desc = "Vault: merge next note into current" }))
+  vim.keymap.set("n", "gJ", function()
+    -- Merge: pick any note as target via telescope, absorb it into current line's note
+    local st = buf_states[bufnr]
+    if not st then return end
+    local row = vim.api.nvim_win_get_cursor(0)[1] - 1  -- 0-indexed
+    local slug_a = get_line_slug(bufnr, row, st)
+    if not slug_a then
+      vim.notify("[vault] Cannot determine note identity on current line", vim.log.levels.WARN)
+      return
+    end
+    local path_a = st.note_paths[slug_a]
+    if not path_a then
+      vim.notify("[vault] Cannot find path for current note", vim.log.levels.WARN)
+      return
+    end
+
+    -- Open telescope notes picker; selecting a note triggers the merge
+    local ok_tele, tele_ok = pcall(function()
+      local actions      = require("telescope.actions")
+      local action_state = require("telescope.actions.state")
+      local finders      = require("telescope.finders")
+      local pickers      = require("telescope.pickers")
+      local sorters      = require("telescope.sorters")
+      local conf = require("telescope.config").values
+
+      -- Build entries from note_paths (already loaded in buf_state)
+      local entries = {}
+      for slug, path in pairs(st.note_paths) do
+        if slug ~= slug_a then  -- exclude current note
+          table.insert(entries, { slug = slug, path = path })
+        end
+      end
+      table.sort(entries, function(a, b) return a.slug < b.slug end)
+
+      pickers.new({}, {
+        prompt_title = string.format("Merge into: %s ← ?", slug_a),
+        finder = finders.new_table({
+          results = entries,
+          entry_maker = function(e)
+            return {
+              value   = e,
+              display = e.slug,
+              ordinal = e.slug,
+              path    = e.path,
+              filename = e.path,
+            }
+          end,
+        }),
+        sorter    = sorters.get_fuzzy_file(),
+        previewer = conf.file_previewer({}),
+        attach_mappings = function(prompt_bufnr, map)
+          actions.select_default:replace(function()
+            actions.close(prompt_bufnr)
+            local sel = action_state.get_selected_entry()
+            if not sel then return end
+            local path_b = sel.value.path
+            require("vault.merge").merge(path_a, path_b, {
+              bufnr   = bufnr,
+              on_done = function() M.reload(bufnr) end,
+            })
+          end)
+          return true
+        end,
+      }):find()
+    end)
+    if not ok_tele then
+      vim.notify("[vault] gJ requires telescope.nvim", vim.log.levels.WARN)
+    end
+  end, vim.tbl_extend("force", kopts, { desc = "Vault: pick any note to merge into current" }))
   vim.keymap.set("n", "g>", function() M.resize_cursor_column(bufnr, 5) end,
     vim.tbl_extend("force", kopts, { desc = "Vault: widen column" }))
   vim.keymap.set("n", "g<", function() M.resize_cursor_column(bufnr, -5) end,
