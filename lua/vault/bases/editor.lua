@@ -73,6 +73,8 @@ local buf_states = {}  -- [bufnr] = vault.OilEditState
 
 ---@class vault.ProcessUndoSnapshot
 ---@field files table<string, string[]>  path → original file lines
+---@field created_paths string[]         paths of files created by this save
+---@field renames { old_path: string, new_path: string }[]  renames to reverse on undo
 ---@field timestamp integer              os.time() when snapshot was taken
 ---@field description string             human-readable summary
 
@@ -1635,6 +1637,8 @@ local function set_frontmatter_fields(path, fields)
 end
 
 --- Snapshot files that will be mutated (for undo support).
+--- For renames, also snapshots files across the vault that contain wikilinks
+--- to the old slug, since those will be patched by watcher:handle_rename.
 ---@param diff vault.OilEditDiff
 ---@param st vault.OilEditState
 ---@param bufnr integer
@@ -1656,12 +1660,47 @@ local function snapshot_for_undo(diff, st, bufnr)
   end
   -- (Creates don't need snapshot — undo just deletes the created files)
 
-  local n_ops = #diff.updates + #diff.deletes + #diff.creates
+  -- Snapshot files that contain wikilinks to renamed slugs.
+  -- These will be patched by watcher:handle_rename during Note:move.
+  if diff.renames and #diff.renames > 0 then
+    local scanner = require("vault.scanner")
+    local paths = scanner.paths()
+    for _, ren in ipairs(diff.renames) do
+      local old_path = st.note_paths[ren.old_slug]
+      if old_path and vim.fn.filereadable(old_path) == 1 then
+        files[old_path] = vim.fn.readfile(old_path)
+      end
+      -- Find all files that reference the old slug in wikilinks
+      local old_stem = vim.fn.fnamemodify(old_path or "", ":t:r")
+      local escaped_slug = vim.pesc(ren.old_slug)
+      local escaped_stem = vim.pesc(old_stem)
+      for _, entry in pairs(paths) do
+        local note_path = entry.path
+        if not files[note_path] and vim.fn.filereadable(note_path) == 1 then
+          local f = io.open(note_path, "r")
+          if f then
+            local content = f:read("*all")
+            f:close()
+            -- Check if this file contains wikilinks to the old slug or stem
+            if content:match("%[%[" .. escaped_slug) or content:match("%[%[" .. escaped_stem) then
+              files[note_path] = vim.split(content, "\n", { plain = true })
+            end
+          end
+        end
+      end
+    end
+  end
+
+  local n_ops = #diff.updates + #diff.deletes + #diff.creates + (#diff.renames or 0)
   undo_snapshots[bufnr] = {
     files = files,
     created_paths = {},  -- will be populated after creates
+    renames = {},        -- will be populated during rename processing
     timestamp = os.time(),
-    description = string.format("%d updates, %d deletes, %d creates", #diff.updates, #diff.deletes, #diff.creates),
+    description = string.format(
+      "%d updates, %d deletes, %d creates, %d renames",
+      #diff.updates, #diff.deletes, #diff.creates, #diff.renames
+    ),
   }
 end
 
@@ -2101,6 +2140,13 @@ local function on_save(bufnr)
       if ok and note then
         local move_ok, move_err = pcall(note.move, note, new_path, false, true)
         if move_ok then
+          -- Track rename for undo
+          if undo_snapshots[bufnr] then
+            table.insert(undo_snapshots[bufnr].renames, {
+              old_path = old_path,
+              new_path = new_path,
+            })
+          end
           -- Update state maps
           st.note_paths[ren.new_slug] = new_path
           st.note_paths[ren.old_slug] = nil
@@ -2385,15 +2431,25 @@ function M.open(opts)
   })
 
   -- Cursor skip: prevent cursor from landing on \x1f byte
+  -- Track previous cursor position for direction detection
+  local prev_cursor = { 1, 0 }
   vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
     buffer = bufnr,
     callback = function()
       local row, col = unpack(vim.api.nvim_win_get_cursor(0))
       local line = vim.api.nvim_get_current_line()
       if col < #line and line:byte(col + 1) == 0x1f then
-        -- Skip forward past the delimiter
-        vim.api.nvim_win_set_cursor(0, { row, col + 1 })
+        -- Determine movement direction to skip the right way
+        local prev_row, prev_col = prev_cursor[1], prev_cursor[2]
+        local moving_left = (row == prev_row and col < prev_col)
+            or (row < prev_row)
+        if moving_left and col > 0 then
+          vim.api.nvim_win_set_cursor(0, { row, col - 1 })
+        else
+          vim.api.nvim_win_set_cursor(0, { row, col + 1 })
+        end
       end
+      prev_cursor = { row, col }
     end,
   })
 
@@ -2640,7 +2696,7 @@ function M.sort_by_cursor(bufnr)
 end
 
 --- Undo the last save operation by restoring snapshotted files.
---- Deletes any files that were created by the last save.
+--- Reverses renames, deletes created files, and restores wikilink-patched files.
 ---@param bufnr? integer  defaults to current buffer
 function M.undo(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
@@ -2650,10 +2706,29 @@ function M.undo(bufnr)
     return
   end
 
+  local uv = vim.uv or vim.loop
   local restored = 0
   local deleted = 0
+  local renames_reversed = 0
 
-  -- Restore modified/deleted files
+  -- 1. Reverse renames FIRST (move files back to old path before restoring content)
+  if snap.renames then
+    for _, ren in ipairs(snap.renames) do
+      if vim.fn.filereadable(ren.new_path) == 1 then
+        local ok, err = uv.fs_rename(ren.new_path, ren.old_path)
+        if ok then
+          renames_reversed = renames_reversed + 1
+        else
+          vim.notify(
+            string.format("[vault] Failed to reverse rename %s → %s: %s", ren.new_path, ren.old_path, tostring(err)),
+            vim.log.levels.ERROR
+          )
+        end
+      end
+    end
+  end
+
+  -- 2. Restore modified/deleted/wikilink-patched files
   for path, original_lines in pairs(snap.files) do
     local ok, err = atomic_writefile(path, original_lines)
     if ok then
@@ -2663,7 +2738,7 @@ function M.undo(bufnr)
     end
   end
 
-  -- Delete files that were created
+  -- 3. Delete files that were created
   if snap.created_paths then
     for _, path in ipairs(snap.created_paths) do
       if vim.fn.filereadable(path) == 1 then
@@ -2675,8 +2750,12 @@ function M.undo(bufnr)
 
   undo_snapshots[bufnr] = nil
 
+  local parts = {}
+  if restored > 0 then table.insert(parts, string.format("restored %d file(s)", restored)) end
+  if deleted > 0 then table.insert(parts, string.format("removed %d created", deleted)) end
+  if renames_reversed > 0 then table.insert(parts, string.format("reversed %d rename(s)", renames_reversed)) end
   vim.notify(
-    string.format("[vault] Undo: restored %d file(s), removed %d created file(s)", restored, deleted),
+    "[vault] Undo: " .. (#parts > 0 and table.concat(parts, ", ") or "nothing to undo"),
     vim.log.levels.INFO
   )
 
