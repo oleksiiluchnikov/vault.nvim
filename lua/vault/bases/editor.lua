@@ -32,13 +32,17 @@ vim.api.nvim_set_hl(0, "VaultProcessValidationErr", { link = "DiagnosticUnderlin
 
 -- ─── Constants ────────────────────────────────────────────────────────────────
 
-local SEP        = " │ "
-local EMPTY_CELL = "∅"
-local NS         = vim.api.nvim_create_namespace("vault_bases_editor")
-local NS_DIFF    = vim.api.nvim_create_namespace("vault_oil_diff")
-local NS_ERR     = vim.api.nvim_create_namespace("vault_bases_errors")
-local NS_FORMULA = vim.api.nvim_create_namespace("vault_bases_formula")
-local NS_VALID   = vim.api.nvim_create_namespace("vault_bases_validation")
+local SEP          = " \x1f "       -- real delimiter: SPACE + Unit Separator (0x1f) + SPACE
+local SEP_DISPLAY  = " │ "         -- visual replacement shown via conceal
+local SEP_CHAR     = "\x1f"        -- bare delimiter byte (for split_cells)
+local SEP_DISPLAY_WIDTH = 3        -- display columns of " │ " (space + pipe + space)
+local EMPTY_CELL   = "∅"
+local NS           = vim.api.nvim_create_namespace("vault_bases_editor")
+local NS_DIFF      = vim.api.nvim_create_namespace("vault_oil_diff")
+local NS_ERR       = vim.api.nvim_create_namespace("vault_bases_errors")
+local NS_FORMULA   = vim.api.nvim_create_namespace("vault_bases_formula")
+local NS_VALID     = vim.api.nvim_create_namespace("vault_bases_validation")
+local NS_CONCEAL   = vim.api.nvim_create_namespace("vault_bases_conceal")
 
 -- ─── Per-buffer state ─────────────────────────────────────────────────────────
 
@@ -318,7 +322,7 @@ end
 ---@param text string
 ---@return string[]
 local function split_cells(text)
-  local raw = vim.split(text, "│", { plain = true })
+  local raw = vim.split(text, SEP_CHAR, { plain = true })
   local cells = {}
   for i, v in ipairs(raw) do
     cells[i] = vim.trim(v)
@@ -855,7 +859,7 @@ local function build_header_chunks(st)
            or "VaultProcessHeader"
     table.insert(chunks, { text = padded, hl = hl })
     if i < #st.columns then
-      table.insert(chunks, { text = SEP, hl = "VaultProcessSep" })
+      table.insert(chunks, { text = SEP_DISPLAY, hl = "VaultProcessSep" })
     end
   end
   return chunks
@@ -965,6 +969,50 @@ local function apply_extmarks(bufnr, st, records)
   for i, rec in ipairs(records) do
     local row = i - 1  -- 0-indexed (no header lines in buffer)
     set_line_slug(bufnr, row, rec.slug, st)
+  end
+end
+
+-- ─── Conceal separators ───────────────────────────────────────────────────────
+
+--- Apply conceal extmarks on every \x1f byte so it displays as │.
+---@param bufnr integer
+local function apply_conceal(bufnr)
+  vim.api.nvim_buf_clear_namespace(bufnr, NS_CONCEAL, 0, -1)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  for row, line in ipairs(lines) do
+    local start = 1
+    while true do
+      local pos = line:find(SEP_CHAR, start, true)
+      if not pos then break end
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, NS_CONCEAL, row - 1, pos - 1, {
+        end_col = pos,  -- single byte
+        conceal = "│",
+      })
+      start = pos + 1
+    end
+  end
+end
+
+--- Incrementally apply conceal on a single line (for TextChanged).
+---@param bufnr integer
+---@param row integer  0-indexed
+local function apply_conceal_line(bufnr, row)
+  -- Clear conceal extmarks on this row only
+  local existing = vim.api.nvim_buf_get_extmarks(bufnr, NS_CONCEAL, {row, 0}, {row, -1}, {})
+  for _, mark in ipairs(existing) do
+    vim.api.nvim_buf_del_extmark(bufnr, NS_CONCEAL, mark[1])
+  end
+  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
+  if not line then return end
+  local start = 1
+  while true do
+    local pos = line:find(SEP_CHAR, start, true)
+    if not pos then break end
+    pcall(vim.api.nvim_buf_set_extmark, bufnr, NS_CONCEAL, row, pos - 1, {
+      end_col = pos,
+      conceal = "│",
+    })
+    start = pos + 1
   end
 end
 
@@ -1892,10 +1940,10 @@ local function on_save(bufnr)
       local col_byte = 0
       local sep_count = 0
       for byte_pos = 1, #line do
-        if line:sub(byte_pos, byte_pos + 2) == " │ " then
+        if line:sub(byte_pos, byte_pos + #SEP - 1) == SEP then
           sep_count = sep_count + 1
           if sep_count == err.col_idx - 1 then
-            col_byte = byte_pos + 2
+            col_byte = byte_pos + #SEP - 1
             break
           end
         end
@@ -2260,14 +2308,19 @@ function M.open(opts)
   local winid = vim.api.nvim_get_current_win()
   st.winid = winid
 
-  -- Window options (no conceal needed — slug is in extmarks, not text)
+  -- Window options
   vim.wo[winid].signcolumn = "yes"
   vim.wo[winid].number = true
   vim.wo[winid].relativenumber = true
   vim.wo[winid].wrap = false
+  vim.wo[winid].conceallevel = 2       -- fully conceal \x1f, show │ replacement
+  vim.wo[winid].concealcursor = "nv"   -- conceal in normal + visual mode
 
   -- Apply extmarks: separator virt_line + slug identity on each data line
   apply_extmarks(bufnr, st, records)
+
+  -- Conceal \x1f separators as │
+  apply_conceal(bufnr)
 
   -- Highlight formula cells as read-only
   highlight_formula_cells(bufnr, st)
@@ -2294,13 +2347,41 @@ function M.open(opts)
   })
 
   -- Live diff signs + inline validation on TextChanged
+  -- Also refresh conceal extmarks on changed lines
   vim.api.nvim_create_autocmd({ "TextChanged", "InsertLeave" }, {
     buffer = bufnr,
     callback = function()
       local s = buf_states[bufnr]
       if s and not s.saving then
+        -- Refresh conceal on all lines (incremental would need tracking changed lines)
+        apply_conceal(bufnr)
         update_diff_signs(bufnr, s)
         update_validation(bufnr, s)
+      end
+    end,
+  })
+
+  -- Sanitize yank register: replace \x1f with │ so pasting elsewhere is clean
+  vim.api.nvim_create_autocmd("TextYankPost", {
+    buffer = bufnr,
+    callback = function()
+      local reg = vim.v.event.regname == "" and '"' or vim.v.event.regname
+      local contents = vim.fn.getreg(reg)
+      if contents:find(SEP_CHAR, 1, true) then
+        vim.fn.setreg(reg, contents:gsub(SEP_CHAR, "│"))
+      end
+    end,
+  })
+
+  -- Cursor skip: prevent cursor from landing on \x1f byte
+  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
+    buffer = bufnr,
+    callback = function()
+      local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+      local line = vim.api.nvim_get_current_line()
+      if col < #line and line:byte(col + 1) == 0x1f then
+        -- Skip forward past the delimiter
+        vim.api.nvim_win_set_cursor(0, { row, col + 1 })
       end
     end,
   })
@@ -2441,6 +2522,7 @@ function M.reload(bufnr)
   set_buffer_lines(bufnr, lines)
   vim.bo[bufnr].modifiable = true
   apply_extmarks(bufnr, st, records)
+  apply_conceal(bufnr)
   highlight_formula_cells(bufnr, st)
   vim.api.nvim_buf_clear_namespace(bufnr, NS_DIFF, 0, -1)
   vim.api.nvim_buf_clear_namespace(bufnr, NS_VALID, 0, -1)
@@ -2527,7 +2609,7 @@ local function col_under_cursor(bufnr)
   local col = vim.fn.virtcol(".")
   local offset = 0
   for i, w in ipairs(st.col_widths) do
-    local sep_width = (i > 1) and #SEP or 0
+    local sep_width = (i > 1) and SEP_DISPLAY_WIDTH or 0
     if col <= offset + w + sep_width then
       return st.columns[i]
     end

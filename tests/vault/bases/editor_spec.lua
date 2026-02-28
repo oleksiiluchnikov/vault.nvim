@@ -84,11 +84,11 @@ describe("bases.editor", function()
 
       local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
       for i = 1, #lines do
-        local parts = vim.split(lines[i], " │ ", { plain = true })
+        local parts = vim.split(lines[i], " \x1f ", { plain = true })
         if parts[status_idx] then
           parts[status_idx] = string.format("%-" .. status_width .. "s", "done")
         end
-        local new_line = table.concat(parts, " │ ")
+        local new_line = table.concat(parts, " \x1f ")
         vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, { new_line })
       end
 
@@ -152,11 +152,11 @@ describe("bases.editor", function()
 
       local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
       for i = 1, #lines do
-        local parts = vim.split(lines[i], " │ ", { plain = true })
+        local parts = vim.split(lines[i], " \x1f ", { plain = true })
         if parts[status_idx2] then
           parts[status_idx2] = string.format("%-" .. status_width2 .. "s", "batch-test")
         end
-        vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, { table.concat(parts, " │ ") })
+        vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, { table.concat(parts, " \x1f ") })
       end
 
       vim.cmd("w")
@@ -281,7 +281,7 @@ describe("bases.editor", function()
       -- At least one line should have an uppercased value
       local found_value = false
       for _, line in ipairs(lines) do
-        local cells = vim.split(line, " │ ", { plain = true })
+        local cells = vim.split(line, " \x1f ", { plain = true })
         local cell = vim.trim(cells[name_upper_idx] or "")
         if cell ~= "" and cell ~= "∅" then
           found_value = true
@@ -339,7 +339,7 @@ describe("bases.editor", function()
 
       -- Edit a formula cell — this should NOT be written to disk
       local lines = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)
-      local parts = vim.split(lines[1], " │ ", { plain = true })
+      local parts = vim.split(lines[1], " \x1f ", { plain = true })
       -- Find formula column index
       local formula_idx = nil
       for i, col in ipairs(st.columns) do
@@ -347,7 +347,7 @@ describe("bases.editor", function()
       end
       if formula_idx and parts[formula_idx] then
         parts[formula_idx] = "HACKED          "
-        vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, { table.concat(parts, " │ ") })
+        vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, { table.concat(parts, " \x1f ") })
       end
 
       -- Also edit status (should be saved)
@@ -357,9 +357,9 @@ describe("bases.editor", function()
       end
       if status_idx then
         lines = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)
-        parts = vim.split(lines[1], " │ ", { plain = true })
+        parts = vim.split(lines[1], " \x1f ", { plain = true })
         parts[status_idx] = "formula-test    "
-        vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, { table.concat(parts, " │ ") })
+        vim.api.nvim_buf_set_lines(bufnr, 0, 1, false, { table.concat(parts, " \x1f ") })
       end
 
       vim.cmd("w")
@@ -498,7 +498,7 @@ describe("bases.editor", function()
         if col == "status" then val = "draft" end
         table.insert(new_cells, string.format("%-" .. width .. "s", val))
       end
-      local new_line = table.concat(new_cells, " │ ")
+      local new_line = table.concat(new_cells, " \x1f ")
 
       -- Insert between line 0 and 1 (simulates 'o' on first line)
       vim.api.nvim_buf_set_lines(bufnr, 1, 1, false, { new_line })
@@ -604,7 +604,7 @@ describe("bases.editor", function()
       local titles = {}
       for _, line in ipairs(lines) do
         if vim.trim(line) == "" then goto cont end
-        local cells = vim.split(line, "│", { plain = true })
+        local cells = vim.split(line, "\x1f", { plain = true })
         local title = vim.trim(cells[title_col_idx] or "")
         table.insert(titles, title:lower())
         ::cont::
@@ -679,7 +679,7 @@ describe("bases.editor", function()
       local titles = {}
       for _, line in ipairs(lines) do
         if vim.trim(line) == "" then goto cont2 end
-        local cells = vim.split(line, "│", { plain = true })
+        local cells = vim.split(line, "\x1f", { plain = true })
         local title = vim.trim(cells[title_col_idx2] or "")
         table.insert(titles, title:lower())
         ::cont2::
@@ -743,10 +743,10 @@ describe("bases.editor", function()
       assert.truthy(status_idx)
 
       local lines = vim.api.nvim_buf_get_lines(bufnr, target_row, target_row + 1, false)
-      local parts = vim.split(lines[1], " │ ", { plain = true })
+      local parts = vim.split(lines[1], " \x1f ", { plain = true })
       parts[status_idx] = string.format("%-" .. st.col_widths[status_idx] .. "s", "batch-ok")
       vim.api.nvim_buf_set_lines(bufnr, target_row, target_row + 1, false,
-        { table.concat(parts, " │ ") })
+        { table.concat(parts, " \x1f ") })
 
       vim.cmd("w")
 
@@ -808,10 +808,10 @@ describe("bases.editor", function()
       end
 
       local lines = vim.api.nvim_buf_get_lines(bufnr, target_row, target_row + 1, false)
-      local parts = vim.split(lines[1], " │ ", { plain = true })
+      local parts = vim.split(lines[1], " \x1f ", { plain = true })
       parts[status_idx] = string.format("%-" .. st.col_widths[status_idx] .. "s", "undo-me")
       vim.api.nvim_buf_set_lines(bufnr, target_row, target_row + 1, false,
-        { table.concat(parts, " │ ") })
+        { table.concat(parts, " \x1f ") })
 
       vim.cmd("w")
 
@@ -1028,7 +1028,7 @@ describe("bases.editor", function()
         if col == "tags" then val = "#test" end
         table.insert(new_cells, string.format("%-" .. w .. "s", val))
       end
-      local new_line = table.concat(new_cells, " │ ")
+      local new_line = table.concat(new_cells, " \x1f ")
 
       vim.api.nvim_buf_set_lines(bufnr, 0, 0, false, { new_line })
 
