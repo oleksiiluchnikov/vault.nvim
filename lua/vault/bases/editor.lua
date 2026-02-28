@@ -2398,22 +2398,28 @@ function M.open(opts)
   vim.api.nvim_create_autocmd({ "TextChanged", "InsertLeave" }, {
     buffer = bufnr,
     callback = function()
-      local s = buf_states[bufnr]
-      if s and not s.saving then
-        -- Refresh conceal only on changed lines (full refresh is too slow for 8k+ lines).
-        -- Conceal extmarks survive in-place edits; only new/pasted lines need them.
-        local line_count = vim.api.nvim_buf_line_count(bufnr)
-        if line_count ~= (s._last_line_count or line_count) then
-          -- Line count changed (insert/delete/paste) — refresh all conceal
-          apply_conceal(bufnr)
-        else
-          -- In-place edit — refresh conceal on current line only
-          local cursor_row = vim.api.nvim_win_get_cursor(0)[1] - 1
-          apply_conceal_line(bufnr, cursor_row)
+      local ok, err = pcall(function()
+        local s = buf_states[bufnr]
+        if s and not s.saving then
+          -- Refresh conceal only on changed lines (full refresh is too slow for 8k+ lines).
+          -- Conceal extmarks survive in-place edits; only new/pasted lines need them.
+          local line_count = vim.api.nvim_buf_line_count(bufnr)
+          if line_count ~= (s._last_line_count or line_count) then
+            -- Line count changed (insert/delete/paste) — refresh all conceal
+            apply_conceal(bufnr)
+          else
+            -- In-place edit — refresh conceal on current line only
+            local cursor_row = vim.api.nvim_win_get_cursor(0)[1] - 1
+            apply_conceal_line(bufnr, cursor_row)
+          end
+          s._last_line_count = line_count
+          update_diff_signs(bufnr, s)
+          update_validation(bufnr, s)
         end
-        s._last_line_count = line_count
-        update_diff_signs(bufnr, s)
-        update_validation(bufnr, s)
+      end)
+      if not ok then
+        local f = io.open("/tmp/nvim_notify.txt", "a")
+        if f then f:write(os.date() .. " [TextChanged err] " .. tostring(err) .. "\n"); f:close() end
       end
     end,
   })
@@ -2436,20 +2442,22 @@ function M.open(opts)
   vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
     buffer = bufnr,
     callback = function()
-      local row, col = unpack(vim.api.nvim_win_get_cursor(0))
-      local line = vim.api.nvim_get_current_line()
-      if col < #line and line:byte(col + 1) == 0x1f then
-        -- Determine movement direction to skip the right way
-        local prev_row, prev_col = prev_cursor[1], prev_cursor[2]
-        local moving_left = (row == prev_row and col < prev_col)
-            or (row < prev_row)
-        if moving_left and col > 0 then
-          vim.api.nvim_win_set_cursor(0, { row, col - 1 })
-        else
-          vim.api.nvim_win_set_cursor(0, { row, col + 1 })
+      local ok, err = pcall(function()
+        local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+        local line = vim.api.nvim_get_current_line()
+        if col < #line and line:byte(col + 1) == 0x1f then
+          -- Determine movement direction to skip the right way
+          local prev_row, prev_col = prev_cursor[1], prev_cursor[2]
+          local moving_left = (row == prev_row and col < prev_col)
+              or (row < prev_row)
+          if moving_left and col > 0 then
+            vim.api.nvim_win_set_cursor(0, { row, col - 1 })
+          else
+            vim.api.nvim_win_set_cursor(0, { row, col + 1 })
+          end
         end
-      end
-      prev_cursor = { row, col }
+        prev_cursor = { row, col }
+      end)
     end,
   })
 
@@ -2488,6 +2496,48 @@ function M.open(opts)
     vim.tbl_extend("force", kopts, { desc = "Vault: reload buffer" }))
   vim.keymap.set("n", "gu", function() M.undo(bufnr) end,
     vim.tbl_extend("force", kopts, { desc = "Vault: undo last save" }))
+  vim.keymap.set("n", "u", function()
+    -- Smart undo: vim undo if entries exist, otherwise plugin undo (gu)
+    -- Note: seq_cur stays non-zero after buffer re-render (undolevels=-1),
+    -- but entries is emptied. So check entries, not seq_cur.
+    local tree = vim.fn.undotree()
+    if #tree.entries > 0 then
+      vim.cmd("undo")
+    elseif undo_snapshots[bufnr] then
+      M.undo(bufnr)
+    else
+      vim.notify("[vault] Nothing to undo", vim.log.levels.INFO)
+    end
+  end, vim.tbl_extend("force", kopts, { desc = "Vault: smart undo" }))
+  vim.keymap.set("n", "J", function()
+    -- Merge: absorb next line's note into current line's note
+    local st = buf_states[bufnr]
+    if not st then return end
+    local row = vim.api.nvim_win_get_cursor(0)[1] - 1  -- 0-indexed
+    local line_count = vim.api.nvim_buf_line_count(bufnr)
+    if row + 1 >= line_count then
+      vim.notify("[vault] No next line to merge with", vim.log.levels.WARN)
+      return
+    end
+    local slug_a = get_line_slug(bufnr, row, st)
+    local slug_b = get_line_slug(bufnr, row + 1, st)
+    if not slug_a or not slug_b then
+      vim.notify("[vault] Cannot determine note identity for merge", vim.log.levels.WARN)
+      return
+    end
+    local path_a = st.note_paths[slug_a]
+    local path_b = st.note_paths[slug_b]
+    if not path_a or not path_b then
+      vim.notify("[vault] Cannot find note paths for merge", vim.log.levels.WARN)
+      return
+    end
+    require("vault.merge").merge(path_a, path_b, {
+      bufnr = bufnr,
+      on_done = function()
+        M.reload(bufnr)
+      end,
+    })
+  end, vim.tbl_extend("force", kopts, { desc = "Vault: merge next note into current" }))
   vim.keymap.set("n", "g>", function() M.resize_cursor_column(bufnr, 5) end,
     vim.tbl_extend("force", kopts, { desc = "Vault: widen column" }))
   vim.keymap.set("n", "g<", function() M.resize_cursor_column(bufnr, -5) end,
