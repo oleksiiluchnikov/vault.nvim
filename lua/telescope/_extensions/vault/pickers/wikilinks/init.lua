@@ -482,6 +482,186 @@ return function(opts)
         map("i", "<c-l>", resolve_action)
         map("n", "<c-l>", resolve_action)
 
+        -- <C-m> — merge: absorb selected wikilink's target into another note (or rewrite if unresolved)
+        local function merge_action()
+            local selection = action_state.get_selected_entry()
+            if not selection or not selection.value then return end
+            local wl = selection.value
+            local slug = wl.data and wl.data.slug or ""
+            if slug == "" then return end
+
+            local resolved = is_resolved(wl)
+
+            -- Close picker before opening sub-picker
+            actions.close(prompt_bufnr)
+
+            vim.schedule(function()
+                local scoring = require("vault.scoring")
+
+                -- Gather all slugs from the vault for scoring
+                local ok_core, core = pcall(require, "vault_core")
+                local vault_config = require("vault.config").options
+                local candidate_slugs = {}
+                if ok_core and core.slugs then
+                    local ok_s, slug_map = pcall(core.slugs, vault_config.root, vault_config.ignore or {})
+                    if ok_s and type(slug_map) == "table" then
+                        for s, _ in pairs(slug_map) do
+                            if s ~= slug then
+                                candidate_slugs[#candidate_slugs + 1] = s
+                            end
+                        end
+                    end
+                end
+
+                -- Score candidates using Rust slug similarity
+                local scored = scoring.suggest(slug, candidate_slugs, 200)
+
+                if #scored == 0 then
+                    vim.notify("[vault] No merge candidates found for [[" .. slug .. "]]", vim.log.levels.WARN)
+                    -- Reopen picker
+                    vim.schedule(function()
+                        local picker_mod = require("telescope._extensions.vault.pickers.wikilinks")
+                        local p = picker_mod({
+                            wikilinks = wikilinks,
+                            _results = results,
+                            sort_by = opts.sort_by,
+                            show_resolved = opts.show_resolved,
+                        })
+                        if p then p:find() end
+                    end)
+                    return
+                end
+
+                -- Open sub-picker with ranked merge candidates
+                local tele_actions = require("telescope.actions")
+                local tele_action_state = require("telescope.actions.state")
+                local tele_finders = require("telescope.finders")
+                local tele_pickers = require("telescope.pickers")
+                local tele_sorters = require("telescope.sorters")
+                local tele_conf = require("telescope.config").values
+
+                local function reopen_picker()
+                    vim.schedule(function()
+                        local picker_mod = require("telescope._extensions.vault.pickers.wikilinks")
+                        local p = picker_mod({
+                            wikilinks = wikilinks,
+                            _results = results,
+                            sort_by = opts.sort_by,
+                            show_resolved = opts.show_resolved,
+                        })
+                        if p then p:find() end
+                    end)
+                end
+
+                local action_label = resolved and "Merge" or "Rewrite"
+                tele_pickers.new({}, {
+                    prompt_title = string.format("%s [[%s]] → ?", action_label, slug),
+                    finder = tele_finders.new_table({
+                        results = scored,
+                        entry_maker = function(e)
+                            local pct = math.floor(e.score * 100 + 0.5)
+                            local display_str = pct > 0
+                                and string.format("%s (%d%%)", e.slug, pct)
+                                or e.slug
+                            local path = utils.slug_to_path(e.slug)
+                            return {
+                                value    = e,
+                                display  = display_str,
+                                ordinal  = e.slug,
+                                path     = path,
+                                filename = path,
+                            }
+                        end,
+                    }),
+                    sorter = tele_sorters.get_fuzzy_file(),
+                    previewer = tele_conf.file_previewer({}),
+                    attach_mappings = function(sub_prompt_bufnr, _sub_map)
+                        tele_actions.select_default:replace(function()
+                            tele_actions.close(sub_prompt_bufnr)
+                            local sel = tele_action_state.get_selected_entry()
+                            if not sel then
+                                reopen_picker()
+                                return
+                            end
+                            local target_slug = sel.value.slug
+                            local target_path = utils.slug_to_path(target_slug)
+                            local target_exists = vim.fn.filereadable(target_path) == 1
+
+                            if resolved then
+                                -- Source note exists on disk
+                                local source_path = utils.slug_to_path(slug)
+                                if target_exists then
+                                    -- Both exist: full merge (A absorbs B, B trashed, wikilinks rewritten)
+                                    require("vault.merge").merge(target_path, source_path, {
+                                        on_done = function()
+                                            -- Remove merged wikilink from results
+                                            for i = #results, 1, -1 do
+                                                if results[i] == wl then
+                                                    table.remove(results, i)
+                                                    break
+                                                end
+                                            end
+                                            reopen_picker()
+                                        end,
+                                    })
+                                else
+                                    -- Target doesn't exist: rename source → target (move + rewrite wikilinks)
+                                    local watcher = require("vault.watcher")
+                                    if watcher.handle_rename then
+                                        watcher.handle_rename(source_path, target_path)
+                                    else
+                                        vim.fn.rename(source_path, target_path)
+                                    end
+                                    -- Rewrite all [[slug]] → [[target_slug]]
+                                    rewrite_wikilink(wl, target_slug)
+                                    for i = #results, 1, -1 do
+                                        if results[i] == wl then
+                                            table.remove(results, i)
+                                            break
+                                        end
+                                    end
+                                    vim.notify(
+                                        "[vault] Renamed [[" .. slug .. "]] → [[" .. target_slug .. "]]",
+                                        vim.log.levels.INFO
+                                    )
+                                    reopen_picker()
+                                end
+                            else
+                                -- Source wikilink is unresolved (no file on disk)
+                                if target_exists then
+                                    -- Target exists: rewrite all [[slug]] → [[target_slug]]
+                                    local patched = rewrite_wikilink(wl, target_slug)
+                                    vim.notify(
+                                        "[vault] [[" .. slug .. "]] → [[" .. target_slug .. "]] | " .. patched .. " files patched",
+                                        vim.log.levels.INFO
+                                    )
+                                else
+                                    -- Neither exists: rewrite links anyway (both remain unresolved but consolidated)
+                                    local patched = rewrite_wikilink(wl, target_slug)
+                                    vim.notify(
+                                        "[vault] [[" .. slug .. "]] → [[" .. target_slug .. "]] (both unresolved) | " .. patched .. " files patched",
+                                        vim.log.levels.INFO
+                                    )
+                                end
+                                -- Remove from results
+                                for i = #results, 1, -1 do
+                                    if results[i] == wl then
+                                        table.remove(results, i)
+                                        break
+                                    end
+                                end
+                                reopen_picker()
+                            end
+                        end)
+                        return true
+                    end,
+                }):find()
+            end)
+        end
+
+        map("i", "<c-j>", merge_action)
+        map("n", "<c-j>", merge_action)
+
         -- Cleanup gradient highlights on close
         local function cleanup()
             if colors then
@@ -500,7 +680,7 @@ return function(opts)
     end
 
     local picker_opts = {
-        prompt_title = "Wikilinks  <C-l>=resolve",
+        prompt_title = "Wikilinks  <C-l>=resolve  <C-j>=merge",
         finder = finder,
         sorter = sorters.get_generic_fuzzy_sorter(),
         previewer = vault_previewers.wikilinks,

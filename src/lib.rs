@@ -748,6 +748,121 @@ fn suggest_all_strategies(
     map
 }
 
+// ============================================================================
+// Standalone scoring APIs (exposed to Lua)
+// ============================================================================
+
+/// Standalone suggest: expose suggest_all_strategies to Lua.
+fn vault_suggest(
+    lua: &Lua,
+    (query, slugs, limit): (String, Vec<String>, usize),
+) -> LuaResult<LuaValue> {
+    let slug_refs: Vec<&str> = slugs.iter().map(|s| s.as_str()).collect();
+    let result = suggest_all_strategies(&query, &slug_refs, limit);
+    lua.to_value(&result)
+}
+
+#[derive(Debug, Deserialize)]
+struct MergeCandidate {
+    slug: String,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct MergeScore {
+    slug: String,
+    score: f64,
+    slug_sim: f64,
+    tag_overlap: f64,
+}
+
+/// Compute tag Jaccard similarity: |A∩B| / |A∪B|.
+fn tag_jaccard(tags_a: &[String], tags_b: &[String]) -> f64 {
+    if tags_a.is_empty() && tags_b.is_empty() {
+        return 0.0;
+    }
+    let set_a: std::collections::HashSet<&str> = tags_a.iter().map(|s| s.as_str()).collect();
+    let set_b: std::collections::HashSet<&str> = tags_b.iter().map(|s| s.as_str()).collect();
+    let intersection = set_a.intersection(&set_b).count() as f64;
+    let union = set_a.union(&set_b).count() as f64;
+    if union == 0.0 {
+        0.0
+    } else {
+        intersection / union
+    }
+}
+
+/// Best slug similarity score across all 4 strategies.
+fn best_slug_similarity(query: &str, slug: &str) -> f64 {
+    let q = query.to_lowercase();
+    let qb = query.rsplit('/').next().unwrap_or(query).to_lowercase();
+    let s = slug.to_lowercase();
+    let sb = slug.rsplit('/').next().unwrap_or(slug).to_lowercase();
+
+    // Jaro-Winkler
+    let jw = jaro_winkler(&q, &s).max(jaro_winkler(&qb, &sb));
+
+    // Levenshtein
+    let lev = normalized_levenshtein(&q, &s).max(normalized_levenshtein(&qb, &sb));
+
+    // Contains
+    let contains = if s.contains(&q) || q.contains(&s) {
+        q.len().min(s.len()) as f64 / q.len().max(s.len()) as f64
+    } else if sb.contains(&qb) || qb.contains(&sb) {
+        qb.len().min(sb.len()) as f64 / qb.len().max(sb.len()) as f64
+    } else {
+        0.0
+    };
+
+    // Prefix
+    let prefix =
+        if s.starts_with(&q) || q.starts_with(&s) || sb.starts_with(&qb) || qb.starts_with(&sb) {
+            q.len().min(s.len()) as f64 / q.len().max(s.len()) as f64
+        } else {
+            0.0
+        };
+
+    jw.max(lev).max(contains).max(prefix)
+}
+
+/// Score merge candidates: slug similarity + tag Jaccard, combined.
+/// Returns top N candidates sorted by combined score.
+fn vault_score_merge_candidates<'a>(
+    lua: &'a Lua,
+    (query_slug, query_tags, candidates_val, limit): (String, Vec<String>, LuaValue<'a>, usize),
+) -> LuaResult<LuaValue<'a>> {
+    // Deserialize candidates from Lua table
+    let candidates: Vec<MergeCandidate> = lua.from_value(candidates_val)?;
+
+    // Score in parallel with rayon
+    let mut scored: Vec<MergeScore> = candidates
+        .par_iter()
+        .map(|c| {
+            let slug_sim = best_slug_similarity(&query_slug, &c.slug);
+            let tag_overlap = tag_jaccard(&query_tags, &c.tags);
+            let score = 0.5 * slug_sim + 0.5 * tag_overlap;
+            MergeScore {
+                slug: c.slug.clone(),
+                score,
+                slug_sim,
+                tag_overlap,
+            }
+        })
+        .collect();
+
+    // Sort descending by score, filter low scores
+    scored.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    scored.retain(|s| s.score > 0.05);
+    scored.truncate(limit);
+
+    lua.to_value(&scored)
+}
+
 fn build_wikilinks_map(notes: &[ParsedNote], root: &str) -> HashMap<String, WikilinkData> {
     let mut wikilinks_map: HashMap<String, WikilinkData> = HashMap::new();
 
@@ -1359,6 +1474,13 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
 
     exports.set("scan", lua.create_function(vault_scan_raw)?)?;
     exports.set("base_files", lua.create_function(vault_base_files)?)?;
+
+    // Scoring / suggestion APIs
+    exports.set("suggest", lua.create_function(vault_suggest)?)?;
+    exports.set(
+        "score_merge_candidates",
+        lua.create_function(vault_score_merge_candidates)?,
+    )?;
 
     Ok(exports)
 }
