@@ -610,8 +610,9 @@ local function build_subcommands()
             end,
         },
 
-        -- :Vault today — today's journal
-        -- :Vault today append <text> — append a line
+        -- :Vault today           — open today's journal
+        -- :Vault today append    — append a line
+        -- :Vault today dictate   — dictate a line via ask --dictate
         today = {
             run = function()
                 callbacks.today()
@@ -626,6 +627,11 @@ local function build_subcommands()
                     callbacks.daily_append(text)
                 end,
             },
+            dictate = vim.fn.executable("ask") == 1 and {
+                run = function()
+                    callbacks.today_dictate()
+                end,
+            } or nil,
         },
 
         -- :Vault yesterday — yesterday's journal
@@ -1035,6 +1041,42 @@ function callbacks.daily_append(text)
     local note = Note(path)
     note:append("- " .. text)
     vim.notify("[vault] Appended to " .. today, vim.log.levels.INFO)
+end
+
+--- Open ask --dictate with today's daily note as context, append result.
+--- Requires the `ask` binary to be available in PATH.
+--- @return nil
+function callbacks.today_dictate()
+    if vim.fn.executable("ask") == 0 then
+        vim.notify("[vault] `ask` not found in PATH — install it to use :Vault today dictate", vim.log.levels.ERROR)
+        return
+    end
+    local config = require("vault.config")
+    local today = os.date("%Y-%m-%d %A")
+    if type(today) ~= "string" then return end
+    local daily_dir = config.dir("journal.daily")
+    if not daily_dir then
+        vim.notify("[vault] Journal daily directory not configured", vim.log.levels.ERROR)
+        return
+    end
+    local path = string.format("%s/%s%s", daily_dir, today, config.options.ext)
+    local ctx = vim.fn.filereadable(path) == 1
+        and table.concat(vim.fn.readfile(path), "\n")
+        or ""
+    local Note = require("vault.notes.note")
+    vim.system(
+        { "ask", "--dictate", "--json", "--context", ctx, "--placeholder", "Say something…" },
+        {},
+        function(out)
+            if out.code ~= 0 then return end
+            vim.schedule(function()
+                local ok, json = pcall(vim.json.decode, vim.trim(out.stdout))
+                if ok and json.ok and json.value ~= "" then
+                    Note(path):append("- " .. os.date("%H:%M:%S") .. " " .. json.value)
+                end
+            end)
+        end
+    )
 end
 
 function callbacks.open_properties_picker(args)
