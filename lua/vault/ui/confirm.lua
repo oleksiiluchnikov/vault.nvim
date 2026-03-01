@@ -94,6 +94,17 @@ local function create_popup(opts)
     popup:mount()
     local bufnr = popup.bufnr
 
+    -- Ensure focus lands on the popup even when opened from BufWriteCmd.
+    -- Neovim restores the original window after an autocmd handler returns,
+    -- so we schedule an explicit focus transfer after the handler completes.
+    if popup.winid then
+        vim.schedule(function()
+            if vim.api.nvim_win_is_valid(popup.winid) then
+                pcall(vim.api.nvim_set_current_win, popup.winid)
+            end
+        end)
+    end
+
     -- Set content
     vim.bo[bufnr].modifiable = true
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, opts.lines)
@@ -114,29 +125,47 @@ local function create_popup(opts)
 
     -- Close tracking
     local closed = false
-    local function close()
+    --- Unmount the popup UI only. Does NOT fire on_close.
+    local function close_ui()
         if closed then return end
         closed = true
         pcall(popup.unmount, popup)
+    end
+
+    --- Full close: unmount + fire on_close callback.
+    local function close()
+        if closed then
+            -- Already unmounted by a keymap; fire on_close if pending
+            return
+        end
+        close_ui()
         if opts.on_close then
             opts.on_close()
         end
     end
 
-    -- Keymaps
+    -- Keymaps: unmount UI only, then run the keymap's own callback.
+    -- on_close is NOT fired (the keymap handler replaces it).
     for key, fn in pairs(opts.keymaps) do
         vim.keymap.set("n", key, function()
-            close()
+            close_ui()
             fn()
         end, { buffer = bufnr, nowait = true })
     end
 
-    -- Also close on BufLeave (user navigated away)
+    -- BufLeave (user navigated away): unmount + fire on_close.
     vim.api.nvim_create_autocmd("BufLeave", {
         buffer = bufnr,
         once = true,
         callback = function()
-            vim.schedule(close)
+            vim.schedule(function()
+                if not closed then
+                    close_ui()
+                    if opts.on_close then
+                        opts.on_close()
+                    end
+                end
+            end)
         end,
     })
 
@@ -217,7 +246,7 @@ function M.confirm(opts)
         width = width,
         height = height,
         keymaps = keymaps,
-        on_close = nil, -- keymaps handle callbacks
+        on_close = on_no, -- fired by BufLeave when user navigates away
     })
 
     if not handle then
@@ -280,7 +309,7 @@ function M.select(opts)
         width = width,
         height = height,
         keymaps = keymaps,
-        on_close = nil,
+        on_close = on_cancel, -- fired by BufLeave when user navigates away
     })
 
     if not handle then
