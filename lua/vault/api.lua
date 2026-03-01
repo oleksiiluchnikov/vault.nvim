@@ -1,5 +1,6 @@
 --- @module "telescope"
 local pickers = require("telescope._extensions.vault.pickers")
+local log = require("vault.log").scope("api")
 local M = {}
 
 --- Safe picker launch — handles nil return from empty results.
@@ -9,7 +10,7 @@ local function safe_find(picker, empty_msg)
     if picker then
         picker:find()
     else
-        vim.notify("[vault] " .. (empty_msg or "No results found"), vim.log.levels.INFO)
+        log.info(empty_msg or "No results found")
     end
 end
 
@@ -83,7 +84,7 @@ function M.move_note(from_note_slug, to_note_slug)
     end
     local note = require("vault.notes")().map[from_note_slug]
     if not note then
-        vim.notify("[vault] Note not found: " .. tostring(from_note_slug), vim.log.levels.WARN)
+        log.warn("Note not found: %s", tostring(from_note_slug))
         return
     end
     require("vault.utils").slug_to_path(to_note_slug)
@@ -250,7 +251,7 @@ function M.open_picker_base_notes(base_name)
     local bases = require("vault.bases")()
     local base = bases:get(base_name)
     if not base then
-        vim.notify("[vault] Base not found: " .. tostring(base_name), vim.log.levels.ERROR)
+        log.error("Base not found: %s", tostring(base_name))
         return
     end
     local base_notes_picker = require("telescope._extensions.vault.pickers.bases.notes")
