@@ -1969,7 +1969,7 @@ local function apply_mutations(diff, st, on_done)
         local move_ok = pcall(function()
           local Note = require("vault.notes.note")
           local note = Note(path)
-          note:move(new_path, false, false)
+          note:move(new_path, false, false, { silent = true })
         end)
         if move_ok then
           st.note_paths[upd.slug] = new_path
@@ -3336,6 +3336,5 @@ end
 M._buf_states = buf_states
 M._diff_buffer = diff_buffer
 M._undo_snapshots = undo_snapshots
-M._buf_states = buf_states  -- expose for testing
 
 return M

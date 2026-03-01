@@ -364,7 +364,21 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silen
                 local modified = vim.bo[bufnr].modified
                 pcall(vim.api.nvim_buf_set_name, bufnr, new_path)
                 vim.bo[bufnr].modified = modified
+                -- Re-attach LSP clients so they track the new URI
+                for _, client in pairs(vim.lsp.get_clients({ bufnr = bufnr })) do
+                    pcall(vim.lsp.buf_detach_client, bufnr, client.id)
+                    pcall(vim.lsp.buf_attach_client, bufnr, client.id)
+                end
             end
+        end
+    end
+
+    -- Reload open buffers whose files were patched (wikilinks changed on disk)
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_is_loaded(bufnr) and updated_paths[vim.api.nvim_buf_get_name(bufnr)] then
+            vim.api.nvim_buf_call(bufnr, function()
+                pcall(vim.cmd, "checktime")
+            end)
         end
     end
 
@@ -447,88 +461,6 @@ function Watcher:handle_rename(old_path, new_path, silent)
     end
 
     return self:_do_rename_update(old_path, new_path, old_slug, new_slug, silent)
-end
-
--- Buffer-level watcher: detect when a note's contents were saved and the user
--- changed a wikilink to point to an existing note. In that case, offer to
--- rename the current file to match the linked note and reuse the existing
--- `handle_rename` logic to patch links across the vault.
-function Watcher:on_buf_write(bufnr)
-    bufnr = bufnr or vim.api.nvim_get_current_buf()
-    local name = vim.api.nvim_buf_get_name(bufnr)
-    if name == "" then
-        return
-    end
-
-    local root = config.options.root
-    if type(root) ~= "string" or root == "" then
-        return
-    end
-
-    -- Only operate on files inside the vault
-    local abs_name = vim.fn.fnamemodify(name, ":p")
-    local abs_root = vim.fn.fnamemodify(root, ":p")
-    if abs_name:sub(1, #abs_root) ~= abs_root then
-        return
-    end
-
-    -- Read buffer content
-    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    local content = table.concat(lines, "\n")
-
-    -- Search wikilinks and try to find the first link that resolves to an
-    -- existing note file distinct from the current file.
-    local ext = config.options.ext or ".md"
-    for link in content:gmatch("%[%[([^%]]+)%]%]") do
-        local target = link:match("([^#|]+)")
-        if target then
-            target = vim.trim(target)
-            if target ~= "" then
-                local candidate = target
-                if not candidate:match(vim.pesc(ext) .. "$") then
-                    -- ensure extension starts with a dot
-                    if ext:sub(1, 1) ~= "." then
-                        candidate = candidate .. "." .. ext
-                    else
-                        candidate = candidate .. ext
-                    end
-                end
-                local candidate_path = vim.fn.fnamemodify(abs_root .. "/" .. candidate, ":p")
-                if vim.fn.filereadable(candidate_path) == 1 and candidate_path ~= abs_name then
-                    -- Found an existing note that the user linked to. Prompt before renaming.
-                    local prompt = string.format(
-                        "[vault] Rename current note '%s' → '%s'?",
-                        vim.fn.fnamemodify(abs_name, ":t"),
-                        vim.fn.fnamemodify(candidate_path, ":t")
-                    )
-                    local ok = vim.fn.confirm(prompt, "&Yes\n&No", 2)
-                    if ok == 1 then
-                        -- Attempt filesystem rename. If it fails, abort.
-                        local ok_mv, mv_err = pcall(function()
-                            assert(uv.fs_rename(abs_name, candidate_path))
-                        end)
-                        if not ok_mv then
-                            vim.schedule(function()
-                                vim.notify(
-                                    "[vault] rename failed: " .. tostring(mv_err),
-                                    vim.log.levels.ERROR
-                                )
-                            end)
-                            return
-                        end
-
-                        -- Reuse existing handler to patch links and update buffers/state
-                        pcall(function()
-                            self:handle_rename(abs_name, candidate_path)
-                        end)
-                    end
-
-                    -- Stop after the first actionable link to avoid multiple prompts
-                    return
-                end
-            end
-        end
-    end
 end
 
 --- Disable the oil guard to allow renames even when oil is loaded
