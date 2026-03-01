@@ -9,7 +9,7 @@ return function(opts)
     local sorters = require("telescope.sorters")
     local entry_display = require("telescope.pickers.entry_display")
     local vault_state = require("vault.core.state")
-    local Log = require("plenary.log")
+    local log = require("vault.log").scope("telescope")
     local vault_mappings = require("telescope._extensions.vault.mappings")
     local vault_hl = require("telescope._extensions.vault.highlights")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
@@ -20,7 +20,7 @@ return function(opts)
 
     local properties_list = opts.properties:list()
     if next(properties_list) == nil then
-        Log.info("No properties found in vault")
+        log.info("No properties found in vault")
     end
 
     table.sort(properties_list, function(a, b)
@@ -83,7 +83,7 @@ return function(opts)
             end
         end
         if next(filtered_properties) == nil then
-            vim.notify("[vault] No properties found", vim.log.levels.INFO)
+            log.info("No properties found")
         end
         opts.properties.map = filtered_properties
     end

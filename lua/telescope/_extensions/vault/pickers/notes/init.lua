@@ -11,7 +11,7 @@ return function(opts)
     local finders = require("telescope.finders")
     local pickers = require("telescope.pickers")
     local sorters = require("telescope.sorters")
-    local Log = require("plenary.log")
+    local log = require("vault.log").scope("telescope")
     local utils = require("vault.utils")
     local vault_previewers = require("telescope._extensions.vault.previewers")
     local vault_mappings = require("telescope._extensions.vault.mappings")
@@ -26,7 +26,7 @@ return function(opts)
 
     local results = opts.notes:list()
     if next(results) == nil then
-        vim.notify("[vault] No notes found", vim.log.levels.INFO)
+        log.info("No notes found")
         return
     end
 
