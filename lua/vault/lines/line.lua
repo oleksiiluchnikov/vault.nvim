@@ -3,6 +3,7 @@ local error_formatter = require("vault.utils.error")
 local utils = require("vault.utils")
 local state = require("vault.core.state")
 local Parser = require("vault.parser")
+local log = require("vault.log").scope("line")
 
 -- local config = require("vault.config")
 -- local data = require("vault.lines.line.data")
@@ -134,10 +135,7 @@ function Line:rename(name, verbose)
         return self
     end
 
-    vim.notify(message, vim.log.levels.INFO, {
-        title = "Vault Rename",
-        timeout = 200,
-    })
+    log.info(message)
     -- require("vault.lines").reset()
     return self
 end

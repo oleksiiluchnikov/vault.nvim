@@ -2,6 +2,7 @@ local Object = require("vault.core.object")
 local error_formatter = require("vault.utils.error")
 local utils = require("vault.utils")
 local state = require("vault.core.state")
+local log = require("vault.log").scope("dir")
 
 -- -- local config = require("vault.config")
 -- local data = require("vault.dirs.dir.data")
@@ -93,10 +94,7 @@ function Dir:rename(name, verbose)
         return self
     end
 
-    vim.notify(message, vim.log.levels.INFO, {
-        title = "Vault Rename",
-        timeout = 200,
-    })
+    log.info(message)
     -- require("vault.dirs").reset()
     return self
 end
