@@ -202,21 +202,21 @@ function utils.is_flatten_list(tbl, expected_type)
 end
 
 function utils.warn(msg)
-    vim.notify(msg, vim.log.levels.WARN, { title = "Vault" })
+    require("vault.log").scope("utils").warn(msg)
 end
 
 function utils.error(msg)
-    vim.notify(msg, vim.log.levels.ERROR, { title = "Vault" })
+    require("vault.log").scope("utils").error(msg)
 end
 
 function utils.debug(msg)
     if config.options.debug then
-        vim.notify(msg, vim.log.levels.DEBUG, { title = "Vault" })
+        require("vault.log").scope("utils").debug(msg)
     end
 end
 
 function utils.info(msg)
-    vim.notify(msg, vim.log.levels.INFO, { title = "Vault" })
+    require("vault.log").scope("utils").info(msg)
 end
 
 --- Performs a fuzzy match between two strings
