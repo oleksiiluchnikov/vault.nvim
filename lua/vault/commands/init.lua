@@ -1267,7 +1267,11 @@ end
 --- @param args vim.api.keyset.create_user_command.command_args
 --- @return nil
 function callbacks.rename(args)
-    local note = require("vault.notes.note")(vim.fn.expand("%:p"))
+    local ok_note, note = pcall(require("vault.notes.note"), vim.fn.expand("%:p"))
+    if not ok_note then
+        vim.notify("[vault] Current buffer is not a vault note", vim.log.levels.WARN)
+        return
+    end
     local new_slug
     if next(args.fargs) == nil then
         -- Interactive rename: prompt for new slug
@@ -1307,7 +1311,11 @@ end
 --- ```
 --- @return nil
 function callbacks.note_inlinks_picker()
-    local note = require("vault.notes.note")(vim.fn.expand("%:p"))
+    local ok, note = pcall(require("vault.notes.note"), vim.fn.expand("%:p"))
+    if not ok or note == nil then
+        vim.notify("[vault] Current buffer is not a vault note", vim.log.levels.WARN)
+        return
+    end
     local inlinks = note.data.inlinks or {}
     if next(inlinks) == nil then
         vim.notify("[vault] No inlinks", vim.log.levels.INFO)
@@ -1331,7 +1339,11 @@ end
 --- ```
 --- @return nil
 function callbacks.note_outlinks_picker()
-    local note = require("vault.notes.note")(vim.fn.expand("%:p"))
+    local ok, note = pcall(require("vault.notes.note"), vim.fn.expand("%:p"))
+    if not ok or note == nil then
+        vim.notify("[vault] Current buffer is not a vault note", vim.log.levels.WARN)
+        return
+    end
     local outlinks = note.data.outlinks or {}
     if next(outlinks) == nil then
         vim.notify("[vault] No outlinks", vim.log.levels.INFO)
@@ -1359,7 +1371,11 @@ end
 --- ```
 --- @param args vim.api.keyset.create_user_command.command_args
 function callbacks.note_tags_picker(args)
-    local note = require("vault.notes.note")(vim.fn.expand("%:p"))
+    local ok, note = pcall(require("vault.notes.note"), vim.fn.expand("%:p"))
+    if not ok or note == nil then
+        vim.notify("[vault] Current buffer is not a vault note", vim.log.levels.WARN)
+        return
+    end
     if next(note.data.tags) == nil then
         vim.notify("[vault] No tags", vim.log.levels.INFO)
         return
@@ -1523,8 +1539,8 @@ function callbacks.note(args)
         return
     elseif #fargs == 1 then
         -- Apply method to the current buffer's note
-        local note = require("vault.notes.note")(vim.fn.expand("%:p"))
-        if note == nil then
+        local ok, note = pcall(require("vault.notes.note"), vim.fn.expand("%:p"))
+        if not ok or note == nil then
             vim.notify("[vault] No note found in current buffer", vim.log.levels.WARN)
             return
         end
@@ -1546,9 +1562,21 @@ function callbacks.note(args)
         table.insert(arguments, fargs[i])
     end
     local note = require("vault.notes")().map[slug]
+    if not note then
+        vim.notify("[vault] Note not found: " .. tostring(slug), vim.log.levels.WARN)
+        return
+    end
+    if not note[method] then
+        vim.notify("[vault] Unknown method: " .. tostring(method), vim.log.levels.WARN)
+        return
+    end
     table.insert(arguments, 1, note)
     -- Apply the method to the note
-    local output = note[method](unpack(arguments))
+    local ok, output = pcall(note[method], unpack(arguments))
+    if not ok then
+        vim.notify("[vault] Error: " .. tostring(output):match("[^\n]+"), vim.log.levels.ERROR)
+        return
+    end
     if output then
         --- @class notify.Options
         local notify_opts = {
