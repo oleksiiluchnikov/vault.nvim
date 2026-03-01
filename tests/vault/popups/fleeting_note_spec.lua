@@ -110,7 +110,7 @@ describe("Fleeting Note", function()
 
     describe("title derivation", function()
         it("derives title from first line via NoteTitle", function()
-            local NoteTitle = require("vault.notes.note.title")
+            local NoteTitle = require("vault.notes.note").Title
             local title = NoteTitle("my awesome idea")
             assert.is_not_nil(title)
             assert.is_not_nil(title.text)
@@ -182,7 +182,7 @@ describe("Fleeting Note", function()
 
     describe("end-to-end: write and verify", function()
         it("full cycle: derive title, write, read back, verify content", function()
-            local NoteTitle = require("vault.notes.note.title")
+            local NoteTitle = require("vault.notes.note").Title
 
             -- Simulate what the popup does:
             -- 1. User types "buy groceries for dinner"
