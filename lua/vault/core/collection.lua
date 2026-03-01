@@ -238,12 +238,24 @@ end
 ---
 --- @return vault.CollectionGroup
 function Collection:to_group()
-    local Group = state.get_global_key(
-        string.format("class.vault.%sGroup", self.class.name:gsub("Vault", "")) -- e.g. "VaultNotes" -> "Notes"
-    )
-        or require(string.format("vault.%s.group", self.class.name:gsub("Vault", ""):lower()))
-        or error(string.format("Group class not found for collection '%s'", self.class.name))
-    return Group(self)
+    local group_name = self.class.name:gsub("Vault", "")
+    local Group = state.get_global_key(string.format("class.vault.%sGroup", group_name))
+    if not Group then
+        local ok, required = pcall(require, string.format("vault.%s.group", group_name:lower()))
+        if ok then
+            Group = required
+        end
+    end
+    if Group then
+        return Group(self)
+    end
+
+    local copy = self.class()
+    copy.map = {}
+    for k, v in pairs(self.map) do
+        copy.map[k] = v
+    end
+    return copy
 end
 
 --- Apply filter to collection
