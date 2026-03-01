@@ -348,6 +348,53 @@ function Wikilink:is_resolved_on_disk()
 end
 
 
+--- Count how many source files would be affected by a rewrite (dry run).
+--- @param new_slug string The new slug.
+--- @return number count Number of source files that contain the old slug.
+--- @return string[] affected List of source slugs that would be modified.
+function Wikilink:rewrite_preview(new_slug)
+    local old_slug = self.data.slug or ""
+    if old_slug == "" or old_slug == new_slug then
+        return 0, {}
+    end
+
+    local utils = require("vault.utils")
+    local sources = self.data.sources or {}
+
+    local old_stem = self.data.stem or old_slug:match("([^/]+)$") or old_slug
+    local old_patterns = {}
+    for _, pat in ipairs({ old_slug, old_stem }) do
+        old_patterns[pat] = true
+    end
+
+    local count = 0
+    local affected = {}
+    for source_slug, _ in pairs(sources) do
+        local source_path = utils.slug_to_path(source_slug)
+        if vim.fn.filereadable(source_path) == 1 then
+            local lines = vim.fn.readfile(source_path)
+            for _, line in ipairs(lines) do
+                local found = false
+                for old_pat, _ in pairs(old_patterns) do
+                    local escaped = old_pat:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+                    if line:find("%[%[" .. escaped) then
+                        found = true
+                        break
+                    end
+                end
+                if found then
+                    count = count + 1
+                    affected[#affected + 1] = source_slug
+                    break
+                end
+            end
+        end
+    end
+
+    return count, affected
+end
+
+
 --- Rewrite all occurrences of this wikilink's slug to a new slug across source files.
 --- @param new_slug string The new slug to replace the old one with.
 --- @return number patched Number of source files that were modified.

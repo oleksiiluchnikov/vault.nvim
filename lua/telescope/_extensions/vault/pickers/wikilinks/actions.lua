@@ -4,6 +4,16 @@ local M = {}
 
 local utils = require("vault.utils")
 
+--- Get wikilinks config options with defaults.
+--- @return table
+local function get_config()
+    local ok, config = pcall(require, "vault.config")
+    if ok and config.options and config.options.wikilinks then
+        return config.options.wikilinks
+    end
+    return { confirm_rewrite = true, confirm_merge = true, confirm_create = false }
+end
+
 --- Remove a wikilink from results in-place (picker-level bookkeeping).
 --- @param results vault.Wikilink[]
 --- @param wl vault.Wikilink
@@ -34,6 +44,24 @@ function M.make_reopen(ctx)
     end
 end
 
+--- Confirm a destructive action. Calls `on_yes()` if confirmed or if confirmation is disabled.
+--- @param enabled boolean Whether confirmation is enabled
+--- @param message string The confirmation prompt
+--- @param on_yes function Called when confirmed (or confirmation disabled)
+--- @param on_no? function Called when cancelled
+local function confirm(enabled, message, on_yes, on_no)
+    if not enabled then
+        on_yes()
+        return
+    end
+    local choice = vim.fn.confirm(message, "&Yes\n&No", 2)
+    if choice == 1 then
+        on_yes()
+    elseif on_no then
+        on_no()
+    end
+end
+
 --- <CR> action: open target (resolved) or create note (unresolved).
 --- @param ctx table
 --- @return function
@@ -59,8 +87,15 @@ function M.make_enter(ctx)
             local target = utils.slug_to_path(slug)
             vim.cmd("edit " .. vim.fn.fnameescape(target))
         else
-            local note = wl:create_target()
-            note:edit()
+            local conf = get_config()
+            confirm(conf.confirm_create,
+                string.format("Create new note [[%s]]?", slug),
+                function()
+                    local note = wl:create_target()
+                    note:edit()
+                    vim.notify(string.format("[vault] Created note: %s", slug), vim.log.levels.INFO)
+                end
+            )
         end
     end
 end
@@ -87,7 +122,10 @@ function M.make_resolve(prompt_bufnr, ctx)
         end
 
         if wl:is_resolved_on_disk() then
-            vim.notify("[vault] Already resolved -> " .. (wl.data.target or ""), vim.log.levels.INFO)
+            vim.notify(
+                string.format("[vault] [[%s]] already points to an existing note", slug),
+                vim.log.levels.INFO
+            )
             return
         end
 
@@ -121,7 +159,7 @@ function M.make_resolve(prompt_bufnr, ctx)
             end
         end
         choices[#choices + 1] = { label = "Create new note: " .. slug, slug = nil, action = "create" }
-        choices[#choices + 1] = { label = "Skip", slug = nil, action = "skip" }
+        choices[#choices + 1] = { label = "Cancel", slug = nil, action = "skip" }
 
         local labels = {}
         for _, c in ipairs(choices) do
@@ -134,7 +172,7 @@ function M.make_resolve(prompt_bufnr, ctx)
 
         vim.schedule(function()
             vim.ui.select(labels, {
-                prompt = "Resolve [[" .. slug .. "]]:",
+                prompt = string.format("Resolve unlinked [[%s]] — pick target:", slug),
             }, function(choice, idx)
                 if not choice or not idx then
                     reopen_picker()
@@ -142,23 +180,59 @@ function M.make_resolve(prompt_bufnr, ctx)
                 end
 
                 local picked = choices[idx]
+                local conf = get_config()
 
-                if picked.action ~= "skip" then
-                    if picked.action == "create" then
-                        wl:create_target()
-                        vim.notify("[vault] Created: " .. slug, vim.log.levels.INFO)
-                    else
-                        local patched = wl:rewrite(picked.slug)
-                        vim.notify(
-                            "[vault] [[" .. slug .. "]] -> [[" .. picked.slug .. "]] | " .. patched .. " files patched",
-                            vim.log.levels.INFO
-                        )
-                    end
-
-                    M.remove_from_results(ctx.results, wl)
+                if picked.action == "skip" then
+                    reopen_picker()
+                    return
                 end
 
-                reopen_picker()
+                if picked.action == "create" then
+                    confirm(conf.confirm_create,
+                        string.format("Create new note [[%s]]?", slug),
+                        function()
+                            wl:create_target()
+                            vim.notify(string.format("[vault] Created note: %s", slug), vim.log.levels.INFO)
+                            M.remove_from_results(ctx.results, wl)
+                            reopen_picker()
+                        end,
+                        reopen_picker
+                    )
+                    return
+                end
+
+                -- Rewrite [[slug]] -> [[picked.slug]]
+                local new_slug = picked.slug
+                local count, affected = wl:rewrite_preview(new_slug)
+
+                local function do_rewrite()
+                    local patched = wl:rewrite(new_slug)
+                    vim.notify(
+                        string.format("[vault] Rewrote [[%s]] -> [[%s]] in %d file(s)", slug, new_slug, patched),
+                        vim.log.levels.INFO
+                    )
+                    M.remove_from_results(ctx.results, wl)
+                    reopen_picker()
+                end
+
+                if count == 0 then
+                    vim.notify(
+                        string.format("[vault] No files contain [[%s]], nothing to rewrite", slug),
+                        vim.log.levels.INFO
+                    )
+                    reopen_picker()
+                    return
+                end
+
+                confirm(conf.confirm_rewrite,
+                    string.format(
+                        "Rewrite [[%s]] -> [[%s]] in %d file(s)?\n\nAffected:\n  %s",
+                        slug, new_slug, count,
+                        table.concat(affected, "\n  ")
+                    ),
+                    do_rewrite,
+                    reopen_picker
+                )
             end)
         end)
     end
@@ -207,7 +281,13 @@ function M.make_merge(prompt_bufnr, ctx)
             local scored = scoring.suggest(slug, candidate_slugs, 200)
 
             if #scored == 0 then
-                vim.notify("[vault] No merge candidates found for [[" .. slug .. "]]", vim.log.levels.WARN)
+                vim.notify(
+                    string.format(
+                        "[vault] No similar notes found for [[%s]]. Try <C-l> to resolve manually instead.",
+                        slug
+                    ),
+                    vim.log.levels.WARN
+                )
                 reopen_picker()
                 return
             end
@@ -219,10 +299,15 @@ function M.make_merge(prompt_bufnr, ctx)
             local tele_pickers = require("telescope.pickers")
             local tele_sorters = require("telescope.sorters")
             local tele_conf = require("telescope.config").values
+            local conf = get_config()
 
             local action_label = resolved and "Merge" or "Rewrite"
+            local prompt_hint = resolved
+                and string.format("Merge [[%s]] into (target absorbs source, source trashed):", slug)
+                or string.format("Rewrite [[%s]] -> pick target (rewrites links across vault):", slug)
+
             tele_pickers.new({}, {
-                prompt_title = string.format("%s [[%s]] -> ?", action_label, slug),
+                prompt_title = prompt_hint,
                 finder = tele_finders.new_table({
                     results = scored,
                     entry_maker = function(e)
@@ -257,38 +342,86 @@ function M.make_merge(prompt_bufnr, ctx)
                         if resolved then
                             local source_path = utils.slug_to_path(slug)
                             if target_exists then
-                                -- Both exist: full merge (domain service)
-                                require("vault.merge").merge(target_path, source_path, {
-                                    on_done = function()
-                                        M.remove_from_results(ctx.results, wl)
-                                        reopen_picker()
+                                -- Both exist: full merge (absorb + trash source + rewrite links)
+                                confirm(conf.confirm_merge,
+                                    string.format(
+                                        "Merge [[%s]] into [[%s]]?\n\n"
+                                        .. "This will:\n"
+                                        .. "  1. Append content of [[%s]] to [[%s]]\n"
+                                        .. "  2. Rewrite all links [[%s]] -> [[%s]]\n"
+                                        .. "  3. Move [[%s]] to .trash/",
+                                        slug, target_slug,
+                                        slug, target_slug,
+                                        slug, target_slug,
+                                        slug
+                                    ),
+                                    function()
+                                        require("vault.merge").merge(target_path, source_path, {
+                                            on_done = function()
+                                                M.remove_from_results(ctx.results, wl)
+                                                reopen_picker()
+                                            end,
+                                        })
                                     end,
-                                })
+                                    reopen_picker
+                                )
                             else
                                 -- Target doesn't exist: rename source -> target
-                                local watcher = require("vault.watcher")
-                                if watcher.handle_rename then
-                                    watcher.handle_rename(source_path, target_path)
-                                else
-                                    vim.fn.rename(source_path, target_path)
-                                end
-                                wl:rewrite(target_slug)
-                                M.remove_from_results(ctx.results, wl)
-                                vim.notify(
-                                    "[vault] Renamed [[" .. slug .. "]] -> [[" .. target_slug .. "]]",
-                                    vim.log.levels.INFO
+                                confirm(conf.confirm_rewrite,
+                                    string.format(
+                                        "Move [[%s]] -> [[%s]]?\n\n"
+                                        .. "This will rename the file and rewrite all links.",
+                                        slug, target_slug
+                                    ),
+                                    function()
+                                        local watcher = require("vault.watcher")
+                                        if watcher.handle_rename then
+                                            watcher.handle_rename(source_path, target_path)
+                                        else
+                                            vim.fn.rename(source_path, target_path)
+                                        end
+                                        wl:rewrite(target_slug)
+                                        M.remove_from_results(ctx.results, wl)
+                                        vim.notify(
+                                            string.format("[vault] Moved [[%s]] -> [[%s]]", slug, target_slug),
+                                            vim.log.levels.INFO
+                                        )
+                                        reopen_picker()
+                                    end,
+                                    reopen_picker
                                 )
-                                reopen_picker()
                             end
                         else
                             -- Source wikilink is unresolved — rewrite via domain method
-                            local patched = wl:rewrite(target_slug)
-                            local msg = target_exists
-                                and string.format("[vault] [[%s]] -> [[%s]] | %d files patched", slug, target_slug, patched)
-                                or string.format("[vault] [[%s]] -> [[%s]] (both unresolved) | %d files patched", slug, target_slug, patched)
-                            vim.notify(msg, vim.log.levels.INFO)
-                            M.remove_from_results(ctx.results, wl)
-                            reopen_picker()
+                            local count, affected = wl:rewrite_preview(target_slug)
+
+                            if count == 0 then
+                                vim.notify(
+                                    string.format("[vault] No files contain [[%s]], nothing to rewrite", slug),
+                                    vim.log.levels.INFO
+                                )
+                                reopen_picker()
+                                return
+                            end
+
+                            local msg_suffix = target_exists and "" or " (both unresolved)"
+                            confirm(conf.confirm_rewrite,
+                                string.format(
+                                    "Rewrite [[%s]] -> [[%s]]%s in %d file(s)?\n\nAffected:\n  %s",
+                                    slug, target_slug, msg_suffix, count,
+                                    table.concat(affected, "\n  ")
+                                ),
+                                function()
+                                    local patched = wl:rewrite(target_slug)
+                                    vim.notify(
+                                        string.format("[vault] Rewrote [[%s]] -> [[%s]] in %d file(s)", slug, target_slug, patched),
+                                        vim.log.levels.INFO
+                                    )
+                                    M.remove_from_results(ctx.results, wl)
+                                    reopen_picker()
+                                end,
+                                reopen_picker
+                            )
                         end
                     end)
                     return true
