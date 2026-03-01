@@ -272,8 +272,9 @@ end
 
 --- Build the info lines and actions for the center panel.
 --- @param st vault.ui.ResolverState
+--- @param width integer? The center panel width (defaults to 60)
 --- @return string[] lines, table[] hl_marks { line, col_start, col_end, group }
-local function build_center_content(st)
+local function build_center_content(st, width)
     local lines = {}
     local hls = {}
     local a_slug = st.a.data and st.a.data.slug or "?"
@@ -283,12 +284,14 @@ local function build_center_content(st)
     local a_hl = st.a_resolved and "VaultResolverResolved" or "VaultResolverUnresolved"
     local b_hl = st.b_resolved and "VaultResolverResolved" or "VaultResolverUnresolved"
 
-    -- Half width for each side
-    local half = 30
+    -- Half width for each side, computed from actual panel width
+    local panel_w = width or 60
+    local half = math.floor((panel_w - 1) / 2) -- -1 for the center separator char
 
     local function pad(s, w)
-        if #s >= w then return s:sub(1, w) end
-        return s .. string.rep(" ", w - #s)
+        local dw = vim.fn.strdisplaywidth(s)
+        if dw >= w then return s end
+        return s .. string.rep(" ", w - dw)
     end
 
     -- Header
@@ -320,12 +323,14 @@ local function build_center_content(st)
     else
         b_info = "  Sources: " .. b_src_count .. " file" .. (b_src_count == 1 and "" or "s")
     end
-    lines[#lines + 1] = pad(a_info, half) .. "│" .. b_info
-    hls[#hls + 1] = { line = #lines - 1, col_start = 0, col_end = #lines, group = "VaultResolverDim" }
+    local info_line = pad(a_info, half) .. "│" .. b_info
+    lines[#lines + 1] = info_line
+    hls[#hls + 1] = { line = #lines - 1, col_start = 0, col_end = #info_line, group = "VaultResolverDim" }
 
     -- Separator
-    lines[#lines + 1] = string.rep("─", half) .. "┴" .. string.rep("─", half)
-    hls[#hls + 1] = { line = #lines - 1, col_start = 0, col_end = half * 2 + 1, group = "VaultResolverSeparator" }
+    local sep_line = string.rep("─", half) .. "┴" .. string.rep("─", half)
+    lines[#lines + 1] = sep_line
+    hls[#hls + 1] = { line = #lines - 1, col_start = 0, col_end = #sep_line, group = "VaultResolverSeparator" }
 
     -- Blank line
     lines[#lines + 1] = ""
@@ -671,7 +676,7 @@ function M.open(opts)
     vim.wo[wins.center].winhighlight = "NormalFloat:Normal,FloatBorder:FloatBorder,CursorLine:Visual"
 
     -- Render center content
-    local lines, hls = build_center_content(st)
+    local lines, hls = build_center_content(st, layout.center.width)
     vim.bo[bufs.center].modifiable = true
     vim.api.nvim_buf_set_lines(bufs.center, 0, -1, false, lines)
     vim.bo[bufs.center].modifiable = false
@@ -703,12 +708,18 @@ function M.open(opts)
         end, km_opts)
     end
 
-    -- Close on BufLeave
+    -- Close on BufLeave (only if leaving to a non-resolver window)
     vim.api.nvim_create_autocmd("BufLeave", {
         buffer = bufs.center,
-        once = true,
         callback = function()
-            vim.schedule(close_all)
+            vim.schedule(function()
+                -- Check if the new current buffer is one of ours
+                local cur_buf = vim.api.nvim_get_current_buf()
+                for _, b in pairs(bufs) do
+                    if b == cur_buf then return end
+                end
+                close_all()
+            end)
         end,
     })
 end

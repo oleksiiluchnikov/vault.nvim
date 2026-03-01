@@ -161,31 +161,25 @@ return function(opts)
         opts = opts,
     }
 
+    -- Keybinding definitions: { lhs, description, action_factory }
+    local keybinds = {
+        { "<C-l>",  "resolve",  "make_resolve" },
+        { "<M-l>",  "batch",    "make_batch_resolve" },
+        { "<M-c>",  "create",   "make_batch_create" },
+        { "<C-j>",  "compare",  "make_merge" },
+    }
+
     local attach_mappings = function(prompt_bufnr, map)
         local actions = require("telescope.actions")
 
         -- <CR> — open target (resolved) or create note (unresolved)
         actions.select_default:replace(wl_actions.make_enter(ctx))
 
-        -- <C-l> — resolve
-        local resolve = wl_actions.make_resolve(prompt_bufnr, ctx)
-        map("i", "<c-l>", resolve)
-        map("n", "<c-l>", resolve)
-
-        -- <C-S-l> — batch resolve (interactive queue with "Create all" option)
-        local batch_resolve = wl_actions.make_batch_resolve(prompt_bufnr, ctx)
-        map("i", "<c-s-l>", batch_resolve)
-        map("n", "<c-s-l>", batch_resolve)
-
-        -- <C-S-c> — batch create (instant, no prompts)
-        local batch_create = wl_actions.make_batch_create(prompt_bufnr, ctx)
-        map("i", "<c-s-c>", batch_create)
-        map("n", "<c-s-c>", batch_create)
-
-        -- <C-j> — merge
-        local merge = wl_actions.make_merge(prompt_bufnr, ctx)
-        map("i", "<c-j>", merge)
-        map("n", "<c-j>", merge)
+        for _, kb in ipairs(keybinds) do
+            local action = wl_actions[kb[3]](prompt_bufnr, ctx)
+            map("i", kb[1], action)
+            map("n", kb[1], action)
+        end
 
         -- Cleanup gradient highlights on close
         if colors then
@@ -201,8 +195,13 @@ return function(opts)
         return true
     end
 
+    -- Build prompt title from keybinds
+    local hints = {}
+    for _, kb in ipairs(keybinds) do
+        hints[#hints + 1] = kb[1] .. "=" .. kb[2]
+    end
     local picker_opts = {
-        prompt_title = "Wikilinks  <C-l>=resolve  <C-S-l>=batch  <C-S-c>=create-all  <C-j>=compare/merge",
+        prompt_title = "Wikilinks  " .. table.concat(hints, "  "),
         finder = finder,
         sorter = sorters.get_generic_fuzzy_sorter(),
         previewer = vault_previewers.wikilinks,
