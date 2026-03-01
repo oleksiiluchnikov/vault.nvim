@@ -10,7 +10,7 @@ return function(opts)
     opts = opts or {}
 
     if not opts.base then
-        vim.notify("[vault] BaseNotes picker requires a base", vim.log.levels.ERROR)
+        require("vault.log").scope("telescope").error("BaseNotes picker requires a base")
         return
     end
 

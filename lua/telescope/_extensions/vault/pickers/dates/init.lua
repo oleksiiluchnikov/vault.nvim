@@ -8,6 +8,7 @@
 return function(opts)
     local config = require("vault.config")
     local utils = require("vault.utils")
+    local log = require("vault.log").scope("telescope")
     local actions = require("telescope.actions")
     local actions_state = require("telescope.actions.state")
     local entry_display = require("telescope.pickers.entry_display")
@@ -28,7 +29,7 @@ return function(opts)
     local date_values = Dates.from_to(opts.start_date, opts.end_date)
     local daily_dir = config.dir("journal.daily")
     if not daily_dir then
-        vim.notify("[vault] Journal daily directory not configured", vim.log.levels.WARN)
+        log.warn("Journal daily directory not configured")
         return
     end
 
