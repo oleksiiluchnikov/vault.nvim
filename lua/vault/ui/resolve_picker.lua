@@ -35,11 +35,22 @@ local M = {}
 
 --- @class ResolveEntry
 --- @field slug string
---- @field display string
 --- @field action string "rewrite" | "create" | "skip"
 --- @field ordinal string
 --- @field sort_priority number Lower = first
 --- @field source string "suggestion" | "note" | "wikilink" | "special"
+--- @field score? number  Suggestion match score (0-1)
+--- @field strategy? string  Suggestion strategy label
+--- @field resolved? boolean  For wikilink entries
+--- @field sources_n? number  For wikilink entries, number of source files
+
+--- Source type icons and highlight groups
+local SOURCE_ICONS = {
+    suggestion = "★",
+    note       = "◆",
+    wikilink   = "◇",
+    special    = "·",
+}
 
 --- Build entries for the resolve picker.
 --- @param wl vault.Wikilink
@@ -55,9 +66,9 @@ local function build_entries(wl, wikilinks)
     local strategy_order = { "jaro_winkler", "levenshtein", "contains", "prefix" }
     local strategy_labels = {
         jaro_winkler = "fuzzy",
-        levenshtein = "edit-dist",
-        contains = "substr",
-        prefix = "prefix",
+        levenshtein = "edit",
+        contains = "sub",
+        prefix = "pre",
     }
     for si, strategy in ipairs(strategy_order) do
         local candidates = suggestions[strategy]
@@ -68,14 +79,14 @@ local function build_entries(wl, wikilinks)
                 if cand_slug ~= "" and not seen[cand_slug] then
                     seen[cand_slug] = true
                     local score = s.score or s[2] or 0
-                    local pct = math.floor(score * 100 + 0.5)
                     entries[#entries + 1] = {
                         slug = cand_slug,
-                        display = string.format("★ %s (%d%% %s)", cand_slug, pct, label),
                         action = "rewrite",
                         ordinal = cand_slug,
                         sort_priority = si * 100 + ci,
                         source = "suggestion",
+                        score = score,
+                        strategy = label,
                     }
                 end
             end
@@ -92,7 +103,6 @@ local function build_entries(wl, wikilinks)
                     seen[note_slug] = true
                     entries[#entries + 1] = {
                         slug = note_slug,
-                        display = note_slug,
                         action = "rewrite",
                         ordinal = note_slug,
                         sort_priority = 10000,
@@ -109,15 +119,18 @@ local function build_entries(wl, wikilinks)
             if not seen[wl_slug] and wl_slug ~= slug then
                 seen[wl_slug] = true
                 local resolved = other_wl.is_resolved_on_disk and other_wl:is_resolved_on_disk()
-                local mark = resolved and "✓" or "○"
-                local sources_n = other_wl.data and other_wl.data.sources and #other_wl.data.sources or 0
+                local sources_n = 0
+                if other_wl.data and type(other_wl.data.sources) == "table" then
+                    sources_n = vim.tbl_count(other_wl.data.sources)
+                end
                 entries[#entries + 1] = {
                     slug = wl_slug,
-                    display = string.format("%s [[%s]] (%d sources)", mark, wl_slug, sources_n),
                     action = "rewrite",
                     ordinal = wl_slug,
                     sort_priority = 20000,
                     source = "wikilink",
+                    resolved = resolved,
+                    sources_n = sources_n,
                 }
             end
         end
@@ -126,7 +139,6 @@ local function build_entries(wl, wikilinks)
     -- 4. Special entries
     entries[#entries + 1] = {
         slug = slug,
-        display = "➕ Create new note: " .. slug,
         action = "create",
         ordinal = "create " .. slug,
         sort_priority = 90000,
@@ -134,7 +146,6 @@ local function build_entries(wl, wikilinks)
     }
     entries[#entries + 1] = {
         slug = nil,
-        display = "⏭ Skip",
         action = "skip",
         ordinal = "skip",
         sort_priority = 99999,
@@ -150,12 +161,15 @@ end
 --- Open the resolve picker.
 --- @param opts vault.ui.ResolvePickerOpts
 function M.open(opts)
+    local entry_display = require("telescope.pickers.entry_display")
     local pickers = require("telescope.pickers")
     local finders = require("telescope.finders")
     local conf = require("telescope.config").values
     local actions = require("telescope.actions")
     local action_state = require("telescope.actions.state")
     local previewers = require("telescope.previewers")
+    local vault_hl = require("telescope._extensions.vault.highlights")
+    local utils = require("vault.utils")
 
     local wl = opts.wikilink
     local slug = wl.data and wl.data.slug or "?"
@@ -165,45 +179,187 @@ function M.open(opts)
 
     local entries = build_entries(wl, opts.wikilinks)
 
-    local utils = require("vault.utils")
+    -- Compute column widths
+    local slug_max = 0
+    for _, e in ipairs(entries) do
+        local s = e.slug or ""
+        if #s > slug_max then slug_max = #s end
+    end
+    slug_max = math.min(slug_max, 60) -- cap for very long slugs
+
+    -- Gradient highlights for note entries
+    local hl_base = "VaultResolve"
+    local ui_height = vim.o.lines
+    if #vim.api.nvim_list_uis() > 0 then
+        ui_height = vim.api.nvim_list_uis()[1].height
+    end
+    local steps = math.min(ui_height, #entries)
+    local colors = vault_hl.setup(hl_base, steps, { "String", "Normal", "Comment" })
+
+    -- Display function
+    local displayer = entry_display.create({
+        separator = " ",
+        items = {
+            { width = 2 },                  -- source icon
+            { width = 6 },                  -- score/info
+            { width = slug_max + 2 },       -- slug
+            { remaining = true },            -- context
+        },
+    })
+
+    local function make_display(entry)
+        local e = entry.value
+
+        -- Icon
+        local icon = SOURCE_ICONS[e.source] or " "
+        local icon_hl
+
+        -- Score / info column
+        local info = ""
+        local info_hl = "TelescopeResultsComment"
+
+        -- Slug
+        local display_slug = e.slug or ""
+        local slug_hl = "TelescopeResultsNormal"
+
+        -- Context (right column)
+        local context = ""
+        local context_hl = "TelescopeResultsComment"
+
+        if e.source == "suggestion" then
+            icon_hl = "TelescopeResultsDiffAdd"
+            local pct = math.floor((e.score or 0) * 100 + 0.5)
+            info = pct .. "%"
+            info_hl = pct >= 80 and "DiagnosticOk" or pct >= 50 and "DiagnosticWarn" or "DiagnosticError"
+            context = e.strategy or ""
+            slug_hl = "TelescopeResultsDiffAdd"
+        elseif e.source == "note" then
+            icon_hl = "TelescopeResultsIdentifier"
+            info = "note"
+            -- Apply gradient based on entry position
+            if colors then
+                local idx = math.max(1, math.min(steps, entry.index or 1))
+                slug_hl = hl_base .. tostring(idx)
+            else
+                slug_hl = "TelescopeResultsNormal"
+            end
+            local path = utils.slug_to_relpath(e.slug)
+            if path and path ~= e.slug then
+                context = path
+            end
+        elseif e.source == "wikilink" then
+            if e.resolved then
+                icon = "✓"
+                icon_hl = "TelescopeResultsDiffAdd"
+                slug_hl = "TelescopeResultsNormal"
+            else
+                icon = "○"
+                icon_hl = "TelescopeResultsDiffChange"
+                slug_hl = "TelescopeResultsComment"
+            end
+            local n = e.sources_n or 0
+            info = n .. "src"
+            context = e.resolved and "resolved" or "unresolved"
+        elseif e.action == "create" then
+            icon = "+"
+            icon_hl = "DiagnosticOk"
+            display_slug = "Create new note"
+            slug_hl = "DiagnosticOk"
+            context = e.slug or ""
+            context_hl = "TelescopeResultsNormal"
+        elseif e.action == "skip" then
+            icon = "→"
+            icon_hl = "TelescopeResultsComment"
+            display_slug = "Skip"
+            slug_hl = "TelescopeResultsComment"
+        end
+
+        return displayer({
+            { icon, icon_hl },
+            { info, info_hl },
+            { display_slug, slug_hl },
+            { context, context_hl },
+        })
+    end
+
+    local entry_maker = function(entry)
+        local filename = nil
+        if entry.action == "rewrite" and entry.slug then
+            local path = utils.slug_to_path(entry.slug)
+            if path and vim.fn.filereadable(path) == 1 then
+                filename = path
+            end
+        end
+
+        return {
+            value = entry,
+            ordinal = entry.ordinal,
+            display = make_display,
+            filename = filename,
+        }
+    end
 
     local finder = finders.new_table({
         results = entries,
-        entry_maker = function(entry)
-            return {
-                value = entry,
-                display = entry.display,
-                ordinal = entry.ordinal,
-            }
-        end,
+        entry_maker = entry_maker,
     })
 
-    -- Previewer: show note content for rewrite targets
+    -- Previewer: for notes show file content, for wikilinks show source summary
     local previewer = previewers.new_buffer_previewer({
-        title = "Target Preview",
+        title = "Target",
         define_preview = function(self, entry, _status)
             local e = entry.value
-            if not e or e.action ~= "rewrite" then
-                vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, {
-                    e and e.action == "create" and ("Will create: " .. (e.slug or "")) or "No preview",
-                })
+            local bufnr = self.state.bufnr
+
+            if not e or e.action == "skip" then
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "No preview" })
                 return
             end
+
+            if e.action == "create" then
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+                    "# [[" .. (e.slug or "") .. "]]",
+                    "",
+                    "Will create a new note with this slug.",
+                    "",
+                    "The wikilink will become resolved after creation.",
+                })
+                vim.api.nvim_set_option_value("filetype", "markdown", { buf = bufnr })
+                return
+            end
+
+            -- Try to show file content
             local path = utils.slug_to_path(e.slug)
             if path and vim.fn.filereadable(path) == 1 then
-                conf.buffer_previewer_maker(path, self.state.bufnr, {
+                conf.buffer_previewer_maker(path, bufnr, {
                     bufname = self.state.bufname,
                 })
             else
-                vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, {
-                    "No file found for: " .. (e.slug or ""),
-                })
+                -- No file — show what we know
+                local lines = {
+                    "# [[" .. (e.slug or "") .. "]]",
+                    "",
+                }
+                if e.source == "suggestion" then
+                    local pct = math.floor((e.score or 0) * 100 + 0.5)
+                    lines[#lines + 1] = string.format("Suggestion match: %d%% (%s)", pct, e.strategy or "")
+                    lines[#lines + 1] = ""
+                end
+                if e.source == "wikilink" then
+                    lines[#lines + 1] = e.resolved and "Resolved wikilink" or "Unresolved wikilink"
+                    lines[#lines + 1] = string.format("Referenced in %d source(s)", e.sources_n or 0)
+                    lines[#lines + 1] = ""
+                end
+                lines[#lines + 1] = "_No file found at expected path._"
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+                vim.api.nvim_set_option_value("filetype", "markdown", { buf = bufnr })
             end
         end,
     })
 
     local picker = pickers.new({}, {
         prompt_title = prefix .. "Resolve [[" .. slug .. "]]",
+        results_title = #entries .. " targets",
         finder = finder,
         sorter = conf.generic_sorter({}),
         previewer = previewer,
@@ -230,6 +386,17 @@ function M.open(opts)
             map("i", "<Esc>", cancel_close)
             map("n", "<Esc>", cancel_close)
             map("n", "q", cancel_close)
+
+            -- Cleanup gradient highlights on close
+            if colors then
+                pcall(vim.api.nvim_create_autocmd, "BufWipeout", {
+                    buffer = prompt_bufnr,
+                    once = true,
+                    callback = function()
+                        vault_hl.cleanup(hl_base, #colors)
+                    end,
+                })
+            end
 
             return true
         end,
