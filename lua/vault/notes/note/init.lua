@@ -4,6 +4,7 @@ local function scanner()
 end
 
 local utils = require("vault.utils")
+local log = require("vault.log").scope("note")
 --- @type vault.Config|vault.Config.options
 local config = require("vault.config")
 local data = require("vault.notes.note.data")
@@ -110,20 +111,20 @@ function Title:sync(path)
 
     local new_path = vim.fn.fnamemodify(path, ":h") .. "/" .. title .. ".md"
     if vim.fn.filereadable(new_path) == 1 then
-        vim.notify("[vault] File already exists: " .. new_path, vim.log.levels.ERROR)
+        log.error("File already exists: %s", new_path)
         return
     end
 
     local rename_success = vim.fn.rename(path, new_path)
     if rename_success == 0 then
-        vim.notify("[vault] Renamed: " .. path .. " -> " .. new_path, vim.log.levels.INFO)
+        log.info("Renamed: %s -> %s", path, new_path)
 
         local inlinks = note.inlinks(path)
         if #inlinks > 0 then
             note.update_inlinks(path)
         end
     else
-        vim.notify("[vault] Failed to rename: " .. path .. " -> " .. new_path, vim.log.levels.ERROR)
+        log.error("Failed to rename: %s -> %s", path, new_path)
         return
     end
 
@@ -396,7 +397,7 @@ function Note:write(path, force)
     if vim.fn.filereadable(path) == 1 then
         vim.fn.writefile(content_lines, path)
         if config.options.notify.on_write == true then
-            vim.notify("[vault] Note created: " .. path, vim.log.levels.INFO)
+            log.info("Note created: %s", path)
         end
         return
     end
@@ -411,7 +412,7 @@ function Note:write(path, force)
         for _, t in pairs(paths) do
             local stem = vim.fn.fnamemodify(t.path, ":t:r")
             if utils.match(stem, new_stem, "exact", false) == true then
-                vim.notify("[vault] A note with the same name already exists: " .. tostring(t.slug), vim.log.levels.WARN)
+                log.warn("A note with the same name already exists: %s", tostring(t.slug))
                 return
             end
         end
@@ -422,7 +423,7 @@ function Note:write(path, force)
 
     vim.fn.writefile(content_lines, path)
     if config.options.notify.on_write == true then
-        vim.notify("[vault] Note created: " .. path, vim.log.levels.INFO)
+        log.info("Note created: %s", path)
     end
 end
 
@@ -448,7 +449,7 @@ end
 function Note:edit(path)
     path = path or self.data.path
     if vim.fn.filereadable(path) == 0 then
-        vim.notify("[vault] File not found: " .. path, vim.log.levels.ERROR)
+        log.error("File not found: %s", path)
         return
     end
     vim.cmd("e " .. vim.fn.fnameescape(path))
@@ -460,7 +461,7 @@ function Note:preview()
     local previewer = config.options.previewer or "glow"
 
     if vim.fn.executable(previewer) == 0 and package.loaded["glow"] == nil then
-        vim.notify("[vault] Preview requires 'glow' — install with: brew install glow", vim.log.levels.WARN)
+        log.warn("Preview requires 'glow' — install with: brew install glow")
         return
     end
     vim.cmd("Glow " .. self.data.path)
@@ -554,7 +555,7 @@ function Note:update_inlinks(path)
         f:close()
         content = content:gsub(inlink.link, new_link)
         utils.safe_write(inlink.source.data.path, content)
-        vim.notify("[vault] " .. inlink.link .. " -> " .. new_link, vim.log.levels.INFO)
+        log.info("%s -> %s", inlink.link, new_link)
     end
 end
 
@@ -566,7 +567,7 @@ end
 function Note:open_in_obsidian(path)
     local root = config.options.root
     if not root then
-        vim.notify("[vault] Vault root is not configured — run require('vault').setup()", vim.log.levels.ERROR)
+        log.error("Vault root is not configured — run require('vault').setup()")
         return
     end
 
@@ -590,7 +591,7 @@ function Note:open_in_obsidian(path)
     end)
 
     if not success then
-        vim.notify("[vault] Failed to open Obsidian: " .. tostring(err):match("[^\n]+"), vim.log.levels.ERROR)
+        log.error("Failed to open Obsidian: %s", tostring(err):match("[^\n]+"))
     end
 end
 
@@ -823,7 +824,7 @@ function Note:move(new_path, force, verbose, opts)
                 utils.path_to_slug(old_path), self.data.slug, patched)
             or string.format("[vault] Moved note: %s -> %s (wikilink update skipped)",
                 utils.path_to_slug(old_path), self.data.slug)
-        vim.notify(msg, vim.log.levels.INFO)
+        log.info(msg)
     end
 
     return patched
@@ -876,10 +877,7 @@ function Note:delete(permanent, verbose)
 
     if verbose ~= false then
         local action = permanent and "Permanently deleted" or "Trashed"
-        vim.notify(
-            string.format("[vault] %s: %s", action, self.data.slug),
-            vim.log.levels.INFO
-        )
+        log.info("%s: %s", action, self.data.slug)
     end
 end
 
