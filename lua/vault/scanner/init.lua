@@ -1,4 +1,3 @@
-local Engine = require("vault.scanner.engine")
 local utils = require("vault.utils")
 local config = require("vault.config")
 local state = require("vault.core.state")
