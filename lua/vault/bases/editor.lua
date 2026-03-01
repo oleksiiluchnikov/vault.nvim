@@ -169,6 +169,42 @@ end
 
 local DEFAULT_COLUMNS = { "slug", "title", "status", "tags" }
 
+-- ─── Implicit file.* / note.* properties ─────────────────────────────────────
+
+--- Read-only file.* columns (file metadata that cannot be edited in-place).
+local READONLY_FILE_COLS = {
+  ["file.path"]     = true,
+  ["file.ext"]      = true,
+  ["file.ctime"]    = true,
+  ["file.mtime"]    = true,
+  ["file.size"]     = true,
+  ["file.inlinks"]  = true,
+  ["file.outlinks"] = true,
+  ["file.headings"] = true,
+}
+
+--- All known file.* implicit property names.
+local FILE_IMPLICIT_PROPS = {
+  "file.name", "file.folder", "file.path", "file.ext",
+  "file.ctime", "file.mtime", "file.size",
+  "file.body", "file.slug",
+  "file.inlinks", "file.outlinks", "file.headings",
+}
+
+--- Normalize column name: note.* → file.*, legacy aliases.
+--- Called on user-supplied column specs so internally we always use file.* form.
+---@param col string
+---@return string
+local function normalize_col(col)
+  -- note.* → file.* (interchangeable prefixes)
+  if col:match("^note%.") then
+    col = "file." .. col:sub(6)
+  end
+  -- Legacy aliases
+  if col == "dir" then return "file.folder" end
+  return col
+end
+
 -- ─── Base property key mapping ────────────────────────────────────────────────
 
 --- Map a base property key (e.g. "file.name") to the internal column name
@@ -178,10 +214,11 @@ local DEFAULT_COLUMNS = { "slug", "title", "status", "tags" }
 ---@return string col_name  Internal column name for build_records
 ---@return boolean is_formula
 local function base_key_to_col(key)
-  if key == "file.name" then return "title", false end
-  if key == "file.folder" then return "dir", false end
+  -- Normalize note.* → file.* first
+  key = normalize_col(key)
   if key:match("^formula%.") then return key, true end
-  -- Everything else maps directly (e.g. "status", "tags", "priority", etc.)
+  if READONLY_FILE_COLS[key] then return key, true end
+  -- Everything else maps directly (file.name, file.folder, file.body, slug, title, tags, etc.)
   return key, false
 end
 
@@ -625,6 +662,62 @@ local function build_records(notes_map, columns, base)
       for _, col in ipairs(columns) do
         if col == "slug" then
           fields.slug = slug
+
+        -- ── file.* / note.* implicit properties ──────────────
+        elseif col == "file.name" then
+          fields[col] = note.data and note.data.stem
+            or (slug:match("[^/]+$") or slug)
+        elseif col == "file.slug" then
+          fields[col] = slug
+        elseif col == "file.folder" then
+          local relpath = note.data and note.data.relpath or ""
+          local dir = relpath:match("^(.-/)[^/]*$") or ""
+          fields[col] = dir ~= "" and dir or "/"
+        elseif col == "file.path" then
+          fields[col] = note.data and note.data.relpath or ""
+        elseif col == "file.ext" then
+          fields[col] = "md"
+        elseif col == "file.ctime" then
+          local t = note.data and note.data.ctime
+          fields[col] = t and t > 0 and os.date("%Y-%m-%d %H:%M", t) or ""
+        elseif col == "file.mtime" then
+          local t = note.data and note.data.mtime
+          fields[col] = t and t > 0 and os.date("%Y-%m-%d %H:%M", t) or ""
+        elseif col == "file.size" then
+          fields[col] = path and vim.fn.getfsize(path) or 0
+        elseif col == "file.body" then
+          local body = note.data and note.data.body or ""
+          -- Flatten newlines to spaces for single-line table row
+          fields[col] = body:gsub("\r?\n", " "):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+        elseif col == "file.inlinks" then
+          local links = note.data and note.data.inlinks
+          if links then
+            local slugs = {}
+            for s, _ in pairs(links) do table.insert(slugs, s) end
+            table.sort(slugs)
+            fields[col] = table.concat(slugs, ", ")
+          else
+            fields[col] = ""
+          end
+        elseif col == "file.outlinks" then
+          local links = note.data and note.data.outlinks
+          if links then
+            local slugs = {}
+            for s, _ in pairs(links) do table.insert(slugs, s) end
+            table.sort(slugs)
+            fields[col] = table.concat(slugs, ", ")
+          else
+            fields[col] = ""
+          end
+        elseif col == "file.headings" then
+          local hdgs = note.data and note.data.headings
+          if hdgs and #hdgs > 0 then
+            fields[col] = hdgs[1].text or hdgs[1][2] or ""
+          else
+            fields[col] = ""
+          end
+
+        -- ── Legacy columns (kept for backward compat) ────────
         elseif col == "title" then
           local basename = slug:match("[^/]+$") or slug
           fields.title = fm.title or (note.data and note.data.stem) or basename
@@ -634,12 +727,14 @@ local function build_records(notes_map, columns, base)
           fields.dir = dir ~= "" and dir or "/"
         elseif col == "tags" then
           fields.tags = fm.tags or (note.data and note.data.frontmatter and note.data.frontmatter.tags) or nil
+
+        -- ── Formula columns ──────────────────────────────────
         elseif col:match("^formula%.") then
-          -- Formula column: use precomputed result
           local formula_name = col:match("^formula%.(.+)")
           fields[col] = formula_results[formula_name]
+
+        -- ── Generic frontmatter key ──────────────────────────
         else
-          -- Generic frontmatter key
           fields[col] = fm[col]
         end
       end
@@ -1314,8 +1409,8 @@ local function diff_buffer(bufnr, st, silent)
               })
               goto next_col
             end
-            -- Slug column → rename operation (only when slug is visible)
-            if col == "slug" then
+            -- Slug or file.slug column → rename operation
+            if col == "slug" or col == "file.slug" then
               local new_slug = vim.trim(new_text)
               if new_slug ~= "" and new_slug ~= slug then
                 table.insert(diff.renames, {
@@ -1324,6 +1419,26 @@ local function diff_buffer(bufnr, st, silent)
                   row = row,
                 })
               end
+              goto next_col
+            end
+            -- file.name → rename (change filename stem, keep dir)
+            if col == "file.name" then
+              local new_stem = vim.trim(new_text)
+              local old_stem = (slug:match("[^/]+$") or slug)
+              if new_stem ~= "" and new_stem ~= old_stem then
+                local dir_prefix = slug:match("^(.-/)[^/]*$") or ""
+                table.insert(diff.renames, {
+                  old_slug = slug,
+                  new_slug = dir_prefix .. new_stem,
+                  row = row,
+                })
+              end
+              goto next_col
+            end
+            -- file.folder → move to different directory
+            if col == "file.folder" then
+              changed_fields["dir"] = parse_value(new_text, "dir")
+              has_changes = true
               goto next_col
             end
             -- Truncated values cannot be reliably saved — warn but skip
@@ -1839,10 +1954,38 @@ local function apply_mutations(diff, st, on_done)
       end
     end
 
-    -- Phase 2: all other field writes (batched to minimize I/O)
+    -- Phase 2: file.body write (replace content after frontmatter)
+    if upd.fields["file.body"] ~= nil then
+      local new_body = upd.fields["file.body"] or ""
+      local ok_read, file_lines = pcall(vim.fn.readfile, path)
+      if ok_read and file_lines then
+        -- Find end of frontmatter
+        local fm_end = 0
+        if file_lines[1] and file_lines[1]:match("^%-%-%-") then
+          for i = 2, #file_lines do
+            if file_lines[i]:match("^%-%-%-") then
+              fm_end = i
+              break
+            end
+          end
+        end
+        -- Rebuild: frontmatter lines + new body
+        local new_lines = {}
+        for i = 1, fm_end do
+          table.insert(new_lines, file_lines[i])
+        end
+        -- The body was flattened (newlines → spaces), write it back as-is
+        -- (user edited a single-line representation)
+        table.insert(new_lines, new_body)
+        table.insert(new_lines, "")  -- trailing newline
+        atomic_writefile(path, new_lines)
+      end
+    end
+
+    -- Phase 3: all other field writes (batched to minimize I/O)
     local fm_fields = {}
     for col, new_val in pairs(upd.fields) do
-      if col ~= "dir" then  -- dir already handled above
+      if col ~= "dir" and col ~= "file.body" then
         fm_fields[col] = new_val
       end
     end
@@ -2340,6 +2483,16 @@ function M.open(opts)
     local cfg = require("vault.config")
     local cfg_cols = cfg.options and cfg.options.process and cfg.options.process.columns
     visible_columns = opts.columns or cfg_cols or DEFAULT_COLUMNS
+    -- Normalize all column names (note.* → file.*, dir → file.folder)
+    for i, c in ipairs(visible_columns) do
+      visible_columns[i] = normalize_col(c)
+    end
+    -- Detect read-only file.* columns
+    for _, c in ipairs(visible_columns) do
+      if READONLY_FILE_COLS[c] then
+        table.insert(formula_cols, c)
+      end
+    end
     -- Internal columns = visible + slug if not already present
     local has_slug = false
     for _, c in ipairs(visible_columns) do
