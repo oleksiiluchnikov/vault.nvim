@@ -64,8 +64,8 @@ function Dir:rename(name, verbose)
         paths_to_update[path] = lnums
     end
 
-    local old_name = "#" .. self.data.relpath
-    local new_name = "#" .. name
+    local old_name = self.data.relpath
+    local new_name = name
 
     local message = ""
     if verbose == true then

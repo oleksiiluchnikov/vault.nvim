@@ -336,9 +336,15 @@ function vault_actions.directory.enter(bufnr)
 end
 
 vault_actions.directory.rename = function(bufnr)
-    local _, _, selections = utils.get_picker_selection(bufnr)
-    -- batch_rename(bufnr, selections)
-    vim.notify("vault_actions.directory.rename is not implemented yet")
+    local _, selection, _ = utils.get_picker_selection(bufnr)
+    --- @type vault.Dir
+    local dir = selection.value
+    local new_name = vim.fn.input("Rename directory: ", dir.data.relpath)
+    if not new_name or new_name == "" or new_name == dir.data.relpath then
+        return
+    end
+    vault_actions.close(bufnr)
+    dir:rename(new_name)
 end
 
 --- @type table<string, fun(bufnr?: number, selections?: table<vault.TelescopeEntry>): nil>
