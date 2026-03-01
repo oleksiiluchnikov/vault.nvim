@@ -2,19 +2,26 @@
 -- Obsidian Bases-style editable buffer for vault note metadata.
 --
 -- Architecture:
---   1. Each data line is pure visible text: "title │ status │ #tags │ dir/"
---   2. Slug identity is stored as extmark metadata (not in buffer text).
+--   1. Each data line always starts with the slug cell, even when "hidden".
+--      When slug_hidden=true the slug prefix is fully concealed (invisible to user).
+--   2. Slug identity comes from slug cell text in the buffer (PRIMARY path).
+--      Extmarks are used only for header virt_lines and diff/validation signs.
 --   3. buftype=acwrite so :w fires BufWriteCmd instead of touching disk.
 --   4. On BufWriteCmd: diff buffer lines against snapshot → mutations.
 --   5. Mutations rewrite YAML frontmatter, move/rename, delete, or create.
 --   6. After mutations complete, re-scan and re-render.
 --
--- Extmark design:
---   NS namespace — one extmark per data line at col 0, right_gravity=true.
---   State maps extmark_id → slug and slug → extmark_id.
---   Lines without a slug extmark → new note (CREATE).
---   Slugs in snapshot whose extmark is gone → note trashed (DELETE).
---   Header/separator rendered as virt_lines above row 0 (immutable).
+-- Hidden slug design:
+--   When user omits slug from their column spec, st.slug_hidden = true.
+--   Buffer line format: "<slug>\x1f<vis_cell_1> \x1f <vis_cell_2> ..."
+--   The slug prefix is concealed with conceal="" extmarks (NS_CONCEAL namespace).
+--   CursorMoved snaps cursor past the concealed prefix so users never land there.
+--   reconcile_extmarks PRIMARY path reads cells[1] as slug — always reliable.
+--
+-- Extmark design (display-only):
+--   NS namespace — one extmark per data line at col 0 for header virt_lines.
+--   NS_DIFF — diff signs (changes, adds, deletes).
+--   NS_CONCEAL — conceal \x1f separators as │, and hidden slug prefix.
 
 local M = {}
 
@@ -47,22 +54,25 @@ local NS_CONCEAL   = vim.api.nvim_create_namespace("vault_bases_conceal")
 -- ─── Per-buffer state ─────────────────────────────────────────────────────────
 
 ---@class vault.OilEditState
----@field bufnr         integer
----@field winid         integer
----@field columns       string[]         ordered column names
----@field col_widths    integer[]        display width per column
----@field snapshot      table<string, table<string, string>>  slug → {col → value}
----@field note_paths    table<string, string>  slug → absolute path
----@field mark_to_slug  table<integer, string>  extmark_id → slug
----@field slug_to_mark  table<string, integer>  slug → extmark_id
----@field note_mtimes   table<string, integer>  slug → mtime at snapshot time
----@field filter_desc   string           human description of the filter used
----@field saving        boolean
----@field base?         vault.Base       the Base object (if opened via base)
----@field display_names table<string, string>  col → header display name
----@field formula_cols  string[]         formula column names (read-only)
----@field sort_by?      { col: string, dir: "asc"|"desc" }  primary sort (legacy, for single-col API)
----@field sort_keys?    { col: string, dir: "asc"|"desc" }[]  multi-column sort (ordered by priority)
+---@field bufnr              integer
+---@field winid              integer
+---@field columns            string[]         ALL column names (always includes "slug" first)
+---@field col_widths         integer[]        display width per column (all columns)
+---@field visible_columns    string[]         columns the user requested (may omit "slug")
+---@field visible_col_widths integer[]        display width for visible columns only
+---@field slug_hidden        boolean          true when slug not in user's column spec
+---@field snapshot           table<string, table<string, string>>  slug → {col → value}
+---@field note_paths         table<string, string>  slug → absolute path
+---@field mark_to_slug       table<integer, string>  extmark_id → slug  (display-only, not for identity)
+---@field slug_to_mark       table<string, integer>  slug → extmark_id
+---@field note_mtimes        table<string, integer>  slug → mtime at snapshot time
+---@field filter_desc        string           human description of the filter used
+---@field saving             boolean
+---@field base?              vault.Base       the Base object (if opened via base)
+---@field display_names      table<string, string>  col → header display name
+---@field formula_cols       string[]         formula column names (read-only)
+---@field sort_by?           { col: string, dir: "asc"|"desc" }  primary sort (legacy)
+---@field sort_keys?         { col: string, dir: "asc"|"desc" }[]  multi-column sort
 
 local buf_states = {}  -- [bufnr] = vault.OilEditState
 
@@ -359,6 +369,36 @@ local function get_line_slug(bufnr, row, st)
   return nil
 end
 
+--- Get slug from buffer text (reliable — doesn't depend on extmarks).
+--- When slug_hidden, slug is the concealed first cell. When visible, slug is
+--- at its vis_cols position. Falls back to extmark if text-based fails.
+---@param bufnr integer
+---@param row integer  0-indexed
+---@param st vault.OilEditState
+---@return string|nil slug
+local function get_row_slug(bufnr, row, st)
+  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
+  if not line or vim.trim(line) == "" then return nil end
+  local cells = split_cells(line)
+  if st.slug_hidden then
+    -- Slug is always cells[1] when hidden (concealed prefix)
+    local s = vim.trim(cells[1] or "")
+    if s ~= "" and st.snapshot[s] then return s end
+  else
+    -- Find slug column in visible columns
+    local vis_cols = st.visible_columns or st.columns
+    for i, col in ipairs(vis_cols) do
+      if col == "slug" then
+        local s = vim.trim(cells[i] or "")
+        if s ~= "" and st.snapshot[s] then return s end
+        break
+      end
+    end
+  end
+  -- Fallback to extmark
+  return get_line_slug(bufnr, row, st)
+end
+
 --- Place a slug identity extmark on a data row.
 ---@param bufnr integer
 ---@param row integer  0-indexed
@@ -385,60 +425,57 @@ end
 -- the title cell against the snapshot. If drift is detected, reconcile by
 -- matching line content (title) to find the true slug for each row.
 
---- Build a reconciled slug-per-row map that corrects for extmark drift.
---- Returns a table { [row] = slug } where each slug is verified or
---- content-matched, plus metadata about the reconciliation.
+--- Build a reconciled slug-per-row map.
+--- Slug is ALWAYS present in buffer text as cells[1] (when slug_hidden, it's
+--- the concealed prefix; when visible, it's the user-visible first column or
+--- wherever slug appears in vis_cols).  This PRIMARY path reads slug from
+--- buffer text — no extmark dependency.
 ---@param bufnr integer
 ---@param st vault.OilEditState
 ---@param lines string[]  buffer lines (already read)
 ---@return table<integer, string|nil>  row → slug (nil = genuinely new line)
----@return integer drift_count  number of rows where extmark was wrong
+---@return integer drift_count  number of rows where slug text didn't match extmark
 ---@return integer reconciled_count  number of drifted rows successfully fixed
 local function reconcile_extmarks(bufnr, st, lines)
-  -- Find the slug/title column index in the VISIBLE columns (what's in the buffer)
   local vis_cols = st.visible_columns or st.columns
   local vis_widths = st.visible_col_widths or st.col_widths
-  local slug_col_idx = nil
-  local title_col_idx = nil
-  for i, col in ipairs(vis_cols) do
-    if col == "slug" then slug_col_idx = i end
-    if col == "title" then title_col_idx = i end
+
+  -- When slug_hidden, the raw slug is always cells[1] (the concealed prefix).
+  -- When slug is visible, find its index in vis_cols.
+  local slug_col_idx
+  if st.slug_hidden then
+    slug_col_idx = 1  -- concealed prefix = first cell after split on \x1f
+  else
+    for i, col in ipairs(vis_cols) do
+      if col == "slug" then slug_col_idx = i; break end
+    end
   end
 
-  -- Build reverse lookup: slug text → snapshot slug (for direct matching)
-  -- Since slug column shows the actual slug, this is the primary identity source.
-  local snapshot_slugs = {}  -- slug_text → true
+  -- Build reverse lookup: slug text → true (for fast membership check)
+  local snapshot_slugs = {}
   for slug, _ in pairs(st.snapshot) do
     snapshot_slugs[slug] = true
   end
 
-  -- Build title reverse lookup as fallback
+  -- Title index in visible columns (for fallback when slug column text is new/empty)
+  local title_col_idx = nil
+  -- Cell offset: when slug_hidden, cells[1]=slug, cells[2..]=vis_cols[1..]
+  local cell_offset = st.slug_hidden and 1 or 0
+  for i, col in ipairs(vis_cols) do
+    if col == "title" then title_col_idx = i + cell_offset; break end
+  end
+
+  -- Build title reverse lookup as last-resort fallback
   local title_to_slugs = {}
   if title_col_idx then
     for slug, snap in pairs(st.snapshot) do
-      local title_rendered = vim.trim(pad(fmt_value(snap.title), vis_widths[title_col_idx]))
+      local ti = title_col_idx - cell_offset  -- vis_cols index for title
+      local title_rendered = vim.trim(pad(fmt_value(snap.title), vis_widths[ti]))
       if not title_to_slugs[title_rendered] then
         title_to_slugs[title_rendered] = {}
       end
       table.insert(title_to_slugs[title_rendered], slug)
     end
-  end
-
-  -- Build full-row fingerprint lookup for disambiguation when slug/title collide.
-  -- Fingerprint = concatenation of all non-slug visible cell values from snapshot.
-  local fingerprint_to_slug = {}
-  for slug, snap in pairs(st.snapshot) do
-    local parts = {}
-    for i, col in ipairs(vis_cols) do
-      if col ~= "slug" then
-        table.insert(parts, vim.trim(pad(fmt_value(snap[col], col), vis_widths[i])))
-      end
-    end
-    local fp = table.concat(parts, "|")
-    if not fingerprint_to_slug[fp] then
-      fingerprint_to_slug[fp] = {}
-    end
-    table.insert(fingerprint_to_slug[fp], slug)
   end
 
   local row_to_slug = {}
@@ -451,14 +488,14 @@ local function reconcile_extmarks(bufnr, st, lines)
     local line = lines[row + 1]
     if vim.trim(line) == "" then goto continue end
 
-    local extmark_slug = get_line_slug(bufnr, row, st)
     local cells = split_cells(line)
+    local extmark_slug = get_line_slug(bufnr, row, st)
 
-    -- PRIMARY: use slug column text as identity (most reliable)
+    -- PRIMARY: slug column text (always present — either visible or concealed prefix)
     if slug_col_idx then
       local cell_slug = vim.trim(cells[slug_col_idx] or "")
       if cell_slug ~= "" and snapshot_slugs[cell_slug] and not claimed_slugs[cell_slug] then
-        -- Slug column text matches a known note — use it directly
+        -- Slug text matches a known note — use it directly
         if extmark_slug and extmark_slug ~= cell_slug then
           drift_count = drift_count + 1
           reconciled_count = reconciled_count + 1
@@ -467,95 +504,34 @@ local function reconcile_extmarks(bufnr, st, lines)
         claimed_slugs[cell_slug] = true
         goto continue
       end
-      -- Slug was edited (rename) — fall back to extmark
+      -- Slug was edited (rename) or is new text — fall back to extmark
       if extmark_slug and st.snapshot[extmark_slug] and not claimed_slugs[extmark_slug] then
         row_to_slug[row] = extmark_slug
         claimed_slugs[extmark_slug] = true
         goto continue
       end
-      -- Neither slug column nor extmark matched — try title fallback
     end
 
-    -- FALLBACK: extmark + title verification (for buffers without slug column, or edge cases)
+    -- FALLBACK: title-based matching (for edge cases, e.g. yyp lines)
     if extmark_slug and st.snapshot[extmark_slug] and not claimed_slugs[extmark_slug] then
-      if title_col_idx then
-        local expected_title = vim.trim(pad(
-          fmt_value(st.snapshot[extmark_slug].title),
-          vis_widths[title_col_idx]
-        ))
-        local actual_title = cells[title_col_idx] or ""
-        if expected_title == actual_title then
-          row_to_slug[row] = extmark_slug
-          claimed_slugs[extmark_slug] = true
-        else
-          drift_count = drift_count + 1
-          local candidates = title_to_slugs[actual_title]
-          if candidates then
-            local matched = false
-            for _, cand_slug in ipairs(candidates) do
-              if not claimed_slugs[cand_slug] then
-                row_to_slug[row] = cand_slug
-                claimed_slugs[cand_slug] = true
-                reconciled_count = reconciled_count + 1
-                matched = true
-                break
-              end
-            end
-            if not matched then
-              row_to_slug[row] = extmark_slug
-              claimed_slugs[extmark_slug] = true
-            end
-          else
-            row_to_slug[row] = extmark_slug
-            claimed_slugs[extmark_slug] = true
+      row_to_slug[row] = extmark_slug
+      claimed_slugs[extmark_slug] = true
+    elseif title_col_idx then
+      local actual_title = vim.trim(cells[title_col_idx] or "")
+      local candidates = title_to_slugs[actual_title]
+      if candidates then
+        for _, cand_slug in ipairs(candidates) do
+          if not claimed_slugs[cand_slug] then
+            row_to_slug[row] = cand_slug
+            claimed_slugs[cand_slug] = true
+            reconciled_count = reconciled_count + 1
+            drift_count = drift_count + 1
+            break
           end
         end
-      else
-        row_to_slug[row] = extmark_slug
-        claimed_slugs[extmark_slug] = true
-      end
-    elseif extmark_slug then
-      row_to_slug[row] = nil
-    else
-      -- No extmark at all. Try content-based recovery.
-      if title_col_idx then
-        local actual_title = cells[title_col_idx] or ""
-        local candidates = title_to_slugs[actual_title]
-        if candidates then
-          for _, cand_slug in ipairs(candidates) do
-            if not claimed_slugs[cand_slug] then
-              row_to_slug[row] = cand_slug
-              claimed_slugs[cand_slug] = true
-              reconciled_count = reconciled_count + 1
-              drift_count = drift_count + 1  -- extmark was missing entirely
-              break
-            end
-          end
-        end
-        -- If no candidate found, try full-row fingerprint disambiguation
-      if not row_to_slug[row] then
-        local parts = {}
-        for ci, col in ipairs(vis_cols) do
-          if col ~= "slug" then
-            table.insert(parts, vim.trim(cells[ci] or ""))
-          end
-        end
-        local fp = table.concat(parts, "|")
-        local fp_candidates = fingerprint_to_slug[fp]
-        if fp_candidates then
-          for _, cand_slug in ipairs(fp_candidates) do
-            if not claimed_slugs[cand_slug] then
-              row_to_slug[row] = cand_slug
-              claimed_slugs[cand_slug] = true
-              reconciled_count = reconciled_count + 1
-              drift_count = drift_count + 1
-              break
-            end
-          end
-        end
-      end
       end
     end
+    -- If still unidentified, row_to_slug[row] stays nil → CREATE
 
     ::continue::
   end
@@ -796,14 +772,19 @@ end
 ---@param rec table
 ---@param columns string[]  visible columns only
 ---@param widths integer[]  widths matching visible columns
+---@param slug_hidden? boolean  when true, prepend raw slug + SEP_CHAR before visible cells
 ---@return string
-local function render_record_line(rec, columns, widths)
+local function render_record_line(rec, columns, widths, slug_hidden)
+  -- When slug is hidden, prepend the raw slug as the first (concealed) cell.
+  -- No padding — it will be fully concealed. Separator is bare SEP_CHAR (no spaces)
+  -- so the first visible cell starts immediately after.
+  local prefix = slug_hidden and (rec.slug .. SEP_CHAR) or ""
   local cells = {}
   for i, col in ipairs(columns) do
     local cell = fmt_value(rec.fields[col], col)
     table.insert(cells, pad(cell, widths[i]))
   end
-  return table.concat(cells, SEP)
+  return prefix .. table.concat(cells, SEP)
 end
 
 --- Build the header virt_lines chunks for display above row 0.
@@ -946,7 +927,7 @@ local function build_data_lines(st, records)
   local vis_widths = st.visible_col_widths or st.col_widths
   local lines = {}
   for _, rec in ipairs(records) do
-    table.insert(lines, render_record_line(rec, vis_cols, vis_widths))
+    table.insert(lines, render_record_line(rec, vis_cols, vis_widths, st.slug_hidden))
   end
   return lines
 end
@@ -996,29 +977,56 @@ end
 
 -- ─── Conceal separators ───────────────────────────────────────────────────────
 
---- Apply conceal extmarks on every \x1f byte so it displays as │.
+--- Conceal the hidden slug prefix on a single line.
+--- When slug_hidden=true, each line starts with "<slug>\x1f" which must be
+--- fully concealed (empty replacement text).  The first \x1f is the slug/visible
+--- separator — conceal it as "" (invisible).  Subsequent \x1f are visible
+--- column separators and get the normal "│" conceal.
 ---@param bufnr integer
-local function apply_conceal(bufnr)
-  vim.api.nvim_buf_clear_namespace(bufnr, NS_CONCEAL, 0, -1)
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  for row, line in ipairs(lines) do
-    local start = 1
-    while true do
-      local pos = line:find(SEP_CHAR, start, true)
-      if not pos then break end
-      pcall(vim.api.nvim_buf_set_extmark, bufnr, NS_CONCEAL, row - 1, pos - 1, {
+---@param row integer  0-indexed
+---@param line string
+---@param slug_hidden boolean
+local function conceal_line(bufnr, row, line, slug_hidden)
+  local start = 1
+  local first_sep = true  -- track whether we're at the slug/visible separator
+  while true do
+    local pos = line:find(SEP_CHAR, start, true)
+    if not pos then break end
+    if slug_hidden and first_sep then
+      -- Conceal the entire slug prefix: bytes 0 through pos (inclusive of \x1f)
+      -- This makes the slug text + separator completely invisible.
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, NS_CONCEAL, row, 0, {
+        end_col = pos,  -- covers slug text + \x1f byte
+        conceal = "",   -- empty = fully hidden
+      })
+      first_sep = false
+    else
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, NS_CONCEAL, row, pos - 1, {
         end_col = pos,  -- single byte
         conceal = "│",
       })
-      start = pos + 1
     end
+    start = pos + 1
+  end
+end
+
+--- Apply conceal extmarks on every \x1f byte so it displays as │.
+--- When slug_hidden, also conceal the slug prefix on each line.
+---@param bufnr integer
+---@param slug_hidden? boolean
+local function apply_conceal(bufnr, slug_hidden)
+  vim.api.nvim_buf_clear_namespace(bufnr, NS_CONCEAL, 0, -1)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  for row, line in ipairs(lines) do
+    conceal_line(bufnr, row - 1, line, slug_hidden or false)
   end
 end
 
 --- Incrementally apply conceal on a single line (for TextChanged).
 ---@param bufnr integer
 ---@param row integer  0-indexed
-local function apply_conceal_line(bufnr, row)
+---@param slug_hidden? boolean
+local function apply_conceal_line(bufnr, row, slug_hidden)
   -- Clear conceal extmarks on this row only
   local existing = vim.api.nvim_buf_get_extmarks(bufnr, NS_CONCEAL, {row, 0}, {row, -1}, {})
   for _, mark in ipairs(existing) do
@@ -1026,16 +1034,7 @@ local function apply_conceal_line(bufnr, row)
   end
   local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
   if not line then return end
-  local start = 1
-  while true do
-    local pos = line:find(SEP_CHAR, start, true)
-    if not pos then break end
-    pcall(vim.api.nvim_buf_set_extmark, bufnr, NS_CONCEAL, row, pos - 1, {
-      end_col = pos,
-      conceal = "│",
-    })
-    start = pos + 1
-  end
+  conceal_line(bufnr, row, line, slug_hidden or false)
 end
 
 -- ─── Formula cell highlighting ────────────────────────────────────────────────
@@ -1055,26 +1054,35 @@ local function highlight_formula_cells(bufnr, st)
   -- Compute byte offsets for each formula column (visible columns only)
   local vis_cols = st.visible_columns or st.columns
   local vis_widths = st.visible_col_widths or st.col_widths
-  local formula_ranges = {}  -- list of { col_idx, byte_start, byte_end }
+  -- Relative offsets within the visible region (after slug prefix if hidden)
+  local formula_rel_ranges = {}  -- list of { col_idx, rel_start, rel_end }
   for i, col in ipairs(vis_cols) do
     if formula_set[col] then
-      local byte_start = 0
+      local rel_start = 0
       for j = 1, i - 1 do
-        byte_start = byte_start + vis_widths[j] + #SEP
+        rel_start = rel_start + vis_widths[j] + #SEP
       end
-      local byte_end = byte_start + vis_widths[i]
-      table.insert(formula_ranges, { idx = i, start = byte_start, finish = byte_end })
+      local rel_end = rel_start + vis_widths[i]
+      table.insert(formula_rel_ranges, { idx = i, rel_start = rel_start, rel_end = rel_end })
     end
   end
 
-  if #formula_ranges == 0 then return end
+  if #formula_rel_ranges == 0 then return end
 
   local line_count = vim.api.nvim_buf_line_count(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   for row = 0, line_count - 1 do
-    for _, range in ipairs(formula_ranges) do
-      pcall(vim.api.nvim_buf_set_extmark, bufnr, NS_FORMULA, row, range.start, {
+    -- When slug_hidden, compute the slug prefix byte length for this line
+    local prefix_len = 0
+    if st.slug_hidden then
+      local line = lines[row + 1] or ""
+      local first_sep = line:find(SEP_CHAR, 1, true)
+      if first_sep then prefix_len = first_sep end  -- includes the \x1f byte
+    end
+    for _, range in ipairs(formula_rel_ranges) do
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, NS_FORMULA, row, prefix_len + range.rel_start, {
         end_row = row,
-        end_col = range.finish,
+        end_col = prefix_len + range.rel_end,
         hl_group = "VaultProcessFormulaCell",
       })
     end
@@ -1111,12 +1119,19 @@ local function update_validation(bufnr, st)
     if not orig then goto continue end
 
     local cells = split_cells(line)
+    local co = st.slug_hidden and 1 or 0
+    -- When slug_hidden, byte_offset starts after the concealed slug prefix
     local byte_offset = 0
+    if st.slug_hidden then
+      -- Skip slug cell bytes + SEP_CHAR byte
+      local slug_cell = cells[1] or ""
+      byte_offset = #slug_cell + #SEP_CHAR
+    end
     local vis_cols = st.visible_columns or st.columns
     local vis_widths = st.visible_col_widths or st.col_widths
 
     for i, col in ipairs(vis_cols) do
-      local cell_text = cells[i] or ""
+      local cell_text = cells[i + co] or ""
       local old_rendered = vim.trim(pad(fmt_value(orig[col], col), vis_widths[i]))
       local sep_len = (i > 1) and #SEP or 0
       local col_start = byte_offset + sep_len
@@ -1186,9 +1201,10 @@ local function update_diff_signs(bufnr, st)
         local changed = false
         local vis_cols_d = st.visible_columns or st.columns
         local vis_widths_d = st.visible_col_widths or st.col_widths
+        local co = st.slug_hidden and 1 or 0
         for i, col in ipairs(vis_cols_d) do
           local old_rendered = vim.trim(pad(fmt_value(orig[col], col), vis_widths_d[i]))
-          if old_rendered ~= (cells[i] or "") then changed = true; break end
+          if old_rendered ~= (cells[i + co] or "") then changed = true; break end
         end
         if changed then
           vim.api.nvim_buf_set_extmark(bufnr, NS_DIFF, row, 0, {
@@ -1261,6 +1277,9 @@ local function diff_buffer(bufnr, st, silent)
     local slug = row_to_slug[row]  -- use reconciled slug, not raw extmark
     local cells = split_cells(line)
 
+    -- Cell offset: when slug_hidden, cells[1]=slug prefix, cells[2..]=vis_cols
+    local co = st.slug_hidden and 1 or 0
+
     if slug then
       identified_lines = identified_lines + 1
       seen[slug] = true
@@ -1278,7 +1297,7 @@ local function diff_buffer(bufnr, st, silent)
         local vis_widths = st.visible_col_widths or st.col_widths
         for i, col in ipairs(vis_cols) do
           local old_rendered = vim.trim(pad(fmt_value(orig[col], col), vis_widths[i]))
-          local new_text = cells[i] or ""
+          local new_text = cells[i + co] or ""
           if old_rendered ~= new_text then
             -- Formula columns are read-only — warn but skip
             if formula_set[col] then
@@ -1328,7 +1347,7 @@ local function diff_buffer(bufnr, st, silent)
       local vis_cols = st.visible_columns or st.columns
       for i, col in ipairs(vis_cols) do
         if formula_set[col] then goto next_create_col end  -- skip formula columns
-        local text = cells[i] or ""
+        local text = cells[i + co] or ""
         if text ~= "" and text ~= EMPTY_CELL then
           fields[col] = parse_value(text, col)
           has_content = true
@@ -2005,8 +2024,13 @@ local function on_save(bufnr)
       -- Place warning highlights on ignored cells
       local line = vim.api.nvim_buf_get_lines(bufnr, err.row, err.row + 1, false)[1] or ""
       local col_byte = 0
+      -- When slug_hidden, skip past the concealed slug prefix first
+      if st.slug_hidden then
+        local first_sep = line:find(SEP_CHAR, 1, true)
+        if first_sep then col_byte = first_sep end  -- start after slug\x1f
+      end
       local sep_count = 0
-      for byte_pos = 1, #line do
+      for byte_pos = col_byte + 1, #line do
         if line:sub(byte_pos, byte_pos + #SEP - 1) == SEP then
           sep_count = sep_count + 1
           if sep_count == err.col_idx - 1 then
@@ -2372,12 +2396,19 @@ function M.open(opts)
   local visible_col_widths = calc_col_widths(visible_columns, records)
 
   -- Build state
+  -- Determine if slug is hidden (not in user's visible column spec)
+  local slug_hidden = true
+  for _, c in ipairs(visible_columns) do
+    if c == "slug" then slug_hidden = false; break end
+  end
+
   local st = {
     bufnr              = bufnr,
     columns            = columns,            -- ALL columns (always includes slug)
     col_widths         = col_widths,          -- widths for all internal columns
     visible_columns    = visible_columns,     -- columns rendered in the buffer
     visible_col_widths = visible_col_widths,  -- widths for visible columns
+    slug_hidden        = slug_hidden,         -- true when slug not in user's column spec
     snapshot           = build_snapshot(records, columns),
     note_paths         = {},
     note_mtimes        = {},
@@ -2418,8 +2449,8 @@ function M.open(opts)
   -- Apply extmarks: separator virt_line + slug identity on each data line
   apply_extmarks(bufnr, st, records)
 
-  -- Conceal \x1f separators as │
-  apply_conceal(bufnr)
+  -- Conceal \x1f separators as │ (and conceal hidden slug prefix when slug_hidden)
+  apply_conceal(bufnr, st.slug_hidden)
 
   -- Highlight formula cells as read-only
   highlight_formula_cells(bufnr, st)
@@ -2458,11 +2489,11 @@ function M.open(opts)
           local line_count = vim.api.nvim_buf_line_count(bufnr)
           if line_count ~= (s._last_line_count or line_count) then
             -- Line count changed (insert/delete/paste) — refresh all conceal
-            apply_conceal(bufnr)
+            apply_conceal(bufnr, s.slug_hidden)
           else
             -- In-place edit — refresh conceal on current line only
             local cursor_row = vim.api.nvim_win_get_cursor(0)[1] - 1
-            apply_conceal_line(bufnr, cursor_row)
+            apply_conceal_line(bufnr, cursor_row, s.slug_hidden)
           end
           s._last_line_count = line_count
           update_diff_signs(bufnr, s)
@@ -2488,15 +2519,30 @@ function M.open(opts)
     end,
   })
 
-  -- Cursor skip: prevent cursor from landing on \x1f byte
+  -- Cursor skip: prevent cursor from landing on \x1f byte or in concealed slug prefix
   -- Track previous cursor position for direction detection
   local prev_cursor = { 1, 0 }
   vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
     buffer = bufnr,
     callback = function()
       local ok, err = pcall(function()
+        local s = buf_states[bufnr]
+        if not s then return end
         local row, col = unpack(vim.api.nvim_win_get_cursor(0))
         local line = vim.api.nvim_get_current_line()
+
+        -- When slug is hidden, snap cursor past the concealed slug prefix.
+        -- The prefix is everything before (and including) the first \x1f.
+        if s.slug_hidden then
+          local first_sep = line:find(SEP_CHAR, 1, true)
+          if first_sep and col < first_sep then
+            -- Cursor is inside the hidden slug prefix — snap to first visible column
+            vim.api.nvim_win_set_cursor(0, { row, first_sep })
+            prev_cursor = { row, first_sep }
+            return
+          end
+        end
+
         if col < #line and line:byte(col + 1) == 0x1f then
           -- Determine movement direction to skip the right way
           local prev_row, prev_col = prev_cursor[1], prev_cursor[2]
@@ -2571,8 +2617,8 @@ function M.open(opts)
       vim.notify("[vault] No next line to merge with", vim.log.levels.WARN)
       return
     end
-    local slug_a = get_line_slug(bufnr, row, st)
-    local slug_b = get_line_slug(bufnr, row + 1, st)
+    local slug_a = get_row_slug(bufnr, row, st)
+    local slug_b = get_row_slug(bufnr, row + 1, st)
     if not slug_a or not slug_b then
       vim.notify("[vault] Cannot determine note identity for merge", vim.log.levels.WARN)
       return
@@ -2595,7 +2641,7 @@ function M.open(opts)
     local st = buf_states[bufnr]
     if not st then return end
     local row = vim.api.nvim_win_get_cursor(0)[1] - 1  -- 0-indexed
-    local slug_a = get_line_slug(bufnr, row, st)
+    local slug_a = get_row_slug(bufnr, row, st)
     if not slug_a then
       vim.notify("[vault] Cannot determine note identity on current line", vim.log.levels.WARN)
       return
@@ -2792,7 +2838,7 @@ function M.reload(bufnr)
   set_buffer_lines(bufnr, lines)
   vim.bo[bufnr].modifiable = true
   apply_extmarks(bufnr, st, records)
-  apply_conceal(bufnr)
+  apply_conceal(bufnr, st.slug_hidden)
   highlight_formula_cells(bufnr, st)
   vim.api.nvim_buf_clear_namespace(bufnr, NS_DIFF, 0, -1)
   vim.api.nvim_buf_clear_namespace(bufnr, NS_VALID, 0, -1)
@@ -3105,5 +3151,6 @@ end
 M._buf_states = buf_states
 M._diff_buffer = diff_buffer
 M._undo_snapshots = undo_snapshots
+M._buf_states = buf_states  -- expose for testing
 
 return M
