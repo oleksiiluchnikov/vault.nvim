@@ -84,12 +84,22 @@ local function confirm_popup(message, on_yes, on_no)
     local bufnr = popup.bufnr
 
     -- Display the message and buttons
-    local lines = {
-        message,
-        "",
-        "  [y]es    [n]o",
-    }
+    -- Split message by newlines
+    local msg_lines = {}
+    for line in (message .. "\n"):gmatch("([^\n]*)\n") do
+        msg_lines[#msg_lines + 1] = line
+    end
+    
+    local lines = {}
+    for _, line in ipairs(msg_lines) do
+        lines[#lines + 1] = line
+    end
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "  [y]es    [n]o"
+    
+    vim.bo[bufnr].modifiable = true
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    vim.bo[bufnr].modifiable = false
 
     -- Keymaps
     local close = function()
