@@ -31,7 +31,7 @@ end
 
 function TaskDocumentation:open()
     if self.exists then
-        vim.cmd("edit " .. self.path)
+        vim.cmd("edit " .. vim.fn.fnameescape(self.path))
     else
         self:write(self.path)
     end
