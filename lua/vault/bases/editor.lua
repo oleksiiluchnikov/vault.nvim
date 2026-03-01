@@ -1384,7 +1384,7 @@ local function diff_buffer(bufnr, st, silent)
   if drift_count > 0 and not silent then
     vim.notify(
       string.format(
-        "[vault] Extmark drift detected on %d row%s (%d reconciled via title matching)",
+        "[vault] %d row%s lost identity tracking — %d recovered. If data looks wrong, reopen with :Vault process",
         drift_count, drift_count == 1 and "" or "s", reconciled_count
       ),
       drift_count > reconciled_count and vim.log.levels.WARN or vim.log.levels.INFO
@@ -1515,8 +1515,8 @@ local function diff_buffer(bufnr, st, silent)
   if snapshot_size > 0 and non_empty_lines > 0 and identified_lines == 0 then
     -- TOTAL identity loss even after reconciliation. Refuse ALL operations.
     vim.notify(
-      "[vault] SAFETY: All line identity lost (even after title reconciliation) — refusing to save. "
-        .. "Please close this buffer and reopen with :Vault process",
+      "[vault] Something went wrong with this buffer — refusing to save. "
+        .. "Please close and reopen with :Vault process",
       vim.log.levels.ERROR
     )
     return { updates = {}, deletes = {}, creates = {}, _integrity_error = true }
@@ -1526,8 +1526,8 @@ local function diff_buffer(bufnr, st, silent)
     -- PARTIAL identity loss: many lines unidentifiable. Refuse deletes.
     vim.notify(
       string.format(
-        "[vault] SAFETY: Only %d/%d lines identified (after reconciliation) — "
-          .. "skipping delete detection (updates still applied)",
+        "[vault] Only %d of %d rows could be matched to notes — "
+          .. "deletes skipped for safety (updates still applied)",
         identified_lines, non_empty_lines
       ),
       vim.log.levels.WARN
