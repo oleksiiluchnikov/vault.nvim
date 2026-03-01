@@ -282,129 +282,138 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silen
         prompt = true
     end
 
-    if prompt and total > 0 then
-        -- Ask the user to confirm before applying changes
-        local ok = vim.fn.confirm(
-            string.format(
-                "[vault] Rename %s → %s will patch %d files. Apply?",
-                old_slug,
-                new_slug,
-                total
-            ),
-            "&Yes\n&No",
-            2
-        )
-        if ok ~= 1 then
-            return 0
-        end
-    end
-
-    -- Apply pending changes — suppress watcher during writes to avoid self-triggered events
-    self._writing = true
-    local updated = 0
-    local updated_paths = {}
-    for path, info in pairs(pending) do
-        local ok_sw, sw_err = pcall(utils.safe_write, path, info.new_content)
-        if ok_sw then
-            updated = updated + 1
-            updated_paths[path] = true
-        else
-            vim.schedule(function()
-                vim.notify("[vault] safe_write failed: " .. tostring(sw_err), vim.log.levels.WARN)
-            end)
-        end
-    end
-
-    -- Update frontmatter on the renamed file if configured
-    local fm_key = watcher_conf.frontmatter_key
-    if fm_key and fm_key ~= "" then
-        local f = io.open(new_path, "r")
-        if f then
-            local content = f:read("*all")
-            f:close()
-
-            -- find YAML frontmatter (---\n ... ---\n)
-            local fm_start, fm_end = content:find("^%-%-%-\n.-\n%-%-%-\n")
-            if fm_start then
-                local fm_block = content:sub(fm_start, fm_end)
-                local pattern = "(" .. fm_key .. "%s*:%s*)(.-)(\n)"
-                if fm_block:match(fm_key .. "%s*:") then
-                    fm_block = fm_block:gsub(pattern, "%1" .. new_slug .. "%3")
-                else
-                    -- insert key right after opening ---\n
-                    fm_block =
-                        fm_block:gsub("^(%-%-%-\n)", "%1" .. fm_key .. ": " .. new_slug .. "\n")
-                end
-                local new_content = content:sub(1, fm_start - 1)
-                    .. fm_block
-                    .. content:sub(fm_end + 1)
-                utils.safe_write(new_path, new_content)
+    --- Apply the pending wikilink patches, update frontmatter, buffers, and state.
+    --- Extracted so it can be called synchronously or from an async confirm callback.
+    --- @return integer updated  number of files patched
+    local function apply_rename()
+        -- Apply pending changes — suppress watcher during writes to avoid self-triggered events
+        self._writing = true
+        local updated = 0
+        local updated_paths = {}
+        for path, info in pairs(pending) do
+            local ok_sw, sw_err = pcall(utils.safe_write, path, info.new_content)
+            if ok_sw then
+                updated = updated + 1
+                updated_paths[path] = true
             else
-                -- no frontmatter: add one with key and relpath
-                local rel = utils.path_to_relpath(new_path)
-                local fm = "---\n"
-                    .. fm_key
-                    .. ": "
-                    .. new_slug
-                    .. "\nrelpath: "
-                    .. rel
-                    .. "\n---\n\n"
-                utils.safe_write(new_path, fm .. content)
+                vim.schedule(function()
+                    vim.notify("[vault] safe_write failed: " .. tostring(sw_err), vim.log.levels.WARN)
+                end)
             end
         end
-    end
 
-    self._writing = false
+        -- Update frontmatter on the renamed file if configured
+        local fm_key = watcher_conf.frontmatter_key
+        if fm_key and fm_key ~= "" then
+            local f = io.open(new_path, "r")
+            if f then
+                local content = f:read("*all")
+                f:close()
 
-    -- Update open buffers: rename any buffer that pointed to the old path
-    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-        if vim.api.nvim_buf_is_loaded(bufnr) then
-            local name = vim.api.nvim_buf_get_name(bufnr)
-            if name == old_path then
-                local modified = vim.bo[bufnr].modified
-                pcall(vim.api.nvim_buf_set_name, bufnr, new_path)
-                vim.bo[bufnr].modified = modified
-                -- Re-attach LSP clients so they track the new URI
-                for _, client in pairs(vim.lsp.get_clients({ bufnr = bufnr })) do
-                    pcall(vim.lsp.buf_detach_client, bufnr, client.id)
-                    pcall(vim.lsp.buf_attach_client, bufnr, client.id)
+                -- find YAML frontmatter (---\n ... ---\n)
+                local fm_start, fm_end = content:find("^%-%-%-\n.-\n%-%-%-\n")
+                if fm_start then
+                    local fm_block = content:sub(fm_start, fm_end)
+                    local pattern_fm = "(" .. fm_key .. "%s*:%s*)(.-)(\n)"
+                    if fm_block:match(fm_key .. "%s*:") then
+                        fm_block = fm_block:gsub(pattern_fm, "%1" .. new_slug .. "%3")
+                    else
+                        -- insert key right after opening ---\n
+                        fm_block =
+                            fm_block:gsub("^(%-%-%-\n)", "%1" .. fm_key .. ": " .. new_slug .. "\n")
+                    end
+                    local new_content = content:sub(1, fm_start - 1)
+                        .. fm_block
+                        .. content:sub(fm_end + 1)
+                    utils.safe_write(new_path, new_content)
+                else
+                    -- no frontmatter: add one with key and relpath
+                    local rel = utils.path_to_relpath(new_path)
+                    local fm = "---\n"
+                        .. fm_key
+                        .. ": "
+                        .. new_slug
+                        .. "\nrelpath: "
+                        .. rel
+                        .. "\n---\n\n"
+                    utils.safe_write(new_path, fm .. content)
                 end
             end
         end
-    end
 
-    -- Reload open buffers whose files were patched (wikilinks changed on disk)
-    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-        if vim.api.nvim_buf_is_loaded(bufnr) and updated_paths[vim.api.nvim_buf_get_name(bufnr)] then
-            vim.api.nvim_buf_call(bufnr, function()
-                pcall(vim.cmd, "checktime")
-            end)
+        self._writing = false
+
+        -- Update open buffers: rename any buffer that pointed to the old path
+        for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+            if vim.api.nvim_buf_is_loaded(bufnr) then
+                local name = vim.api.nvim_buf_get_name(bufnr)
+                if name == old_path then
+                    local modified = vim.bo[bufnr].modified
+                    pcall(vim.api.nvim_buf_set_name, bufnr, new_path)
+                    vim.bo[bufnr].modified = modified
+                    -- Re-attach LSP clients so they track the new URI
+                    for _, client in pairs(vim.lsp.get_clients({ bufnr = bufnr })) do
+                        pcall(vim.lsp.buf_detach_client, bufnr, client.id)
+                        pcall(vim.lsp.buf_attach_client, bufnr, client.id)
+                    end
+                end
+            end
         end
-    end
 
-    -- Record rename in global state for other subsystems to pick up
-    pcall(function()
-        state.set_global_key(
-            "vault.last_rename",
-            { old = old_path, new = new_path, old_slug = old_slug, new_slug = new_slug }
-        )
-    end)
+        -- Reload open buffers whose files were patched (wikilinks changed on disk)
+        for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+            if vim.api.nvim_buf_is_loaded(bufnr) and updated_paths[vim.api.nvim_buf_get_name(bufnr)] then
+                vim.api.nvim_buf_call(bufnr, function()
+                    pcall(vim.cmd, "checktime")
+                end)
+            end
+        end
 
-    if not silent then
-        vim.schedule(function()
-            vim.notify(
-                string.format(
-                    "[vault] renamed %s → %s • %d files patched",
-                    old_slug,
-                    new_slug,
-                    updated
-                ),
-                vim.log.levels.INFO
+        -- Record rename in global state for other subsystems to pick up
+        pcall(function()
+            state.set_global_key(
+                "vault.last_rename",
+                { old = old_path, new = new_path, old_slug = old_slug, new_slug = new_slug }
             )
         end)
+
+        if not silent then
+            vim.schedule(function()
+                vim.notify(
+                    string.format(
+                        "[vault] renamed %s → %s • %d files patched",
+                        old_slug,
+                        new_slug,
+                        updated
+                    ),
+                    vim.log.levels.INFO
+                )
+            end)
+        end
+
+        return updated
     end
 
-    return updated
+    -- Fast path: no prompt needed (disabled or no files to patch)
+    if not prompt or total == 0 then
+        return apply_rename()
+    end
+
+    -- Async path: show non-blocking confirm popup, apply on "yes"
+    require("vault.ui.confirm").confirm({
+        message = string.format(
+            "Rename %s → %s will patch %d file(s). Apply?",
+            old_slug, new_slug, total
+        ),
+        title = "Vault Rename",
+        on_yes = function() apply_rename() end,
+        on_no = function()
+            if not silent then
+                vim.notify("[vault] Rename patch cancelled", vim.log.levels.INFO)
+            end
+        end,
+    })
+    return 0
 end
 
 --- Handle a .base file change (created, modified, or deleted).
