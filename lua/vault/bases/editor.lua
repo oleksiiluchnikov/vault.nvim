@@ -2518,7 +2518,7 @@ function M.open(opts)
   -- Cursor skip: prevent cursor from landing on \x1f byte or in concealed slug prefix
   -- Track previous cursor position for direction detection
   local prev_cursor = { 1, 0 }
-  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
+  vim.api.nvim_create_autocmd({ "CursorMoved" }, {
     buffer = bufnr,
     callback = function()
       local ok, err = pcall(function()
