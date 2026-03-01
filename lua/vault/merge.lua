@@ -6,6 +6,7 @@
 local M = {}
 
 local config = require("vault.config")
+local log = require("vault.log").scope("merge")
 
 --- Read the full content of a file, split into frontmatter fields, body lines.
 ---@param path string
@@ -275,12 +276,12 @@ function M.open_conflict_picker(slug_a, slug_b, conflicts, on_resolve)
 
   vim.keymap.set("n", "q", function()
     close()
-    vim.notify("[vault] Merge cancelled", vim.log.levels.INFO)
+    log.info("Merge cancelled")
   end, kopts)
 
   vim.keymap.set("n", "<Esc>", function()
     close()
-    vim.notify("[vault] Merge cancelled", vim.log.levels.INFO)
+    log.info("Merge cancelled")
   end, kopts)
 
   update()
@@ -305,7 +306,7 @@ function M.absorb(path_a, path_b, resolved, opts)
     local missing = {}
     if not fields_a then table.insert(missing, slug_a .. " (" .. path_a .. ")") end
     if not fields_b then table.insert(missing, slug_b .. " (" .. path_b .. ")") end
-    vim.notify("[vault] Failed to parse: " .. table.concat(missing, ", "), vim.log.levels.ERROR)
+    log.error("Failed to parse: %s", table.concat(missing, ", "))
     return
   end
 
@@ -382,7 +383,7 @@ function M.absorb(path_a, path_b, resolved, opts)
     f:close()
   end)
   if not write_ok then
-    vim.notify("[vault] Failed to write merged note: " .. tostring(write_err), vim.log.levels.ERROR)
+    log.error("Failed to write merged note: %s", tostring(write_err))
     return
   end
 
@@ -399,10 +400,7 @@ function M.absorb(path_a, path_b, resolved, opts)
     pcall(note_b.delete, note_b, false, false)
   end
 
-  vim.notify(
-    string.format("[vault] Merged %s ← %s (%d wikilinks patched)", slug_a, slug_b, patched),
-    vim.log.levels.INFO
-  )
+  log.info("Merged %s ← %s (%d wikilinks patched)", slug_a, slug_b, patched)
 
   if opts.on_done then opts.on_done() end
 end
@@ -424,7 +422,7 @@ function M.merge(path_a, path_b, opts)
     local missing = {}
     if not fields_a then table.insert(missing, slug_a .. " (" .. path_a .. ")") end
     if not fields_b then table.insert(missing, slug_b .. " (" .. path_b .. ")") end
-    vim.notify("[vault] Failed to parse: " .. table.concat(missing, ", "), vim.log.levels.ERROR)
+    log.error("Failed to parse: %s", table.concat(missing, ", "))
     return
   end
 
