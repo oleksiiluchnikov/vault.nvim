@@ -629,7 +629,19 @@ local function build_subcommands()
                 if col_arg then
                     local last_comma = col_arg:match(".*,()")
                     local col_prefix = last_comma and col_arg:sub(last_comma) or ""
-                    local builtin = { "slug", "title", "dir", "tags", "status" }
+                    local builtin = {
+                        "slug", "title", "tags", "status",
+                        -- file.* implicit properties (Obsidian Bases notation)
+                        "file.name", "file.folder", "file.path", "file.ext",
+                        "file.ctime", "file.mtime", "file.size",
+                        "file.body", "file.slug",
+                        "file.inlinks", "file.outlinks", "file.headings",
+                        -- note.* aliases (interchangeable with file.*)
+                        "note.name", "note.folder", "note.path", "note.ext",
+                        "note.ctime", "note.mtime", "note.size",
+                        "note.body", "note.slug",
+                        "note.inlinks", "note.outlinks", "note.headings",
+                    }
                     -- Also try to get frontmatter field names from vault_core
                     local ok_core, core = pcall(require, "vault_core")
                     if ok_core and core.fields then
