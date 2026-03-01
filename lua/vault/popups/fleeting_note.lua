@@ -15,7 +15,7 @@ local utils = require("vault.utils")
 
 --- @type vault.Notes|vault.Notes.constructor
 local Notes = require("vault.notes")
-local NoteTitle = require("vault.notes.note.title")
+local NoteTitle = require("vault.notes.note").Title
 
 --- Popup for creating fleeting notes.
 --- @class vault.ui.Popup.FleetingNote: vault.Object

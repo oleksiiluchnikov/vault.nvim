@@ -6,9 +6,172 @@ end
 local utils = require("vault.utils")
 --- @type vault.Config|vault.Config.options
 local config = require("vault.config")
-local metadata = require("vault.notes.note.metadata")
 local data = require("vault.notes.note.data")
 local state = require("vault.core.state")
+
+local metadata = {}
+
+metadata.unique = {
+    relpath = true,
+    path = true,
+}
+
+metadata.keys = {
+    relpath = true,
+    path = true,
+    basename = true,
+    stem = true,
+    title = true,
+    content = true,
+    frontmatter = true,
+    body = true,
+    tags = true,
+    inlinks = true,
+    outlinks = true,
+    type = true,
+    status = true,
+}
+
+function metadata.is_valid(key)
+    return metadata.keys[key] ~= nil
+end
+
+--- @class vault.Note.Data.basename
+local NoteBasename = Object("VaultNoteBasename")
+
+function NoteBasename:init(s)
+    if not s then
+        error("NoteBasename:init() requires a string")
+    end
+
+    local replaces = {
+        ["/"] = "-",
+        [":"] = "-",
+        ["*"] = "-",
+        ["?"] = "-",
+        ['"'] = "-",
+        ["<"] = "-",
+        [">"] = "-",
+        ["|"] = "-",
+        ["\n"] = "",
+        ["\r"] = "",
+        ["#"] = " ",
+    }
+
+    for k, v in pairs(replaces) do
+        s = s:gsub(k, v)
+    end
+
+    local ext = config.options.ext
+    if not s:match(ext .. "$") then
+        s = s .. ext
+    end
+
+    local this = {}
+    setmetatable(this, self)
+    this.__index = s
+    return this
+end
+
+function NoteBasename:__tostring()
+    return self.__index
+end
+
+--- @class vault.Note.Title
+--- @field text string
+--- @field __index string
+local Title = Object("VaultNoteTitle")
+
+function Title:init(str)
+    if not str then
+        error("missing argument: str")
+    end
+    if type(str) ~= "string" then
+        error("str must be a string")
+    end
+    self.text = str
+end
+
+function Title:sync(path)
+    if path == nil then
+        local bufpath = vim.fn.expand("%:p")
+        if type(bufpath) ~= "string" then
+            return
+        end
+        path = bufpath
+    end
+
+    local Note = require("vault.notes.note")
+    local note = Note({ path = path })
+    local title = note.data.title
+    if title == nil then
+        return
+    end
+
+    local new_path = vim.fn.fnamemodify(path, ":h") .. "/" .. title .. ".md"
+    if vim.fn.filereadable(new_path) == 1 then
+        vim.notify("File already exists: " .. new_path, vim.log.levels.ERROR, {
+            title = "Knowledge",
+            timeout = 200,
+        })
+        return
+    end
+
+    local rename_success = vim.fn.rename(path, new_path)
+    if rename_success == 0 then
+        vim.notify("Renamed: " .. path .. " -> " .. new_path, vim.log.levels.INFO, {
+            title = "Knowledge",
+            timeout = 200,
+        })
+
+        local inlinks = note.inlinks(path)
+        if #inlinks > 0 then
+            note.update_inlinks(path)
+        end
+    else
+        vim.notify("Failed to rename: " .. path .. " -> " .. new_path, vim.log.levels.ERROR, {
+            title = "Knowledge",
+            timeout = 200,
+        })
+        return
+    end
+
+    vim.cmd("e " .. new_path)
+end
+
+function Title:__tostring()
+    return self.__index
+end
+
+function Title:from_string(str)
+    if not str then
+        error("Vault: Title:from_string() - s is nil.")
+    end
+
+    if str:match("^#") then
+        str = str:gsub("^#", "")
+    end
+    str = str:gsub("%s+", " ")
+    str = str:gsub("%s+$", "")
+    str = str:gsub("^%s+", "")
+
+    self.text = str
+end
+
+function Title:to_basename()
+    local str = self.__index
+    if not str then
+        error("Vault: Title:to_basename() - s is nil.")
+    end
+    return NoteBasename:new(str)
+end
+
+function NoteBasename:to_title()
+    local s = self.__index
+    s = s:gsub(config.options.ext .. "$", "")
+    local title = Title:from_string(s)
+    return title
+end
 
 --- State object for |vault.Note|.
 --- @class vault.Note.Data: vault.Object
@@ -653,7 +816,7 @@ function Note:move(new_path, force, verbose, opts)
         local watcher = Watcher()
         -- Disable prompts for programmatic moves and skip oil guard
         watcher:disable_oil_guard()
-        patched = watcher:handle_rename(old_path, new_path) or 0
+        patched = watcher:handle_rename(old_path, new_path, opts.silent) or 0
     end
 
     -- Update internal data to reflect the new path
@@ -727,6 +890,9 @@ end
 
 --- @type vault.Note|vault.Note.constructor
 local VaultNote = Note
+VaultNote.Title = Title
+VaultNote.Basename = NoteBasename
+VaultNote.metadata = metadata
 
 state.set_global_key("class.vault.Note", VaultNote)
 return VaultNote
