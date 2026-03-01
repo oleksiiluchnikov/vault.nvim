@@ -171,8 +171,9 @@ end
 --- @param new_path string
 --- @param old_slug string
 --- @param new_slug string
+--- @param silent? boolean  suppress notifications (default: honor config.watcher.notify_on_rename)
 --- @return integer
-function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug)
+function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silent)
     local scanner = require("vault.scanner")
     local paths = scanner.paths()
 
@@ -350,17 +351,19 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug)
         )
     end)
 
-    vim.schedule(function()
-        vim.notify(
-            string.format(
-                "[vault] renamed %s → %s • %d files patched",
-                old_slug,
-                new_slug,
-                updated
-            ),
-            vim.log.levels.INFO
-        )
-    end)
+    if not silent then
+        vim.schedule(function()
+            vim.notify(
+                string.format(
+                    "[vault] renamed %s → %s • %d files patched",
+                    old_slug,
+                    new_slug,
+                    updated
+                ),
+                vim.log.levels.INFO
+            )
+        end)
+    end
 
     return updated
 end
@@ -386,8 +389,9 @@ end
 --- Returns number of files patched.
 --- @param old_path string absolute
 --- @param new_path string absolute
+--- @param silent? boolean  suppress notifications (default: honor config.watcher.notify_on_rename)
 --- @return integer
-function Watcher:handle_rename(old_path, new_path)
+function Watcher:handle_rename(old_path, new_path, silent)
     if old_path == new_path or not old_path or not new_path then
         return 0
     end
@@ -399,15 +403,25 @@ function Watcher:handle_rename(old_path, new_path)
         return 0
     end
 
+    -- Resolve silent: explicit param > config.watcher.notify_on_rename > default (show)
+    if silent == nil then
+        local watcher_conf = (config.options and config.options.watcher) or {}
+        if watcher_conf.notify_on_rename == false then
+            silent = true
+        else
+            silent = false
+        end
+    end
+
     -- Defer processing if oil is active to let it complete its operations
     if self.oil_guard_enabled and package.loaded["oil"] then
         vim.defer_fn(function()
-            self:_do_rename_update(old_path, new_path, old_slug, new_slug)
+            self:_do_rename_update(old_path, new_path, old_slug, new_slug, silent)
         end, 1000)
         return 0
     end
 
-    return self:_do_rename_update(old_path, new_path, old_slug, new_slug)
+    return self:_do_rename_update(old_path, new_path, old_slug, new_slug, silent)
 end
 
 -- Buffer-level watcher: detect when a note's contents were saved and the user
