@@ -83,7 +83,7 @@ return function(opts)
             end
         end
         if next(filtered_properties) == nil then
-            vim.notify("No properties found")
+            vim.notify("[vault] No properties found", vim.log.levels.INFO)
         end
         opts.properties.map = filtered_properties
     end

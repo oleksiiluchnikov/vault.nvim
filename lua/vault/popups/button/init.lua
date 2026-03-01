@@ -29,7 +29,6 @@ function Button:init(this)
     self.callback = this.callback
         or function()
             self:blink()
-            vim.notify(vim.inspect(self.label))
         end
     self.pos = this.pos or {}
     self.ns_id = ns_id
@@ -71,7 +70,7 @@ end
 --- | '"left"'
 --- | '"right"'
 function Button:add_padding(orientation)
-    vim.notify("Not implemented")
+    -- TODO: implement padding
     -- self.view = self.view or {}
     -- if orientation == "top" then
     --     table.insert(self.view, 1, self.options.padding.top.char)

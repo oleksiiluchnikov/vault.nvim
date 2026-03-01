@@ -1288,7 +1288,7 @@ function callbacks.rename(args)
         note:move(new_path)
     end)
     if not ok then
-        vim.notify("Failed to move note: " .. tostring(err), vim.log.levels.ERROR)
+        vim.notify("[vault] Failed to move note: " .. tostring(err):match("[^\n]+"), vim.log.levels.ERROR)
         return
     end
 

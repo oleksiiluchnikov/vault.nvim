@@ -56,9 +56,7 @@ local function default_options()
         choices = {
             {
                 "Try",
-                function()
-                    vim.notify("Button clicked!")
-                end,
+                function() end,
             },
         },
         callback = nil,
@@ -128,9 +126,7 @@ function Dialog:init(choices, opts)
     for i, choice in ipairs(self.choices) do
         local button = Button({
             label = choice[1],
-            callback = choice[2] or function()
-                vim.notify(choice.label .. " clicked")
-            end,
+            callback = choice[2] or function() end,
         })
 
         button.view.padding.left = string.rep(

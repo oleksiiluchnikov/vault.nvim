@@ -149,9 +149,9 @@ end
 --- @param this vault.Wikilink.Data|{raw: string}
 function WikilinkData:init(this)
     if not this then
-        error("Invalid wikilink format")
+        error("Invalid wikilink: missing input")
     elseif not this.raw then
-        error("Invalid wikilink format")
+        error("Invalid wikilink: missing 'raw' field")
     end
 
     local content, embedded = strip_brackets(this.raw)
@@ -159,7 +159,7 @@ function WikilinkData:init(this)
 
     -- Validate
     if not is_valid_content(content) then
-        error("Invalid wikilink format")
+        error("Invalid wikilink content: " .. tostring(this.raw):sub(1, 80))
     end
 
     -- Store raw content (inside brackets, without [[ ]])
@@ -168,7 +168,7 @@ function WikilinkData:init(this)
     -- Parse components: slug#heading|alias
     self.slug = content:match("([^#|]+)")
     if not self.slug or self.slug == "" then
-        error("Invalid wikilink format")
+        error("Invalid wikilink: could not extract slug from: " .. tostring(content):sub(1, 80))
     end
 
     self.heading = content:match("#([^|]+)")
@@ -243,8 +243,9 @@ local Wikilink = Object("VaultWikilink")
 
 --- @param this vault.Wikilink.raw|vault.Wikilink.Data.partial|table
 function Wikilink:init(this)
+    local input_repr = type(this) == "string" and this:sub(1, 80) or type(this)
     if not this or (type(this) == "string" and this == "") then
-        error("Invalid wikilink format")
+        error("Invalid wikilink: empty or nil input")
     end
 
     if type(this) == "string" then
@@ -262,21 +263,20 @@ function Wikilink:init(this)
             -- Bare string — could be single brackets or raw wikilink content
             if s:match("%[") or s:match("%]") then
                 -- Contains mismatched brackets like "[single bracket]"
-                error("Invalid wikilink format")
+                error("Invalid wikilink: mismatched brackets in: " .. input_repr)
             end
             -- Treat as raw wikilink content (e.g. from parser extracting inner text)
             this = { raw = s }
         elseif has_open and not has_close then
-            error("Invalid wikilink format")
+            error("Invalid wikilink: missing closing ]]: " .. input_repr)
         elseif not has_open and has_close then
-            -- e.g. "extra]]brackets]]" — malformed
-            error("Invalid wikilink format")
+            error("Invalid wikilink: missing opening [[: " .. input_repr)
         else
             -- Normal [[...]] form
             -- Check for multiple closing brackets: "extra]]brackets]]"
             local inner = s:sub(3, -3)
             if inner:find("%]%]") then
-                error("Invalid wikilink format")
+                error("Invalid wikilink: nested brackets in: " .. input_repr)
             end
             this = { raw = s }
         end
