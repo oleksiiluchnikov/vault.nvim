@@ -160,18 +160,32 @@ function Watcher:on_event(filename, events)
         return
     end
 
-    -- A file appeared/changed; if we have a recent deletion, treat as rename
-    local old_path = nil
-    local old_ts = nil
+    -- A file appeared/changed; if we have a recent deletion, treat as rename.
+    -- Pick the best match: prefer a deletion whose stem matches the new file's
+    -- stem (handles renames within the same directory). Fall back to the most
+    -- recent deletion within the time window.
+    local new_stem = vim.fn.fnamemodify(full_path, ":t:r")
+    local best_path = nil
+    local best_ts = nil
+    local best_stem_match = false
     for path, ts in pairs(self.deleted_paths) do
-        old_path = path
-        old_ts = ts
-        break
+        if (now - ts) <= self.rename_window_sec then
+            local stem = vim.fn.fnamemodify(path, ":t:r")
+            local stem_match = (stem == new_stem)
+            -- Prefer: stem match > most recent timestamp
+            if best_path == nil
+                or (stem_match and not best_stem_match)
+                or (stem_match == best_stem_match and ts > best_ts) then
+                best_path = path
+                best_ts = ts
+                best_stem_match = stem_match
+            end
+        end
     end
 
-    if old_path and old_ts and (now - old_ts) <= self.rename_window_sec then
-        self.deleted_paths[old_path] = nil
-        self:handle_rename(old_path, full_path)
+    if best_path then
+        self.deleted_paths[best_path] = nil
+        self:handle_rename(best_path, full_path)
     end
 end
 
@@ -254,7 +268,6 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silen
                 pending[note_path] = { new_content = cur, count = total_n }
             end
         end
-        ::continue_file::
     end
 
     -- Total replacements
