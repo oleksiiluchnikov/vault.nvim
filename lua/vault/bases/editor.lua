@@ -201,7 +201,9 @@ local function normalize_col(col)
     col = "file." .. col:sub(6)
   end
   -- Legacy aliases
-  if col == "dir" then return "file.folder" end
+  if col == "dir"  then return "file.folder" end
+  if col == "body" then return "file.body"   end
+  if col == "name" then return "file.name"   end
   return col
 end
 
@@ -686,8 +688,17 @@ local function build_records(notes_map, columns, base)
         elseif col == "file.size" then
           fields[col] = path and vim.fn.getfsize(path) or 0
         elseif col == "file.body" then
-          local body = note.data and note.data.body or ""
-          -- Flatten newlines to spaces for single-line table row
+          -- Read a limited preview (first 4 KB) to avoid full-file I/O for large vaults.
+          -- Skips the YAML frontmatter block, then flattens to a single line.
+          local body = ""
+          local f = path and io.open(path, "r")
+          if f then
+            local chunk = f:read(4096) or ""
+            f:close()
+            -- Strip leading frontmatter (--- ... ---\n)
+            local after_fm = chunk:match("^%-%-%-.-\n%-%-%-\n(.*)") or chunk
+            body = after_fm
+          end
           fields[col] = body:gsub("\r?\n", " "):gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
         elseif col == "file.inlinks" then
           local links = note.data and note.data.inlinks
@@ -2975,51 +2986,17 @@ function M.reload(bufnr)
   local st = buf_states[bufnr]
   if not st then return end
 
-  -- Check if we need Note objects for formula evaluation
-  local has_formulas = st.formula_cols and #st.formula_cols > 0
-  local formula_results_by_slug = {}
-
-  if has_formulas and st.base then
-    -- Re-create Note objects for formula evaluation
-    local Note = require("vault.notes.note")
-    for slug, path in pairs(st.note_paths) do
-      if vim.fn.filereadable(path) == 1 then
-        local ok, note = pcall(Note, path)
-        if ok and note then
-          formula_results_by_slug[slug] = st.base:evaluate_formulas(note)
-        end
-      end
-    end
-  end
-
-  -- Re-scan notes
-  local records = {}
+  -- Build a notes_map (slug → Note) from st.note_paths so we can reuse
+  -- build_records() for all column types (including file.* and formulas).
+  local Note = require("vault.notes.note")
+  local notes_map = {}
   local dead_slugs = {}
   for slug, path in pairs(st.note_paths) do
     if vim.fn.filereadable(path) == 1 then
-      local fm = read_frontmatter_fields(path, st.columns)
-      local fields = {}
-      for _, col in ipairs(st.columns) do
-        if col == "slug" then
-          fields.slug = slug
-        elseif col == "title" then
-          local basename = slug:match("[^/]+$") or slug
-          fields.title = fm.title or basename
-        elseif col == "dir" then
-          local relpath = require("vault.utils").path_to_relpath(path)
-          local dir = relpath:match("^(.-/)[^/]*$") or "/"
-          fields.dir = dir
-        elseif col == "tags" then
-          fields.tags = fm.tags
-        elseif col:match("^formula%.") then
-          local formula_name = col:match("^formula%.(.+)")
-          local results = formula_results_by_slug[slug]
-          fields[col] = results and results[formula_name] or nil
-        else
-          fields[col] = fm[col]
-        end
+      local ok, note = pcall(Note, path)
+      if ok and note then
+        notes_map[slug] = note
       end
-      table.insert(records, { slug = slug, path = path, fields = fields })
     else
       table.insert(dead_slugs, slug)
     end
@@ -3028,6 +3005,9 @@ function M.reload(bufnr)
     st.note_paths[slug] = nil
     if st.note_mtimes then st.note_mtimes[slug] = nil end
   end
+
+  -- Re-scan using the shared build_records() so all file.* columns are handled.
+  local records = build_records(notes_map, st.columns, st.base)
   sort_records(records, st.sort_by, st.sort_keys)
 
   -- Recompute + refresh mtimes
