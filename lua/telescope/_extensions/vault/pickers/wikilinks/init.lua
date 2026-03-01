@@ -163,10 +163,10 @@ return function(opts)
 
     -- Keybinding definitions: { lhs, description, action_factory }
     local keybinds = {
-        { "<C-l>",  "resolve",  "make_resolve" },
-        { "<M-l>",  "batch",    "make_batch_resolve" },
-        { "<M-c>",  "create",   "make_batch_create" },
-        { "<C-j>",  "compare",  "make_merge" },
+        { "<C-l>",  "resolve",    "make_resolve" },
+        { "<C-b>",  "batch",      "make_batch_resolve" },
+        { "<C-a>",  "create-all", "make_batch_create" },
+        { "<C-j>",  "compare",    "make_merge" },
     }
 
     local attach_mappings = function(prompt_bufnr, map)

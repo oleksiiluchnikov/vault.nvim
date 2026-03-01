@@ -3,6 +3,7 @@
 local M = {}
 
 local utils = require("vault.utils")
+local resolve_picker = require("vault.ui.resolve_picker")
 
 --- Get wikilinks config options with defaults.
 --- @return table
@@ -100,45 +101,62 @@ function M.make_enter(ctx)
     end
 end
 
---- Build the suggestion choices list for an unresolved wikilink.
+--- Handle the rewrite action for a wikilink (shared by single and batch resolve).
 --- @param wl vault.Wikilink
---- @return table[] choices  Each entry: { label, slug?, action? }
-local function build_choices(wl)
+--- @param new_slug string Target slug
+--- @param ctx table { wikilinks, results, opts }
+--- @param on_done function Called after rewrite completes (or is skipped)
+local function handle_rewrite(wl, new_slug, ctx, on_done)
     local slug = wl.data and wl.data.slug or ""
-    local choices = {}
-    local suggestions = wl.data and wl.data.suggestions or {}
-    local strategy_order = { "jaro_winkler", "levenshtein", "contains", "prefix" }
-    local strategy_labels = {
-        jaro_winkler = "fuzzy",
-        levenshtein = "edit-dist",
-        contains = "substr",
-        prefix = "prefix",
-    }
-    local seen_slugs = {}
-    for _, strategy in ipairs(strategy_order) do
-        local candidates = suggestions[strategy]
-        if type(candidates) == "table" then
-            local strat_label = strategy_labels[strategy] or strategy
-            for _, s in ipairs(candidates) do
-                local cand_slug = s.slug or s[1] or ""
-                if cand_slug ~= "" and not seen_slugs[cand_slug] then
-                    seen_slugs[cand_slug] = true
-                    local score = s.score or s[2] or 0
-                    local pct = math.floor(score * 100 + 0.5)
-                    choices[#choices + 1] = {
-                        label = cand_slug .. " (" .. pct .. "% " .. strat_label .. ")",
-                        slug = cand_slug,
-                    }
-                end
-            end
-        end
+    local conf = get_config()
+    local count, affected = wl:rewrite_preview(new_slug)
+
+    local function do_rewrite()
+        local patched = wl:rewrite(new_slug)
+        vim.notify(
+            string.format("[vault] Rewrote [[%s]] -> [[%s]] in %d file(s)", slug, new_slug, patched),
+            vim.log.levels.INFO
+        )
+        M.remove_from_results(ctx.results, wl)
+        on_done()
     end
-    choices[#choices + 1] = { label = "Create new note: " .. slug, slug = nil, action = "create" }
-    choices[#choices + 1] = { label = "Skip", slug = nil, action = "skip" }
-    return choices
+
+    if count == 0 then
+        vim.notify(
+            string.format("[vault] No files contain [[%s]], nothing to rewrite", slug),
+            vim.log.levels.INFO
+        )
+        on_done()
+        return
+    end
+
+    confirm(conf.confirm_rewrite,
+        string.format(
+            "Rewrite [[%s]] -> [[%s]] in %d file(s)?\n\nAffected:\n  %s",
+            slug, new_slug, count,
+            table.concat(affected, "\n  ")
+        ),
+        do_rewrite,
+        on_done
+    )
 end
 
---- <C-l> resolve action: close picker, show vim.ui.select, apply, reopen.
+--- Open the resolve picker for a wikilink and handle the result.
+--- @param wl vault.Wikilink
+--- @param opts { wikilinks?: table, prompt_prefix?: string, on_done: fun(result: table), on_cancel?: fun() }
+local function resolve_wikilink(wl, opts)
+    resolve_picker.open({
+        wikilink = wl,
+        wikilinks = opts.wikilinks,
+        prompt_prefix = opts.prompt_prefix,
+        on_resolve = opts.on_done,
+        on_cancel = opts.on_cancel or function()
+            if opts.on_done then opts.on_done({ action = "skip" }) end
+        end,
+    })
+end
+
+--- <C-l> resolve action: close picker, open resolve Telescope picker, apply, reopen.
 --- @param prompt_bufnr number
 --- @param ctx table { wikilinks, results, opts }
 --- @return function
@@ -167,82 +185,28 @@ function M.make_resolve(prompt_bufnr, ctx)
             return
         end
 
-        -- Build choices from strategy-grouped suggestions
-        local choices = build_choices(wl)
-
-        local labels = {}
-        for _, c in ipairs(choices) do
-            labels[#labels + 1] = c.label
-        end
-
-        -- Close the picker BEFORE vim.ui.select so dressing.nvim doesn't
-        -- destroy the Telescope prompt buffer.
         actions.close(prompt_bufnr)
 
         vim.schedule(function()
-            vim.ui.select(labels, {
-                prompt = string.format("Resolve unlinked [[%s]] — pick target:", slug),
-            }, function(choice, idx)
-                if not choice or not idx then
-                    reopen_picker()
-                    return
-                end
-
-                local picked = choices[idx]
-                local conf = get_config()
-
-                if picked.action == "skip" then
-                    reopen_picker()
-                    return
-                end
-
-                if picked.action == "create" then
-                    confirm(conf.confirm_create,
-                        string.format("Create new note [[%s]]?", slug),
-                        function()
-                            wl:create_target()
-                            vim.notify(string.format("[vault] Created note: %s", slug), vim.log.levels.INFO)
-                            M.remove_from_results(ctx.results, wl)
-                            reopen_picker()
-                        end,
-                        reopen_picker
-                    )
-                    return
-                end
-
-                -- Rewrite [[slug]] -> [[picked.slug]]
-                local new_slug = picked.slug
-                local count, affected = wl:rewrite_preview(new_slug)
-
-                local function do_rewrite()
-                    local patched = wl:rewrite(new_slug)
-                    vim.notify(
-                        string.format("[vault] Rewrote [[%s]] -> [[%s]] in %d file(s)", slug, new_slug, patched),
-                        vim.log.levels.INFO
-                    )
-                    M.remove_from_results(ctx.results, wl)
-                    reopen_picker()
-                end
-
-                if count == 0 then
-                    vim.notify(
-                        string.format("[vault] No files contain [[%s]], nothing to rewrite", slug),
-                        vim.log.levels.INFO
-                    )
-                    reopen_picker()
-                    return
-                end
-
-                confirm(conf.confirm_rewrite,
-                    string.format(
-                        "Rewrite [[%s]] -> [[%s]] in %d file(s)?\n\nAffected:\n  %s",
-                        slug, new_slug, count,
-                        table.concat(affected, "\n  ")
-                    ),
-                    do_rewrite,
-                    reopen_picker
-                )
-            end)
+            resolve_wikilink(wl, {
+                wikilinks = ctx.wikilinks,
+                on_done = function(result)
+                    if result.action == "skip" or not result.action then
+                        reopen_picker()
+                        return
+                    end
+                    if result.action == "create" then
+                        wl:create_target()
+                        vim.notify(string.format("[vault] Created note: %s", slug), vim.log.levels.INFO)
+                        M.remove_from_results(ctx.results, wl)
+                        reopen_picker()
+                        return
+                    end
+                    -- Rewrite
+                    handle_rewrite(wl, result.slug, ctx, reopen_picker)
+                end,
+                on_cancel = reopen_picker,
+            })
         end)
     end
 end
@@ -612,7 +576,7 @@ function M.make_batch_resolve(prompt_bufnr, ctx)
                     return
                 end
 
-                -- Resolve individually: walk the queue
+                -- Resolve individually: walk the queue with Telescope pickers
                 local stats = { rewritten = 0, created = 0, skipped = 0 }
                 local qi = 0
 
@@ -638,57 +602,49 @@ function M.make_batch_resolve(prompt_bufnr, ctx)
                         return
                     end
 
-                    local choices = build_choices(wl)
-                    local labels = {}
-                    for _, c in ipairs(choices) do
-                        labels[#labels + 1] = c.label
-                    end
+                    resolve_wikilink(wl, {
+                        wikilinks = ctx.wikilinks,
+                        prompt_prefix = string.format("(%d/%d) ", qi, #queue),
+                        on_done = function(result)
+                            if result.action == "skip" or not result.action then
+                                stats.skipped = stats.skipped + 1
+                                vim.schedule(process_next)
+                                return
+                            end
 
-                    vim.ui.select(labels, {
-                        prompt = string.format("(%d/%d) Resolve [[%s]]:", qi, #queue, slug),
-                    }, function(sel, sel_idx)
-                        if not sel or not sel_idx then
-                            stats.skipped = stats.skipped + 1
-                            vim.schedule(process_next)
-                            return
-                        end
+                            if result.action == "create" then
+                                local ok, err = pcall(wl.create_target, wl)
+                                if ok then
+                                    stats.created = stats.created + 1
+                                    M.remove_from_results(ctx.results, wl)
+                                else
+                                    vim.notify(
+                                        string.format("[vault] Failed to create [[%s]]: %s", slug, tostring(err)),
+                                        vim.log.levels.WARN
+                                    )
+                                end
+                                vim.schedule(process_next)
+                                return
+                            end
 
-                        local picked = choices[sel_idx]
-
-                        if picked.action == "skip" then
-                            stats.skipped = stats.skipped + 1
-                            vim.schedule(process_next)
-                            return
-                        end
-
-                        if picked.action == "create" then
-                            local ok, err = pcall(wl.create_target, wl)
+                            -- Rewrite
+                            local ok, err = pcall(wl.rewrite, wl, result.slug)
                             if ok then
-                                stats.created = stats.created + 1
+                                stats.rewritten = stats.rewritten + 1
                                 M.remove_from_results(ctx.results, wl)
                             else
                                 vim.notify(
-                                    string.format("[vault] Failed to create [[%s]]: %s", slug, tostring(err)),
+                                    string.format("[vault] Failed to rewrite [[%s]]: %s", slug, tostring(err)),
                                     vim.log.levels.WARN
                                 )
                             end
                             vim.schedule(process_next)
-                            return
-                        end
-
-                        -- Rewrite
-                        local ok, err = pcall(wl.rewrite, wl, picked.slug)
-                        if ok then
-                            stats.rewritten = stats.rewritten + 1
-                            M.remove_from_results(ctx.results, wl)
-                        else
-                            vim.notify(
-                                string.format("[vault] Failed to rewrite [[%s]]: %s", slug, tostring(err)),
-                                vim.log.levels.WARN
-                            )
-                        end
-                        vim.schedule(process_next)
-                    end)
+                        end,
+                        on_cancel = function()
+                            stats.skipped = stats.skipped + 1
+                            vim.schedule(process_next)
+                        end,
+                    })
                 end
 
                 vim.schedule(process_next)
