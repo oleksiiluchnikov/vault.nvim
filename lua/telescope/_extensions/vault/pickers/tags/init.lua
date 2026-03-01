@@ -10,7 +10,7 @@ return function(opts)
     local finders = require("telescope.finders")
     local pickers = require("telescope.pickers")
     local sorters = require("telescope.sorters")
-    local Log = require("plenary.log")
+    local log = require("vault.log").scope("telescope")
     local vault_previewers = require("telescope._extensions.vault.previewers")
     local vault_mappings = require("telescope._extensions.vault.mappings")
     local vault_layouts = require("telescope._extensions.vault.layouts")
@@ -22,7 +22,7 @@ return function(opts)
 
     local tags_list = opts.tags:list()
     if next(tags_list) == nil then
-        Log.info("No tags found in vault")
+        log.info("No tags found in vault")
         return
     end
 

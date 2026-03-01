@@ -11,7 +11,7 @@ return function(opts)
     local finders = require("telescope.finders")
     local pickers = require("telescope.pickers")
     local sorters = require("telescope.sorters")
-    local Log = require("plenary.log")
+    local log = require("vault.log").scope("telescope")
     local vault_previewers = require("telescope._extensions.vault.previewers")
     local vault_mappings = require("telescope._extensions.vault.mappings")
     local vault_layouts = require("telescope._extensions.vault.layouts")
@@ -23,7 +23,7 @@ return function(opts)
     --- @type vault.Base[]
     local results = opts.bases:list()
     if next(results) == nil then
-        Log.info("No bases found in vault")
+        log.info("No bases found in vault")
         return
     end
 

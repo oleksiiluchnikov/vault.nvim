@@ -3,7 +3,7 @@
 --- @return Picker
 return function(opts)
     local vault_state = require("vault.core.state")
-    local Log = require("plenary.log")
+    local log = require("vault.log").scope("telescope")
     local entry_display = require("telescope.pickers.entry_display")
     local finders = require("telescope.finders")
     local pickers = require("telescope.pickers")
@@ -79,7 +79,7 @@ return function(opts)
     local tasks_list = opts.tasks:list()
 
     if next(tasks_list) == nil then
-        Log.info("No tasks found in vault")
+        log.info("No tasks found in vault")
     end
 
     local make_display = function(entry)

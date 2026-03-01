@@ -9,7 +9,7 @@ return function(opts)
     local finders = require("telescope.finders")
     local pickers = require("telescope.pickers")
     local sorters = require("telescope.sorters")
-    local Log = require("plenary.log")
+    local log = require("vault.log").scope("telescope")
     local config = require("vault.config")
     local utils = require("vault.utils")
     local actions = require("telescope.actions")
@@ -24,7 +24,7 @@ return function(opts)
         local bufnr = vim.api.nvim_get_current_buf()
         local path = vim.api.nvim_buf_get_name(bufnr)
         if not utils.match(path, config.options.root, "startswith", false) then
-            Log.error("Current buffer is not in vault")
+            log.error("Current buffer is not in vault")
         end
         opts.note = Note(path)
     end

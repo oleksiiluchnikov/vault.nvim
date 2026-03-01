@@ -5,7 +5,7 @@ return function(opts)
     local finders = require("telescope.finders")
     local pickers = require("telescope.pickers")
     local sorters = require("telescope.sorters")
-    local Log = require("plenary.log")
+    local log = require("vault.log").scope("telescope")
     local vault_mappings = require("telescope._extensions.vault.mappings")
     local vault_hl = require("telescope._extensions.vault.highlights")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
@@ -14,7 +14,7 @@ return function(opts)
     opts.lines = opts.lines or require("vault.lines")()
     local lines_list = opts.lines:list()
     if next(lines_list) == nil then
-        Log.info("No lines found in vault")
+        log.info("No lines found in vault")
         return
     end
 

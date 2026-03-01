@@ -207,7 +207,7 @@ function Fields:sources_with_few_fields()
     for slug, source in pairs(sources) do
         for row, cols in pairs(source) do
             if #cols > 1 then
-                print(vim.inspect(cols))
+                -- debug: print(vim.inspect(cols))
             end
         end
     end
