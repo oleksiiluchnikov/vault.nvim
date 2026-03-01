@@ -2,6 +2,7 @@ local Object = require("vault.core.object")
 local error_formatter = require("vault.utils.error")
 local utils = require("vault.utils")
 local state = require("vault.core.state")
+local log = require("vault.log").scope("task")
 
 -- local config = require("vault.config")
 local data = require("vault.tasks.task.data")
@@ -153,10 +154,7 @@ function Task:rename(name, verbose)
         return self
     end
 
-    vim.notify(message, vim.log.levels.INFO, {
-        title = "Vault Rename",
-        timeout = 200,
-    })
+    log.info(message)
     -- require("vault.tasks").reset()
     return self
 end

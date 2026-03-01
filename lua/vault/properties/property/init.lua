@@ -4,6 +4,7 @@ local Error = require("vault.utils.error")
 local state = require("vault.core.state")
 local data = require("vault.properties.property.data")
 local utils = require("vault.utils")
+local log = require("vault.log").scope("property")
 
 --- @class vault.Property.Data: vault.Object
 local PropertyData = Object("VaultPropertyData")
@@ -125,10 +126,7 @@ function Property:rename(name, verbose)
         return self
     end
 
-    vim.notify(message, vim.log.levels.INFO, {
-        title = "Vault Rename",
-        timeout = 200,
-    })
+    log.info(message)
     -- require("vault.tags").reset()
     return self
 end

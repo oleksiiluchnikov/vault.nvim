@@ -8,7 +8,7 @@ if not ok or type(Note) ~= "table" then
     -- Fallback shim: make the Note dependency optional so this module doesn't error
     -- when `vault.notes.note` fails to return a module (some setups may `return true`).
     -- The shim provides a minimal `extend` method so TagDocumentation = Note:extend(...) works.
-    vim.notify("vault: 'vault.notes.note' did not return a module; using fallback Note shim", vim.log.levels.DEBUG)
+    require("vault.log").scope("tag").debug("'vault.notes.note' did not return a module; using fallback Note shim")
     Note = {
         extend = function(_, _name)
             local cls = {}
