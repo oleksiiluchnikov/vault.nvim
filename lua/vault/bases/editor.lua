@@ -2445,6 +2445,11 @@ function M.open(opts)
   st.winid = winid
   st._last_line_count = #records
 
+  -- Disable auto-formatters for this buffer.
+  -- formatter.nvim checks vim.b.formatter_skip_buf (format.lua:69).
+  vim.b[bufnr].formatter_skip_buf  = true   -- formatter.nvim
+  vim.b[bufnr].autoformat          = false  -- conform.nvim
+
   -- Window options
   vim.wo[winid].signcolumn = "yes"
   vim.wo[winid].number = true
@@ -2598,15 +2603,16 @@ function M.open(opts)
     local tree = vim.fn.undotree()
     if #tree.entries > 0 then
       vim.cmd("undo")
-      -- Schedule conceal refresh + redraw after undo — must be deferred so
+      -- Schedule conceal refresh after undo — must be deferred so
       -- Neovim finishes processing the undo before we re-apply extmarks.
       vim.schedule(function()
         local s = buf_states[bufnr]
         if s then
+          local view = vim.fn.winsaveview()
           apply_conceal(bufnr, s.slug_hidden)
           update_diff_signs(bufnr, s)
+          vim.fn.winrestview(view)
         end
-        vim.cmd("redraw!")
       end)
     elseif undo_snapshots[bufnr] then
       M.undo(bufnr)
