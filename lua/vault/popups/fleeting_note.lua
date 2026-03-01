@@ -1,5 +1,5 @@
 if not pcall(require, "nui.popup") then
-    vim.notify("[vault] nui.nvim is required for the fleeting note popup", vim.log.levels.ERROR)
+    require("vault.log").scope("fleeting").error("nui.nvim is required for the fleeting note popup")
     return
 end
 
@@ -8,6 +8,7 @@ local Popup = require("nui.popup")
 local event = require("nui.utils.autocmd").event
 
 local Object = require("vault.core.object")
+local log = require("vault.log").scope("fleeting")
 
 --- @type vault.Config|vault.Config.options
 local config = require("vault.config")
@@ -43,7 +44,7 @@ end
 --- @return nil
 local function write_note(path, content, opts)
     if check_if_note_exists(path) then
-        vim.notify("[vault] Note already exists: " .. vim.fn.fnamemodify(path, ":t:r"), vim.log.levels.WARN)
+        log.warn("Note already exists: %s", vim.fn.fnamemodify(path, ":t:r"))
         return nil
     end
     -- Concatenate multiline content for performance
@@ -54,7 +55,7 @@ local function write_note(path, content, opts)
     end
 
     if content == "" then
-        vim.notify("[vault] Note creation cancelled (empty content)", vim.log.levels.INFO)
+        log.info("Note creation cancelled (empty content)")
         return nil
     end
 
@@ -65,17 +66,17 @@ local function write_note(path, content, opts)
     -- Check parent directory exists before writing
     local parent = vim.fn.fnamemodify(path, ":h")
     if vim.fn.isdirectory(parent) == 0 then
-        vim.notify("[vault] Directory does not exist: " .. parent, vim.log.levels.ERROR)
+        log.error("Directory does not exist: %s", parent)
         return nil
     end
 
     local lines = vim.split(content, "\n")
     vim.fn.writefile(lines, path)
     if not check_if_note_exists(path) then
-        vim.notify("Failed to create note: " .. path, vim.log.levels.ERROR)
+        log.error("Failed to create note: %s", path)
         return nil
     end
-    vim.notify("Note created: " .. path, vim.log.levels.INFO)
+    log.info("Note created: %s", path)
 
     return nil
 end
