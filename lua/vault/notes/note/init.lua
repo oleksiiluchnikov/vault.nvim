@@ -825,6 +825,8 @@ function Note:move(new_path, force, verbose, opts)
                 utils.path_to_slug(old_path), self.data.slug)
         vim.notify(msg, vim.log.levels.INFO)
     end
+
+    return patched
 end
 
 --- Delete a note by moving it to the vault's .trash/ directory (Obsidian-compatible).
