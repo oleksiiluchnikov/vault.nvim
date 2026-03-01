@@ -326,7 +326,10 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silen
                     local new_content = content:sub(1, fm_start - 1)
                         .. fm_block
                         .. content:sub(fm_end + 1)
-                    utils.safe_write(new_path, new_content)
+                    local ok_fm, fm_err = pcall(utils.safe_write, new_path, new_content)
+                    if not ok_fm then
+                        log.warn("frontmatter update failed for %s: %s", new_path, tostring(fm_err))
+                    end
                 else
                     -- no frontmatter: add one with key and relpath
                     local rel = utils.path_to_relpath(new_path)
@@ -337,7 +340,10 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silen
                         .. "\nrelpath: "
                         .. rel
                         .. "\n---\n\n"
-                    utils.safe_write(new_path, fm .. content)
+                    local ok_fm2, fm_err2 = pcall(utils.safe_write, new_path, fm .. content)
+                    if not ok_fm2 then
+                        log.warn("frontmatter creation failed for %s: %s", new_path, tostring(fm_err2))
+                    end
                 end
             end
         end
