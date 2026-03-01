@@ -5,17 +5,17 @@ local state = require("vault.core.state")
 --- @type vault.Note.constructor|vault.Note
 local Note = require("vault.notes.note")
 
---- Tag documentation.
---- A tag documentation is an object that represents a documentation file for a tag.
---- @class vault.Tag.Documentation: vault.Note
+--- Task documentation.
+--- A task documentation is an object that represents a documentation file for a task.
+--- @class vault.Task.Documentation: vault.Note
 --- @field description vault.Note.body
 --- @field path vault.path
 --- @field exists boolean
 --- @field content string|function
-local TagDocumentation = Note:extend("VaultTagDocumentation")
+local TaskDocumentation = Note:extend("VaultTaskDocumentation")
 
 --- @param name string
-function TagDocumentation:init(name)
+function TaskDocumentation:init(name)
     if not name then
         error("Tag documentation name is required")
     end
@@ -29,7 +29,7 @@ function TagDocumentation:init(name)
     self.__index = self
 end
 
-function TagDocumentation:open()
+function TaskDocumentation:open()
     if self.exists then
         vim.cmd("edit " .. self.path)
     else
@@ -37,7 +37,7 @@ function TagDocumentation:open()
     end
 end
 
-function TagDocumentation:write(path)
+function TaskDocumentation:write(path)
     local root_dir = config.options.root
     local parent_dir = vim.fn.fnamemodify(path, ":h")
     if not parent_dir then
@@ -66,7 +66,7 @@ end
 
 --- Scann content of tag documentation.
 --- @return string
-function TagDocumentation:content()
+function TaskDocumentation:content()
     local docs_dir = config.options.dirs.docs
     local path = docs_dir .. "/" .. self.name .. ".md"
     local f = io.open(path, "r")
@@ -78,8 +78,8 @@ function TagDocumentation:content()
     return content
 end
 
---- @alias VaultTag.documentation.constructor fun(name: string): vault.Tag.Documentation
---- @type VaultTag.documentation.constructor|vault.Tag.Documentation
-local VaultTagDocumentation = TagDocumentation
+--- @alias VaultTask.documentation.constructor fun(name: string): vault.Task.Documentation
+--- @type VaultTask.documentation.constructor|vault.Task.Documentation
+local VaultTaskDocumentation = TaskDocumentation
 
-return VaultTagDocumentation
+return VaultTaskDocumentation

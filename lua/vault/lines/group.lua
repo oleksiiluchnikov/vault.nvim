@@ -1,7 +1,7 @@
 local state = require("vault.core.state")
 local error_formatter = require("vault.utils.error")
 --- @type vault.Lines.constructor|vault.Lines
-local Lines = state.get_global_key("class.vault.Lines") or require("vault.notes")
+local Lines = state.get_global_key("class.vault.Lines") or require("vault.lines")
 
 --- @class vault.Lines.Group: vault.Lines
 --- @field init fun(self: vault.Lines.Group, notes: vault.Lines)
