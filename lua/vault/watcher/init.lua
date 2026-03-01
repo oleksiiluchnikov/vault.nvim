@@ -6,6 +6,7 @@ local uv = vim.uv or vim.loop
 local config = require("vault.config")
 local utils = require("vault.utils")
 local state = require("vault.core.state")
+local log = require("vault.log").scope("watcher")
 
 --- @class vault.Watcher: vault.Object
 local Watcher = require("vault.core.object")("VaultWatcher")
@@ -297,7 +298,7 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silen
                 updated_paths[path] = true
             else
                 vim.schedule(function()
-                    vim.notify("[vault] safe_write failed: " .. tostring(sw_err), vim.log.levels.WARN)
+                    log.warn("safe_write failed: %s", tostring(sw_err))
                 end)
             end
         end
@@ -379,15 +380,7 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silen
 
         if not silent then
             vim.schedule(function()
-                vim.notify(
-                    string.format(
-                        "[vault] renamed %s → %s • %d files patched",
-                        old_slug,
-                        new_slug,
-                        updated
-                    ),
-                    vim.log.levels.INFO
-                )
+                log.info("renamed %s → %s • %d files patched", old_slug, new_slug, updated)
             end)
         end
 
@@ -409,7 +402,7 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silen
         on_yes = function() apply_rename() end,
         on_no = function()
             if not silent then
-                vim.notify("[vault] Rename patch cancelled", vim.log.levels.INFO)
+                log.info("Rename patch cancelled")
             end
         end,
     })
