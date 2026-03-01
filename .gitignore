@@ -71,6 +71,7 @@ coverage/
 .gitignore_local
 .gitmodules_local
 VAULT_PROCESS_BUGS.md
+PLAN.md
 
 # Local scratch lua files
 lua/vault/_*.lua
