@@ -774,11 +774,16 @@ end
 ---@param widths integer[]  widths matching visible columns
 ---@param slug_hidden? boolean  when true, prepend raw slug + SEP_CHAR before visible cells
 ---@return string
-local function render_record_line(rec, columns, widths, slug_hidden)
-  -- When slug is hidden, prepend the raw slug as the first (concealed) cell.
-  -- No padding — it will be fully concealed. Separator is bare SEP_CHAR (no spaces)
-  -- so the first visible cell starts immediately after.
-  local prefix = slug_hidden and (rec.slug .. SEP_CHAR) or ""
+local function render_record_line(rec, columns, widths, slug_hidden, slug_width)
+  -- When slug is hidden, prepend the raw slug padded to slug_width as the first
+  -- (concealed) cell.  Fixed-width padding is critical: without it, horizontal
+  -- scrolling misaligns rows because Neovim offsets by bytes, and different slug
+  -- lengths would shift the visible content start.
+  local prefix = ""
+  if slug_hidden then
+    local padded_slug = slug_width and pad(rec.slug, slug_width) or rec.slug
+    prefix = padded_slug .. SEP_CHAR
+  end
   local cells = {}
   for i, col in ipairs(columns) do
     local cell = fmt_value(rec.fields[col], col)
@@ -927,7 +932,7 @@ local function build_data_lines(st, records)
   local vis_widths = st.visible_col_widths or st.col_widths
   local lines = {}
   for _, rec in ipairs(records) do
-    table.insert(lines, render_record_line(rec, vis_cols, vis_widths, st.slug_hidden))
+    table.insert(lines, render_record_line(rec, vis_cols, vis_widths, st.slug_hidden, st.col_widths[1]))
   end
   return lines
 end
@@ -998,12 +1003,14 @@ local function conceal_line(bufnr, row, line, slug_hidden)
       pcall(vim.api.nvim_buf_set_extmark, bufnr, NS_CONCEAL, row, 0, {
         end_col = pos,  -- covers slug text + \x1f byte
         conceal = "",   -- empty = fully hidden
+        right_gravity = false,
       })
       first_sep = false
     else
       pcall(vim.api.nvim_buf_set_extmark, bufnr, NS_CONCEAL, row, pos - 1, {
         end_col = pos,  -- single byte
         conceal = "│",
+        right_gravity = false,
       })
     end
     start = pos + 1
@@ -2444,7 +2451,7 @@ function M.open(opts)
   vim.wo[winid].relativenumber = true
   vim.wo[winid].wrap = false
   vim.wo[winid].conceallevel = 2       -- fully conceal \x1f, show │ replacement
-  vim.wo[winid].concealcursor = "nv"   -- conceal in normal + visual mode
+  vim.wo[winid].concealcursor = "nvic" -- conceal in normal + visual + insert + command-line mode
 
   -- Apply extmarks: separator virt_line + slug identity on each data line
   apply_extmarks(bufnr, st, records)
@@ -2484,18 +2491,14 @@ function M.open(opts)
       local ok, err = pcall(function()
         local s = buf_states[bufnr]
         if s and not s.saving then
-          -- Refresh conceal only on changed lines (full refresh is too slow for 8k+ lines).
-          -- Conceal extmarks survive in-place edits; only new/pasted lines need them.
-          local line_count = vim.api.nvim_buf_line_count(bufnr)
-          if line_count ~= (s._last_line_count or line_count) then
-            -- Line count changed (insert/delete/paste) — refresh all conceal
-            apply_conceal(bufnr, s.slug_hidden)
-          else
-            -- In-place edit — refresh conceal on current line only
-            local cursor_row = vim.api.nvim_win_get_cursor(0)[1] - 1
-            apply_conceal_line(bufnr, cursor_row, s.slug_hidden)
-          end
-          s._last_line_count = line_count
+          -- Conceal refresh strategy:
+          --   Insert mode → current line only (fast, no lag during typing)
+          --   Normal mode (TextChanged/InsertLeave) → full refresh (catches all drift)
+          -- With right_gravity=false, in-place edits only destroy extmarks on
+          -- the current line; other lines stay stable.
+          -- Full conceal + diff + validation refresh (only fires in normal mode
+          -- via TextChanged/InsertLeave — no lag during insert-mode typing)
+          apply_conceal(bufnr, s.slug_hidden)
           update_diff_signs(bufnr, s)
           update_validation(bufnr, s)
         end
@@ -2507,17 +2510,10 @@ function M.open(opts)
     end,
   })
 
-  -- Sanitize yank register: replace \x1f with │ so pasting elsewhere is clean
-  vim.api.nvim_create_autocmd("TextYankPost", {
-    buffer = bufnr,
-    callback = function()
-      local reg = vim.v.event.regname == "" and '"' or vim.v.event.regname
-      local contents = vim.fn.getreg(reg)
-      if contents:find(SEP_CHAR, 1, true) then
-        vim.fn.setreg(reg, contents:gsub(SEP_CHAR, "│"))
-      end
-    end,
-  })
+  -- NOTE: We intentionally do NOT sanitize \x1f in yank registers.
+  -- The \x1f chars are concealed as │ in the buffer. Sanitizing would break
+  -- internal paste (yyp) because the pasted line would have real │ (3 bytes)
+  -- instead of \x1f (1 byte), breaking split_cells and conceal.
 
   -- Cursor skip: prevent cursor from landing on \x1f byte or in concealed slug prefix
   -- Track previous cursor position for direction detection
@@ -2535,9 +2531,10 @@ function M.open(opts)
         -- The prefix is everything before (and including) the first \x1f.
         if s.slug_hidden then
           local first_sep = line:find(SEP_CHAR, 1, true)
-          if first_sep and col < first_sep then
-            -- Cursor is inside the hidden slug prefix — snap to first visible column
-            vim.api.nvim_win_set_cursor(0, { row, first_sep })
+          if first_sep and col <= first_sep then
+            -- Cursor is inside the hidden slug prefix (or on the \x1f) — snap to
+            -- first visible column (byte AFTER the \x1f separator)
+            vim.api.nvim_win_set_cursor(0, { row, first_sep })  -- first_sep is 1-indexed end of \x1f → 0-indexed start of visible
             prev_cursor = { row, first_sep }
             return
           end
@@ -2601,6 +2598,16 @@ function M.open(opts)
     local tree = vim.fn.undotree()
     if #tree.entries > 0 then
       vim.cmd("undo")
+      -- Schedule conceal refresh + redraw after undo — must be deferred so
+      -- Neovim finishes processing the undo before we re-apply extmarks.
+      vim.schedule(function()
+        local s = buf_states[bufnr]
+        if s then
+          apply_conceal(bufnr, s.slug_hidden)
+          update_diff_signs(bufnr, s)
+        end
+        vim.cmd("redraw!")
+      end)
     elseif undo_snapshots[bufnr] then
       M.undo(bufnr)
     else
