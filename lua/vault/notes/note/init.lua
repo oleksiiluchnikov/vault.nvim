@@ -755,9 +755,10 @@ end
 --- @param new_path string Absolute path for the new location.
 --- @param force? boolean Overwrite target if it exists (default false).
 --- @param verbose? boolean Show notification (default true).
---- @param opts? { update_links?: boolean } Extra options.
+--- @param opts? { update_links?: boolean, silent?: boolean } Extra options.
 ---   update_links: whether to patch wikilinks across the vault.
 ---     Defaults to `config.options.watcher.auto_update_links` (true).
+---   silent: suppress watcher notifications (default false).
 function Note:move(new_path, force, verbose, opts)
     local uv = vim.uv or vim.loop
     opts = opts or {}
