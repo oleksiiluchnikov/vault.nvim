@@ -39,6 +39,7 @@
 --- @field search_tool? string Tool used for searching vault. Example: "rg" or "fd"
 --- @field ui? { popups: table, notify: table} UI configuration settings
 --- @field notify? table Notification settings and preferences. Example: { on_write = true }
+--- @field log? vault.LogConfig Centralized logging configuration. Example: { level = "debug", file = true }
 --- @field features? { cmp: boolean, commands: boolean, blink: boolean } Feature toggles for plugin components. Example: { cmp = true, commands = true, blink = true }
 --- @field frontmatter? table YAML frontmatter configuration. Example: { keys = { tags = "tags" } }
 --- @field check_duplicate_basename? boolean Enable duplicate filename detection. Example: true
@@ -156,6 +157,12 @@ local DEFAULT_OPTIONS = {
     },
     notify = {
         on_write = true,
+    },
+    log = {
+        level = "info",    --- @type vault.LogLevel Minimum level for vim.notify display
+        file = false,      --- Write all levels to log file (stdpath("cache")/vault.log)
+        file_path = nil,   --- Override log file path
+        on_message = nil,  --- fun(level, scope, msg) callback for programmatic access
     },
     check_duplicate_basename = true,
     ui = {
@@ -407,7 +414,7 @@ end
 local function validate_config(options)
     -- If root is not specified, try to use demo vault
     if not options.root then
-        vim.notify("No root directory specified. Attempting to use demo vault", vim.log.levels.INFO)
+        require("vault.log").scope("config").info("No root directory specified. Attempting to use demo vault")
         local demo_vault_root = get_demo_vault_root()
         if demo_vault_root then
             options.root = demo_vault_root
@@ -430,7 +437,7 @@ end
 function Config.setup(options)
     -- Allow re-initialization with a warning
     if Config.is_initialized then
-        vim.notify("Reinitializing vault.nvim configuration", vim.log.levels.INFO)
+        require("vault.log").scope("config").info("Reinitializing vault.nvim configuration")
     end
 
     local defaults = Config.get_defaults()
