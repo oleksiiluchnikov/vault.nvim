@@ -148,13 +148,17 @@ local batch_rename = function(_, selections)
     local function on_enter()
         local lines = vim.api.nvim_buf_get_lines(popup.bufnr, 0, -1, false)
         if next(lines) == nil then
-            error("No lines to rename")
+            vim.notify("[vault] Nothing to rename — buffer is empty", vim.log.levels.WARN)
             return
         end
-        assert(#lines == #strings_to_rename, "Keep a line unchanged if you do not want to rename")
-        local class_name = selections[1].value.class.name
+        if #lines ~= #strings_to_rename then
+            vim.notify("[vault] Line count changed — keep lines unchanged if you don't want to rename them", vim.log.levels.WARN)
+            return
+        end
+        local class_name = selections[1].value.class and selections[1].value.class.name
         if not class_name then
-            error("Invalid object name: " .. vim.inspect(selections[1].value))
+            vim.notify("[vault] Cannot determine type of selected items", vim.log.levels.ERROR)
+            return
         end
         if class_name == "VaultNote" then
             rename_notes(selections, lines)

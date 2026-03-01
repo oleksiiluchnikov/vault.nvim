@@ -448,7 +448,7 @@ end
 function Note:edit(path)
     path = path or self.data.path
     if vim.fn.filereadable(path) == 0 then
-        error("File not found: " .. path)
+        vim.notify("[vault] File not found: " .. path, vim.log.levels.ERROR)
         return
     end
     vim.cmd("e " .. vim.fn.fnameescape(path))
@@ -566,7 +566,8 @@ end
 function Note:open_in_obsidian(path)
     local root = config.options.root
     if not root then
-        error("Vault root is not configured")
+        vim.notify("[vault] Vault root is not configured — run require('vault').setup()", vim.log.levels.ERROR)
+        return
     end
 
     local vault_name = vim.fn.fnamemodify(root, ":t")
