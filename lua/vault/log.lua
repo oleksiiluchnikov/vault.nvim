@@ -18,6 +18,9 @@
 ---   INFO   — normal user-facing messages (default display level)
 ---   WARN   — something unexpected but recoverable
 ---   ERROR  — something failed
+---
+--- Backend: uses teolog (structured NDJSON) when available, falls back to
+--- built-in vim.notify + io.open when teolog is not on the runtimepath.
 
 local M = {}
 
@@ -66,6 +69,99 @@ local function get_file_path()
   return cfg.file_path or (vim.fn.stdpath("cache") .. "/vault.log")
 end
 
+-------------------------------------------------------------------------------
+-- teolog backend (structured NDJSON, async file writes)
+-------------------------------------------------------------------------------
+
+--- Try to load teolog. Cached after first attempt.
+--- @return table|nil teolog module or nil
+local _teolog_checked = false
+local _teolog = nil
+
+local function get_teolog()
+  if _teolog_checked then
+    return _teolog
+  end
+  _teolog_checked = true
+  local ok, mod = pcall(require, "teolog")
+  if ok then
+    _teolog = mod
+  end
+  return _teolog
+end
+
+--- Lazily build the teolog Logger instance.
+--- Rebuilt when config changes (file toggle, path, callbacks).
+--- @type teolog.Logger|nil
+local _logger = nil
+local _logger_config_hash = ""
+
+--- Build a config hash to detect changes.
+local function config_hash()
+  local cfg = get_config()
+  return string.format("%s:%s:%s:%s",
+    tostring(cfg.level),
+    tostring(cfg.file),
+    tostring(cfg.file_path),
+    tostring(cfg.on_message ~= nil))
+end
+
+--- Get or create the teolog Logger, rebuilding if config changed.
+--- @return teolog.Logger|nil
+local function get_logger()
+  local teolog = get_teolog()
+  if not teolog then
+    return nil
+  end
+
+  local hash = config_hash()
+  if _logger and _logger_config_hash == hash then
+    return _logger
+  end
+
+  local cfg = get_config()
+  local sinks = {}
+
+  -- Sink 1: vim.notify (filtered by configured level)
+  local notify_min = LEVELS[cfg.level] or LEVELS.info
+  table.insert(sinks, teolog.sinks.NotifySink.new("vault", VIM_LEVELS[cfg.level] or vim.log.levels.INFO))
+
+  -- Sink 2: async NDJSON file (when file=true)
+  if cfg.file then
+    local path = cfg.file_path or get_file_path()
+    table.insert(sinks, teolog.sinks.FileSink.new(path))
+  end
+
+  -- Sink 3: callback sink (for process buffer log pane, tests, etc.)
+  if cfg.on_message and type(cfg.on_message) == "function" then
+    local cb = cfg.on_message
+    table.insert(sinks, teolog.sinks.CallbackSink.new(function(event)
+      -- Adapt teolog event back to vault callback signature: (level, scope, msg)
+      local scope = (event.ctx and event.ctx.scope) or ""
+      pcall(cb, event.lvl, scope, event.msg)
+    end))
+  end
+
+  local sink
+  if #sinks == 1 then
+    sink = sinks[1]
+  else
+    sink = teolog.sinks.MultiSink.new(sinks)
+  end
+
+  _logger = teolog.new("vault.nvim", sink)
+  -- Set teolog level to TRACE so all filtering is done per-sink
+  -- (NotifySink handles its own min_level, FileSink gets everything)
+  _logger:set_level(teolog.Level.TRACE)
+  _logger_config_hash = hash
+
+  return _logger
+end
+
+-------------------------------------------------------------------------------
+-- Fallback backend (original implementation, no teolog dependency)
+-------------------------------------------------------------------------------
+
 --- @param level vault.LogLevel
 --- @return boolean
 local function should_display(level)
@@ -74,7 +170,7 @@ local function should_display(level)
   return (LEVELS[level] or LEVELS.info) >= min
 end
 
---- Write a line to the log file
+--- Write a line to the log file (synchronous fallback)
 --- @param line string
 local function write_file(line)
   local cfg = get_config()
@@ -89,13 +185,12 @@ local function write_file(line)
   end
 end
 
---- Core emit function. All public methods funnel through here.
+--- Fallback emit (no teolog). Preserves original behavior exactly.
 --- @param level vault.LogLevel
 --- @param scope string
 --- @param fmt string
 --- @param ... any
-local function emit(level, scope, fmt, ...)
-  -- Lazy format: only build the string if at least one sink needs it
+local function emit_fallback(level, scope, fmt, ...)
   local needs_display = should_display(level)
   local cfg = get_config()
   local needs_file = cfg.file
@@ -105,10 +200,8 @@ local function emit(level, scope, fmt, ...)
     return
   end
 
-  -- Format the message
   local ok, msg = pcall(string.format, fmt, ...)
   if not ok then
-    -- Fallback: concatenate raw args if format fails
     local parts = { fmt }
     for i = 1, select("#", ...) do
       parts[#parts + 1] = tostring(select(i, ...))
@@ -116,23 +209,19 @@ local function emit(level, scope, fmt, ...)
     msg = table.concat(parts, " ")
   end
 
-  -- Build prefixed message
   local prefix = scope ~= "" and string.format("[vault.%s]", scope) or "[vault]"
   local prefixed = string.format("%s %s", prefix, msg)
 
-  -- Sink 1: vim.notify (filtered by level)
   if needs_display then
     vim.notify(prefixed, VIM_LEVELS[level])
   end
 
-  -- Sink 2: log file (all levels, timestamped)
   if needs_file then
     local timestamp = os.date("%Y-%m-%d %H:%M:%S")
     local lvl_tag = level:upper()
     write_file(string.format("[%s] [%s] %s", timestamp, lvl_tag, prefixed))
   end
 
-  -- Sink 3: callback (for process buffer log pane, tests, etc.)
   if needs_callback then
     local cb = cfg.on_message
     if type(cb) == "function" then
@@ -140,6 +229,56 @@ local function emit(level, scope, fmt, ...)
     end
   end
 end
+
+-------------------------------------------------------------------------------
+-- Unified emit: teolog backend or fallback
+-------------------------------------------------------------------------------
+
+--- teolog level map
+local TEOLOG_LEVELS = {
+  trace = 0,
+  debug = 1,
+  info = 2,
+  warn = 3,
+  error = 4,
+}
+
+--- Core emit function. All public methods funnel through here.
+--- @param level vault.LogLevel
+--- @param scope string
+--- @param fmt string
+--- @param ... any
+local function emit(level, scope, fmt, ...)
+  local logger = get_logger()
+
+  if not logger then
+    -- No teolog available — use original fallback
+    emit_fallback(level, scope, fmt, ...)
+    return
+  end
+
+  -- Format the message (same fallback logic as before)
+  local ok, msg = pcall(string.format, fmt, ...)
+  if not ok then
+    local parts = { fmt }
+    for i = 1, select("#", ...) do
+      parts[#parts + 1] = tostring(select(i, ...))
+    end
+    msg = table.concat(parts, " ")
+  end
+
+  -- Emit through teolog with scope as context
+  local teolog_level = TEOLOG_LEVELS[level] or TEOLOG_LEVELS.info
+  if scope ~= "" then
+    logger:emit(teolog_level, msg, { scope = scope, module = scope })
+  else
+    logger:emit(teolog_level, msg)
+  end
+end
+
+-------------------------------------------------------------------------------
+-- Public API (unchanged)
+-------------------------------------------------------------------------------
 
 --- Create level methods for a given scope
 --- @param scope string
@@ -205,7 +344,7 @@ end
 
 --- Tail the log file into a scratch buffer
 function M.open()
-  local path = get_file_path()
+  local path = M.get_file_path()
   if vim.fn.filereadable(path) == 0 then
     M.info("No log file yet: %s", path)
     return
