@@ -1,4 +1,5 @@
 local completions = require("vault.commands.completions")
+local log = require("vault.log").scope("cmd")
 --- @class vault.commands.callback
 local callbacks = {}
 
@@ -11,7 +12,7 @@ local function safe_find(picker, empty_msg)
     if picker then
         picker:find()
     else
-        vim.notify("[vault] " .. (empty_msg or "No results found"), vim.log.levels.INFO)
+        log.info("%s", empty_msg or "No results found")
     end
 end
 
@@ -67,7 +68,7 @@ function callbacks.toggle_link()
         url_start = s + 1
     end
 
-    vim.notify("[vault] No URL or Markdown link found under cursor", vim.log.levels.WARN)
+        log.warn("No URL or Markdown link found under cursor")
 end
 
 --- ============================================================================
@@ -186,7 +187,7 @@ local function build_subcommands()
                     local notes = require("vault.notes")()
                     local note = notes:filter("slug", input, "exact"):list()[1]
                     if not note then
-                        vim.notify("[vault] Note not found: " .. input, vim.log.levels.WARN)
+                        log.warn("Note not found: %s", input)
                         return
                     end
                     notes = require("vault.notes")()
@@ -212,7 +213,7 @@ local function build_subcommands()
                         path = vim.fn.expand("%:p")
                     end
                     if not path:match("%.md$") then
-                        vim.notify("[vault] Current buffer is not a note", vim.log.levels.WARN)
+                        log.warn("Current buffer is not a note")
                         return
                     end
                     local note = require("vault.notes.note")(path)
@@ -222,7 +223,7 @@ local function build_subcommands()
                         title = "Vault",
                         on_yes = function() note:delete(permanent) end,
                         on_no = function()
-                            vim.notify("[vault] Delete cancelled", vim.log.levels.INFO)
+                            log.info("Delete cancelled")
                         end,
                     })
                 end,
@@ -234,7 +235,7 @@ local function build_subcommands()
                 run = function()
                     local path = vim.fn.expand("%:p")
                     if not path:match("%.md$") then
-                        vim.notify("[vault] Current buffer is not a note", vim.log.levels.WARN)
+                        log.warn("Current buffer is not a note")
                         return
                     end
                     require("vault.notes.note")(path):preview()
@@ -244,7 +245,7 @@ local function build_subcommands()
                 run = function()
                     local path = vim.fn.expand("%:p")
                     if not path:match("%.md$") then
-                        vim.notify("[vault] Current buffer is not a note", vim.log.levels.WARN)
+                        log.warn("Current buffer is not a note")
                         return
                     end
                     require("vault.notes.note")(path):open_in_obsidian()
@@ -363,10 +364,9 @@ local function build_subcommands()
             rename = {
                 run = function(args)
                     if #args < 2 then
-                        vim.notify("[vault] Usage: :Vault tags rename <old> <new>", vim.log.levels.WARN)
+                        log.warn("Usage: :Vault tags rename <old> <new>")
                         return
-                    end
-                    require("vault.api").rename_tag(args[1], args[2])
+                    end                    require("vault.api").rename_tag(args[1], args[2])
                 end,
                 complete = function(prefix)
                     return completions.tags(nil, "Vault tags rename " .. prefix, nil) or {}
@@ -375,14 +375,14 @@ local function build_subcommands()
             merge = {
                 run = function(args)
                     if #args < 2 then
-                        vim.notify("[vault] Usage: :Vault tags merge <target> <source1> [source2 ...]", vim.log.levels.WARN)
+                        log.warn("Usage: :Vault tags merge <target> <source1> [source2 ...]")
                         return
                     end
                     local target = args[1]
                     for i = 2, #args do
                         require("vault.api").rename_tag(args[i], target)
                     end
-                    vim.notify(string.format("[vault] Merged %d tags into '%s'", #args - 1, target), vim.log.levels.INFO)
+                    log.info("Merged %d tags into '%s'", #args - 1, target)
                 end,
                 complete = function(prefix)
                     return completions.tags(nil, "Vault tags merge " .. prefix, nil) or {}
@@ -391,7 +391,7 @@ local function build_subcommands()
             doc = {
                 run = function(args)
                     if #args == 0 then
-                        vim.notify("[vault] Usage: :Vault tags doc <tag_name>", vim.log.levels.WARN)
+                        log.warn("Usage: :Vault tags doc <tag_name>")
                         return
                     end
                     require("vault.api").edit_tag_documentation(args[1])
@@ -437,17 +437,17 @@ local function build_subcommands()
             rename = {
                 run = function(args)
                     if #args < 2 then
-                        vim.notify("[vault] Usage: :Vault properties rename <old> <new>", vim.log.levels.WARN)
+                        log.warn("Usage: :Vault properties rename <old> <new>")
                         return
                     end
                     local properties = require("vault.properties")()
                     local property = properties.map[args[1]]
                     if not property then
-                        vim.notify("[vault] Property not found: " .. args[1], vim.log.levels.WARN)
+                        log.warn("Property not found: %s", args[1])
                         return
                     end
                     property:rename(args[2])
-                    vim.notify(string.format("[vault] Renamed property '%s' -> '%s'", args[1], args[2]), vim.log.levels.INFO)
+                    log.info("Renamed property '%s' -> '%s'", args[1], args[2])
                 end,
                 complete = function(prefix)
                     local ok, props = pcall(function()
@@ -585,7 +585,7 @@ local function build_subcommands()
                         local bases = Bases()
                         local base = bases:get(base_name)
                         if not base then
-                            vim.notify("[vault] Base not found: " .. base_name, vim.log.levels.ERROR)
+                            log.error("Base not found: %s", base_name)
                             return
                         end
                         bases_editor.open({ base = base, columns = columns_arg })
@@ -595,7 +595,7 @@ local function build_subcommands()
                         if ok then
                             picker():find()
                         else
-                            vim.notify("[vault] Telescope bases picker not available: " .. tostring(picker), vim.log.levels.ERROR)
+                            log.error("Telescope bases picker not available: %s", tostring(picker))
                         end
                     end
                     return
@@ -680,7 +680,7 @@ local function build_subcommands()
                 run = function(args)
                     local text = table.concat(args, " ")
                     if text == "" then
-                        vim.notify("[vault] Usage: :Vault today append <text>", vim.log.levels.WARN)
+                        log.warn("Usage: :Vault today append <text>")
                         return
                     end
                     callbacks.daily_append(text)
@@ -708,25 +708,25 @@ local function build_subcommands()
                 local sub = args[1] or "status"
                 if sub == "status" then
                     if w and w.is_watching then
-                        vim.notify("[vault] Watcher is active", vim.log.levels.INFO)
+                        log.info("Watcher is active")
                     else
-                        vim.notify("[vault] Watcher is inactive", vim.log.levels.INFO)
+                        log.info("Watcher is inactive")
                     end
                 elseif sub == "start" then
                     local Watcher = require("vault.watcher")
                     w = w or Watcher()
                     w:start()
                     state.set_global_key("watcher", w)
-                    vim.notify("[vault] Watcher started", vim.log.levels.INFO)
+                    log.info("Watcher started")
                 elseif sub == "stop" then
                     if w and w.is_watching then
                         w:stop()
-                        vim.notify("[vault] Watcher stopped", vim.log.levels.INFO)
+                        log.info("Watcher stopped")
                     else
-                        vim.notify("[vault] Watcher is not running", vim.log.levels.WARN)
+                        log.warn("Watcher is not running")
                     end
                 else
-                    vim.notify("[vault] Usage: :Vault watcher [start|stop|status]", vim.log.levels.WARN)
+                    log.warn("Usage: :Vault watcher [start|stop|status]")
                 end
             end,
             complete = function(prefix)
@@ -741,12 +741,12 @@ local function build_subcommands()
                 local config = require("vault.config")
                 local trash_dir = config.options.root .. "/.trash"
                 if vim.fn.isdirectory(trash_dir) == 0 then
-                    vim.notify("[vault] Trash is empty (.trash/ does not exist)", vim.log.levels.INFO)
+                    log.info("Trash is empty (.trash/ does not exist)")
                     return
                 end
                 local files = vim.fn.globpath(trash_dir, "*.md", false, true)
                 if #files == 0 then
-                    vim.notify("[vault] Trash is empty", vim.log.levels.INFO)
+                    log.info("Trash is empty")
                     return
                 end
                 -- Use vim.ui.select for simplicity
@@ -766,22 +766,22 @@ local function build_subcommands()
                             { key = "r", label = "Restore", action = function()
                                 local restore_path = config.options.root .. "/" .. choice
                                 if vim.fn.filereadable(restore_path) == 1 then
-                                    vim.notify("[vault] A note with that name already exists in the vault", vim.log.levels.ERROR)
+                                    log.error("A note with that name already exists in the vault")
                                     return
                                 end
                                 local ok, err = (vim.uv or vim.loop).fs_rename(full_path, restore_path)
                                 if ok then
-                                    vim.notify("[vault] Restored: " .. choice, vim.log.levels.INFO)
+                                    log.info("Restored: %s", choice)
                                 else
-                                    vim.notify("[vault] Restore failed: " .. tostring(err), vim.log.levels.ERROR)
+                                    log.error("Restore failed: %s", tostring(err))
                                 end
                             end },
                             { key = "d", label = "Permanent delete", action = function()
                                 local ok, err = os.remove(full_path)
                                 if ok then
-                                    vim.notify("[vault] Permanently deleted: " .. choice, vim.log.levels.INFO)
+                                    log.info("Permanently deleted: %s", choice)
                                 else
-                                    vim.notify("[vault] Delete failed: " .. tostring(err), vim.log.levels.ERROR)
+                                    log.error("Delete failed: %s", tostring(err))
                                 end
                             end, danger = true },
                             { key = "c", label = "Cancel", action = function() end },
@@ -823,7 +823,7 @@ local function build_subcommands()
                 local config = require("vault.config")
                 local inbox_dir = config.dir("inbox")
                 if not inbox_dir or vim.fn.isdirectory(inbox_dir) == 0 then
-                    vim.notify("[vault] Inbox directory not configured or does not exist (dirs.inbox)", vim.log.levels.WARN)
+                    log.warn("Inbox directory not configured or does not exist (dirs.inbox)")
                     return
                 end
                 safe_find(
@@ -852,7 +852,7 @@ local function build_subcommands()
                     if note then
                         opts.note = note
                     else
-                        vim.notify("[vault] Note not found: " .. args[1], vim.log.levels.WARN)
+                        log.warn("Note not found: %s", args[1])
                         return
                     end
                 end
@@ -868,12 +868,12 @@ local function build_subcommands()
             run = function(args)
                 local func_name = args[1]
                 if not func_name then
-                    vim.notify("[vault] Usage: :Vault api <function> [args...]", vim.log.levels.INFO)
+                    log.info("Usage: :Vault api <function> [args...]")
                     return
                 end
                 local api_func = require("vault.api")[func_name]
                 if not api_func then
-                    vim.notify("[vault] Unknown API function: " .. func_name, vim.log.levels.WARN)
+                    log.warn("Unknown API function: %s", func_name)
                     return
                 end
                 api_func(unpack(args, 2))
@@ -917,7 +917,7 @@ function callbacks.api(args)
                 node.run(remaining, args)
                 return
             end
-            vim.notify("[vault] Unknown subcommand: " .. table.concat(vim.list_slice(fargs, 1, i), " "), vim.log.levels.WARN)
+            log.warn("Unknown subcommand: %s", table.concat(vim.list_slice(fargs, 1, i), " "))
             return
         end
         depth = i
@@ -949,7 +949,7 @@ function callbacks.api(args)
             end
         end
         table.sort(subs)
-        vim.notify("[vault] Subcommands: " .. table.concat(subs, ", "), vim.log.levels.INFO)
+        log.info("Subcommands: %s", table.concat(subs, ", "))
     end
 end
 
@@ -1076,12 +1076,12 @@ function callbacks.today()
     end
     local daily_dir = config.dir("journal.daily")
     if not daily_dir then
-        vim.notify("[vault] Journal daily directory not configured (dirs.journal.daily)", vim.log.levels.ERROR)
+        log.error("Journal daily directory not configured (dirs.journal.daily)")
         return
     end
     local path = string.format("%s/%s%s", daily_dir, today, config.options.ext)
     if vim.fn.filereadable(path) == 0 then
-        vim.notify("[vault] Initializing today's journal note", vim.log.levels.INFO)
+        log.info("Initializing today's journal note")
     end
     vim.cmd("e " .. vim.fn.fnameescape(path))
 end
@@ -1095,14 +1095,14 @@ function callbacks.daily_append(text)
     if type(today) ~= "string" then return end
     local daily_dir = config.dir("journal.daily")
     if not daily_dir then
-        vim.notify("[vault] Journal daily directory not configured (dirs.journal.daily)", vim.log.levels.ERROR)
+        log.error("Journal daily directory not configured (dirs.journal.daily)")
         return
     end
     local path = string.format("%s/%s%s", daily_dir, today, config.options.ext)
     local Note = require("vault.notes.note")
     local note = Note(path)
     note:append("- " .. text)
-    vim.notify("[vault] Appended to " .. today, vim.log.levels.INFO)
+    log.info("Appended to %s", today)
 end
 
 --- Open ask --dictate with today's daily note as context, append result.
@@ -1110,7 +1110,7 @@ end
 --- @return nil
 function callbacks.today_dictate()
     if vim.fn.executable("ask") == 0 then
-        vim.notify("[vault] `ask` not found in PATH — install it to use :Vault today dictate", vim.log.levels.ERROR)
+        log.error("`ask` not found in PATH — install it to use :Vault today dictate")
         return
     end
     local config = require("vault.config")
@@ -1118,7 +1118,7 @@ function callbacks.today_dictate()
     if type(today) ~= "string" then return end
     local daily_dir = config.dir("journal.daily")
     if not daily_dir then
-        vim.notify("[vault] Journal daily directory not configured", vim.log.levels.ERROR)
+        log.error("Journal daily directory not configured")
         return
     end
     local path = string.format("%s/%s%s", daily_dir, today, config.options.ext)
@@ -1177,7 +1177,7 @@ function callbacks.open_notes_status_picker(args)
         end
     end
     if next(statuses) == nil then
-        vim.notify("[vault] No matching status tags found", vim.log.levels.INFO)
+        log.info("No matching status tags found")
         return
     end
     local notes = require("vault.notes")():filter({ "tags", statuses, {}, "startswith", "all" })
@@ -1247,12 +1247,12 @@ function callbacks.yesterday()
     local yesterday = os.date("%Y-%m-%d", os.time() - 60 * 60 * 24)
     local daily_dir = config.dir("journal.daily")
     if not daily_dir then
-        vim.notify("[vault] Journal daily directory not configured (dirs.journal.daily)", vim.log.levels.ERROR)
+        log.error("Journal daily directory not configured (dirs.journal.daily)")
         return
     end
     local path = string.format("%s/%s%s", daily_dir, yesterday, config.options.ext)
     if vim.fn.filereadable(path) == 0 then
-        vim.notify("[vault] Initializing yesterday's journal note", vim.log.levels.INFO)
+        log.info("Initializing yesterday's journal note")
     end
     vim.cmd("e " .. vim.fn.fnameescape(path))
 end
@@ -1271,7 +1271,7 @@ end
 function callbacks.rename(args)
     local ok_note, note = pcall(require("vault.notes.note"), vim.fn.expand("%:p"))
     if not ok_note then
-        vim.notify("[vault] Current buffer is not a vault note", vim.log.levels.WARN)
+        log.warn("Current buffer is not a vault note")
         return
     end
     local new_slug
@@ -1279,7 +1279,7 @@ function callbacks.rename(args)
         -- Interactive rename: prompt for new slug
         new_slug = vim.fn.input("Rename to: ", note.data.slug)
         if not new_slug or new_slug == "" or new_slug == note.data.slug then
-            vim.notify("[vault] Rename cancelled", vim.log.levels.INFO)
+            log.info("Rename cancelled")
             return
         end
     else
@@ -1294,7 +1294,7 @@ function callbacks.rename(args)
         note:move(new_path)
     end)
     if not ok then
-        vim.notify("[vault] Failed to move note: " .. tostring(err):match("[^\n]+"), vim.log.levels.ERROR)
+        log.error("Failed to move note: %s", tostring(err):match("[^\n]+"))
         return
     end
 
@@ -1315,12 +1315,12 @@ end
 function callbacks.note_inlinks_picker()
     local ok, note = pcall(require("vault.notes.note"), vim.fn.expand("%:p"))
     if not ok or note == nil then
-        vim.notify("[vault] Current buffer is not a vault note", vim.log.levels.WARN)
+        log.warn("Current buffer is not a vault note")
         return
     end
     local inlinks = note.data.inlinks or {}
     if next(inlinks) == nil then
-        vim.notify("[vault] No inlinks", vim.log.levels.INFO)
+        log.info("No inlinks")
         return
     end
     local inlink_slugs = vim.tbl_keys(inlinks)
@@ -1343,12 +1343,12 @@ end
 function callbacks.note_outlinks_picker()
     local ok, note = pcall(require("vault.notes.note"), vim.fn.expand("%:p"))
     if not ok or note == nil then
-        vim.notify("[vault] Current buffer is not a vault note", vim.log.levels.WARN)
+        log.warn("Current buffer is not a vault note")
         return
     end
     local outlinks = note.data.outlinks or {}
     if next(outlinks) == nil then
-        vim.notify("[vault] No outlinks", vim.log.levels.INFO)
+        log.info("No outlinks")
         return
     end
     local target_slugs = {}
@@ -1375,11 +1375,11 @@ end
 function callbacks.note_tags_picker(args)
     local ok, note = pcall(require("vault.notes.note"), vim.fn.expand("%:p"))
     if not ok or note == nil then
-        vim.notify("[vault] Current buffer is not a vault note", vim.log.levels.WARN)
+        log.warn("Current buffer is not a vault note")
         return
     end
     if next(note.data.tags) == nil then
-        vim.notify("[vault] No tags", vim.log.levels.INFO)
+        log.info("No tags")
         return
     end
 
@@ -1422,7 +1422,7 @@ function callbacks.note_from_selected_text(args)
 
     -- Validate marks
     if start_pos[1] == 0 or end_pos[1] == 0 then
-        vim.notify("[vault] No selection found", vim.log.levels.WARN)
+        log.warn("No selection found")
         return
     end
 
@@ -1435,7 +1435,7 @@ function callbacks.note_from_selected_text(args)
     if col2 == 2147483647 then
         local line_content = vim.api.nvim_buf_get_lines(0, row2, row2 + 1, false)[1]
         if not line_content then
-            vim.notify("[vault] Invalid selection range", vim.log.levels.WARN)
+            log.warn("Invalid selection range")
             return
         end
         col2 = #line_content
@@ -1446,14 +1446,14 @@ function callbacks.note_from_selected_text(args)
 
     local lines = vim.api.nvim_buf_get_text(0, row1, col1, row2, col2, {})
     if next(lines) == nil then
-        vim.notify("[vault] Invalid text", vim.log.levels.WARN)
+        log.warn("Invalid text")
         return
     end
 
     --- @type string
     local new_note_slug = vim.fn.input("New note slug: ")
     if not new_note_slug or new_note_slug == "" then
-        vim.notify("[vault] Invalid slug", vim.log.levels.WARN)
+        log.warn("Invalid slug")
         return
     end
 
@@ -1465,7 +1465,7 @@ function callbacks.note_from_selected_text(args)
     --- @type vault.path
     local new_note_path = require("vault.utils").slug_to_path(new_note_slug)
     if vim.fn.filereadable(new_note_path) == 1 then
-        vim.notify("[vault] File already exists: " .. new_note_path, vim.log.levels.WARN)
+        log.warn("File already exists: %s", new_note_path)
         return
     end
 
@@ -1543,17 +1543,17 @@ function callbacks.note(args)
         -- Apply method to the current buffer's note
         local ok, note = pcall(require("vault.notes.note"), vim.fn.expand("%:p"))
         if not ok or note == nil then
-            vim.notify("[vault] No note found in current buffer", vim.log.levels.WARN)
+            log.warn("No note found in current buffer")
             return
         end
         local method = fargs[1]
         if type(note[method]) ~= "function" then
-            vim.notify("[vault] Unknown note method: " .. method, vim.log.levels.WARN)
+            log.warn("Unknown note method: %s", method)
             return
         end
         local output = note[method](note)
         if output then
-            vim.notify(tostring(output), vim.log.levels.INFO)
+            log.info("%s", tostring(output))
         end
         return
     end
@@ -1565,18 +1565,18 @@ function callbacks.note(args)
     end
     local note = require("vault.notes")().map[slug]
     if not note then
-        vim.notify("[vault] Note not found: " .. tostring(slug), vim.log.levels.WARN)
+        log.warn("Note not found: %s", tostring(slug))
         return
     end
     if not note[method] then
-        vim.notify("[vault] Unknown method: " .. tostring(method), vim.log.levels.WARN)
+        log.warn("Unknown method: %s", tostring(method))
         return
     end
     table.insert(arguments, 1, note)
     -- Apply the method to the note
     local ok, output = pcall(note[method], unpack(arguments))
     if not ok then
-        vim.notify("[vault] Error: " .. tostring(output):match("[^\n]+"), vim.log.levels.ERROR)
+        log.error("Error: %s", tostring(output):match("[^\n]+"))
         return
     end
     if output then
@@ -1621,10 +1621,10 @@ local function construct_notes_picker_args(input)
             end
             safe_find(pickers.notes({ notes = preset }), "No notes found for preset: " .. args[1])
         elseif args[1] == "by" then
-            vim.notify("[vault] Need further arguments", vim.log.levels.WARN)
+            log.warn("Need further arguments")
         end
     elseif #args == 2 then
-        vim.notify("[vault] Need further arguments", vim.log.levels.WARN)
+        log.warn("Need further arguments")
         return
     elseif #args == 3 then
         if type(args[3]) ~= "table" then
