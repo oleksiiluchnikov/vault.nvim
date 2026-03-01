@@ -136,7 +136,7 @@ function Title:sync(path)
         return
     end
 
-    vim.cmd("e " .. new_path)
+    vim.cmd("e " .. vim.fn.fnameescape(new_path))
 end
 
 function Title:__tostring()

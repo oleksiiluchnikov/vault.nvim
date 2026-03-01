@@ -48,7 +48,7 @@ return function(opts)
         -- vim.cmd("write") -- write changes to disk
         -- we couldnd write becaust the picker is still open
         vim.api.nvim_buf_delete(bufnr_of_note, { force = true })
-        vim.cmd("edit " .. new_path)
+        vim.cmd("edit " .. vim.fn.fnameescape(new_path))
     end
 
     --- @param entry vault.TelescopeEntry
