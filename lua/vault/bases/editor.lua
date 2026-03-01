@@ -973,12 +973,25 @@ local function set_winbar(winid, st)
   if not vim.api.nvim_win_is_valid(winid) then return end
 
   local textoff = get_textoff(winid)
-  -- leftcol: how many screen columns the buffer has scrolled right
+  -- leftcol: how many virtual columns the buffer has scrolled right.
+  -- Neovim computes leftcol in virtcol space, which counts concealed bytes.
+  -- When slug_hidden, the concealed prefix (slug + \x1f) adds phantom width
+  -- to leftcol that has no corresponding header content.  Subtract it so the
+  -- header aligns with the visible buffer content.
   local leftcol = vim.api.nvim_win_call(winid, function()
     return vim.fn.winsaveview().leftcol
   end)
+  -- When slug_hidden, leftcol includes the concealed prefix's virtual width
+  -- (Neovim counts concealed bytes in leftcol space).  Subtract the phantom
+  -- width to get the real scroll offset within the visible columns.
+  -- When leftcol < phantom the cursor is in the phantom zone — the concealed
+  -- region has 0 display width so the visible data is still at screen col 0.
+  -- In both cases: clamp to 0, never add leading spaces.
+  if st.slug_hidden and st._slug_phantom_vcol then
+    leftcol = math.max(0, leftcol - st._slug_phantom_vcol)
+  end
 
-  -- Build full header chunks then skip/trim based on leftcol
+  -- Build full header chunks then skip/trim based on adjusted leftcol
   local chunks = build_header_chunks(st)
 
   -- Walk chunks, skipping characters before leftcol
@@ -2592,6 +2605,18 @@ function M.open(opts)
   set_buffer_lines(bufnr, lines)
   vim.bo[bufnr].modifiable = true
 
+  -- Precompute concealed slug prefix virtcol offset for winbar alignment.
+  -- Neovim's leftcol is in virtcol space (doesn't account for concealment).
+  -- The concealed prefix adds phantom virtual columns that the header must skip.
+  if slug_hidden and lines[1] then
+    local first_sep = lines[1]:find(SEP_CHAR, 1, true)
+    if first_sep then
+      -- Prefix = bytes 0..first_sep-1 (slug) + byte first_sep (\x1f)
+      -- Use strdisplaywidth to match what virtcol counts
+      st._slug_phantom_vcol = vim.fn.strdisplaywidth(lines[1]:sub(1, first_sep))
+    end
+  end
+
   -- Open in current window
   vim.api.nvim_set_current_buf(bufnr)
   local winid = vim.api.nvim_get_current_win()
@@ -2691,8 +2716,16 @@ function M.open(opts)
           local first_sep = line:find(SEP_CHAR, 1, true)
           if first_sep and col <= first_sep then
             -- Cursor is inside the hidden slug prefix (or on the \x1f) — snap to
-            -- first visible column (byte AFTER the \x1f separator)
-            vim.api.nvim_win_set_cursor(0, { row, first_sep })  -- first_sep is 1-indexed end of \x1f → 0-indexed start of visible
+            -- first visible column (byte AFTER the \x1f separator).
+            vim.api.nvim_win_set_cursor(0, { row, first_sep })
+            -- Also align the viewport so the first visible column is at screen col 0.
+            -- Without this, Neovim positions the cursor at the rightmost visible
+            -- column (virtcol ~254 with leftcol=70), hiding the column data.
+            if s._slug_phantom_vcol then
+              local v = vim.fn.winsaveview()
+              v.leftcol = s._slug_phantom_vcol  -- scroll right past the phantom prefix
+              vim.fn.winrestview(v)
+            end
             prev_cursor = { row, first_sep }
             return
           end
@@ -2710,6 +2743,12 @@ function M.open(opts)
           end
         end
         prev_cursor = { row, col }
+
+        -- Update winbar to sync header with new leftcol after cursor movement.
+        -- WinScrolled handles scroll events but misses cursor-driven leftcol changes.
+        if s.winid and vim.api.nvim_win_is_valid(s.winid) then
+          set_winbar(s.winid, s)
+        end
       end)
     end,
   })
