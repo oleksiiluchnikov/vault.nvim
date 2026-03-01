@@ -25,6 +25,8 @@
 
 local M = {}
 
+local log = require("vault.log").scope("editor")
+
 -- ─── Highlight groups ─────────────────────────────────────────────────────────
 -- Define once on module load; users can override in their colorscheme.
 -- Use link-fallback so we work with any theme.
@@ -759,10 +761,7 @@ local function build_records(notes_map, columns, base)
     end
   end
   if skipped > 0 then
-    vim.notify(
-      string.format("[vault] Warning: %d notes skipped due to parse errors", skipped),
-      vim.log.levels.WARN
-    )
+    log.warn("Warning: %d notes skipped due to parse errors", skipped)
   end
   table.sort(records, function(a, b) return a.slug < b.slug end)
   return records
@@ -1382,12 +1381,10 @@ local function diff_buffer(bufnr, st, silent)
   -- changed but extmarks still hold the old slug until reload).  Suppress the
   -- notification in that case; only surface it during background diff checks.
   if drift_count > 0 and not silent then
-    vim.notify(
-      string.format(
-        "[vault] %d row%s lost identity tracking — %d recovered. If data looks wrong, reopen with :Vault process",
-        drift_count, drift_count == 1 and "" or "s", reconciled_count
-      ),
-      drift_count > reconciled_count and vim.log.levels.WARN or vim.log.levels.INFO
+    local drift_log = drift_count > reconciled_count and log.warn or log.info
+    drift_log(
+      "%d row%s lost identity tracking — %d recovered. If data looks wrong, reopen with :Vault process",
+      drift_count, drift_count == 1 and "" or "s", reconciled_count
     )
   end
 
@@ -1514,23 +1511,15 @@ local function diff_buffer(bufnr, st, silent)
 
   if snapshot_size > 0 and non_empty_lines > 0 and identified_lines == 0 then
     -- TOTAL identity loss even after reconciliation. Refuse ALL operations.
-    vim.notify(
-      "[vault] Something went wrong with this buffer — refusing to save. "
-        .. "Please close and reopen with :Vault process",
-      vim.log.levels.ERROR
-    )
+    log.error("Something went wrong with this buffer — refusing to save. Please close and reopen with :Vault process")
     return { updates = {}, deletes = {}, creates = {}, _integrity_error = true }
   end
 
   if snapshot_size > 0 and identified_lines < non_empty_lines * 0.5 then
     -- PARTIAL identity loss: many lines unidentifiable. Refuse deletes.
-    vim.notify(
-      string.format(
-        "[vault] Only %d of %d rows could be matched to notes — "
-          .. "deletes skipped for safety (updates still applied)",
-        identified_lines, non_empty_lines
-      ),
-      vim.log.levels.WARN
+    log.warn(
+      "Only %d of %d rows could be matched to notes — deletes skipped for safety (updates still applied)",
+      identified_lines, non_empty_lines
     )
     -- Return updates/creates only — no deletes
     return diff
@@ -1556,7 +1545,7 @@ local function set_frontmatter_field(path, key, value)
   -- Safety: verify path is inside vault root
   local safe_path, path_err = validate_path_in_vault(path)
   if not safe_path then
-    vim.notify("[vault] SAFETY: " .. path_err, vim.log.levels.ERROR)
+    log.error("SAFETY: %s", path_err)
     return
   end
 
@@ -1586,7 +1575,7 @@ local function set_frontmatter_field(path, key, value)
     for _, l in ipairs(lines) do table.insert(new_lines, l) end
     local write_ok, write_err = atomic_writefile(safe_path, new_lines)
     if not write_ok then
-      vim.notify("[vault] SAFETY: " .. write_err, vim.log.levels.ERROR)
+      log.error("SAFETY: %s", write_err)
     end
     return
   end
@@ -1654,17 +1643,14 @@ local function set_frontmatter_field(path, key, value)
   -- Safety: verify body content is preserved (same number of lines after frontmatter)
   local new_body_count = #result - (#new_fm + 2)  -- +2 for the two "---" lines
   if new_body_count ~= body_line_count then
-    vim.notify(
-      string.format("[vault] SAFETY: Aborting frontmatter write to %s — body line count mismatch (%d vs %d)",
-        vim.fn.fnamemodify(safe_path, ":t"), new_body_count, body_line_count),
-      vim.log.levels.ERROR
-    )
+    log.error("SAFETY: Aborting frontmatter write to %s — body line count mismatch (%d vs %d)",
+      vim.fn.fnamemodify(safe_path, ":t"), new_body_count, body_line_count)
     return
   end
 
   local write_ok, write_err = atomic_writefile(safe_path, result)
   if not write_ok then
-    vim.notify("[vault] SAFETY: " .. write_err, vim.log.levels.ERROR)
+    log.error("SAFETY: %s", write_err)
   end
 end
 
@@ -1679,7 +1665,7 @@ local function set_frontmatter_fields(path, fields)
   -- Safety: verify path is inside vault root
   local safe_path, path_err = validate_path_in_vault(path)
   if not safe_path then
-    vim.notify("[vault] SAFETY: " .. path_err, vim.log.levels.ERROR)
+    log.error("SAFETY: %s", path_err)
     return
   end
 
@@ -1719,7 +1705,7 @@ local function set_frontmatter_fields(path, fields)
     for _, l in ipairs(lines) do table.insert(new_lines, l) end
     local write_ok, write_err = atomic_writefile(safe_path, new_lines)
     if not write_ok then
-      vim.notify("[vault] SAFETY: " .. write_err, vim.log.levels.ERROR)
+      log.error("SAFETY: %s", write_err)
     end
     return
   end
@@ -1815,17 +1801,14 @@ local function set_frontmatter_fields(path, fields)
   -- Safety: verify body content is preserved
   local new_body_count = #result - (#new_fm + 2)
   if new_body_count ~= body_line_count then
-    vim.notify(
-      string.format("[vault] SAFETY: Aborting batch frontmatter write to %s — body line count mismatch (%d vs %d)",
-        vim.fn.fnamemodify(safe_path, ":t"), new_body_count, body_line_count),
-      vim.log.levels.ERROR
-    )
+    log.error("SAFETY: Aborting batch frontmatter write to %s — body line count mismatch (%d vs %d)",
+      vim.fn.fnamemodify(safe_path, ":t"), new_body_count, body_line_count)
     return
   end
 
   local write_ok, write_err = atomic_writefile(safe_path, result)
   if not write_ok then
-    vim.notify("[vault] SAFETY: " .. write_err, vim.log.levels.ERROR)
+    log.error("SAFETY: %s", write_err)
   end
 end
 
@@ -1919,10 +1902,7 @@ local function apply_mutations(diff, st, on_done)
     progress_done = progress_done + 1
     local now = vim.uv.now()
     if now - progress_last > 200 then  -- at most every 200ms
-      vim.notify(
-        string.format("[vault] %s… %d/%d", phase, progress_done, total_ops),
-        vim.log.levels.INFO
-      )
+      log.info("%s… %d/%d", phase, progress_done, total_ops)
       progress_last = now
     end
   end
@@ -1935,7 +1915,7 @@ local function apply_mutations(diff, st, on_done)
     -- Safety: verify path is inside vault root
     local safe_path, path_err = validate_path_in_vault(path)
     if not safe_path then
-      vim.notify("[vault] SAFETY: Skipping update — " .. path_err, vim.log.levels.ERROR)
+      log.error("SAFETY: Skipping update — %s", path_err)
       goto continue
     end
     path = safe_path
@@ -1945,10 +1925,7 @@ local function apply_mutations(diff, st, on_done)
     if snap_mtime > 0 then
       local current_mtime = get_mtime(path)
       if current_mtime > snap_mtime then
-        vim.notify(
-          string.format("[vault] SAFETY: Skipping %s — file modified externally since snapshot", upd.slug),
-          vim.log.levels.WARN
-        )
+        log.warn("SAFETY: Skipping %s — file modified externally since snapshot", upd.slug)
         goto continue
       end
     end
@@ -1960,7 +1937,7 @@ local function apply_mutations(diff, st, on_done)
       if new_dir == "/" then new_dir = "" end
       -- Safety: reject paths that escape the vault root
       if new_dir:match("%.%.") then
-        vim.notify("[vault] SAFETY: Refusing to move note to path with '..': " .. new_dir, vim.log.levels.ERROR)
+        log.error("SAFETY: Refusing to move note to path with '..': %s", new_dir)
         goto continue
       end
       local basename = vim.fn.fnamemodify(path, ":t")
@@ -2028,7 +2005,7 @@ local function apply_mutations(diff, st, on_done)
       -- Safety: verify path is inside vault root before deleting
       local safe_del, del_err = validate_path_in_vault(path)
       if not safe_del then
-        vim.notify("[vault] SAFETY: Skipping delete — " .. del_err, vim.log.levels.ERROR)
+        log.error("SAFETY: Skipping delete — %s", del_err)
         goto del_continue
       end
       pcall(function()
@@ -2058,7 +2035,7 @@ local function apply_mutations(diff, st, on_done)
     if dir == "/" then dir = "" end
     -- Safety: reject paths that escape the vault root (e.g., "../" in dir)
     if dir:match("%.%.") then
-      vim.notify("[vault] SAFETY: Refusing to create note with '..' in path: " .. dir, vim.log.levels.ERROR)
+      log.error("SAFETY: Refusing to create note with '..' in path: %s", dir)
       goto continue
     end
     local base_slug = slug
@@ -2069,7 +2046,7 @@ local function apply_mutations(diff, st, on_done)
       path = config.options.root .. "/" .. dir .. slug .. config.options.ext
       counter = counter + 1
       if counter > 100 then
-        vim.notify("[vault] Too many slug collisions for: " .. base_slug, vim.log.levels.ERROR)
+        log.error("Too many slug collisions for: %s", base_slug)
         goto continue
       end
     end
@@ -2077,7 +2054,7 @@ local function apply_mutations(diff, st, on_done)
     -- Safety: validate final path is inside vault
     local safe_create, create_err = validate_path_in_vault(path)
     if not safe_create then
-      vim.notify("[vault] SAFETY: Skipping create — " .. create_err, vim.log.levels.ERROR)
+      log.error("SAFETY: Skipping create — %s", create_err)
       goto continue
     end
 
@@ -2116,7 +2093,7 @@ local function apply_mutations(diff, st, on_done)
     end
     local write_ok, write_err = atomic_writefile(safe_create, fm)
     if not write_ok then
-      vim.notify("[vault] SAFETY: " .. write_err, vim.log.levels.ERROR)
+      log.error("SAFETY: %s", write_err)
       goto continue
     end
     -- Track created path for undo
@@ -2152,19 +2129,16 @@ local function apply_safe_and_reload(bufnr, st, diff)
   -- Also cap creates in the "safe" path — they can be phantom too
   local safe_creates = diff.creates
   if #safe_creates > CREATE_HARD_CAP then
-    vim.notify(
-      string.format("[vault] SAFETY: Also refusing %d creates (cap %d)", #safe_creates, CREATE_HARD_CAP),
-      vim.log.levels.ERROR
-    )
+    log.error("SAFETY: Also refusing %d creates (cap %d)", #safe_creates, CREATE_HARD_CAP)
     safe_creates = {}
   end
   local safe_diff = { updates = diff.updates, deletes = {}, creates = safe_creates }
   local n_u, _, n_c = apply_mutations(safe_diff, st)
-  local msg = string.format("[vault] Applied: %d updated, %d created", n_u, n_c)
+  local msg = string.format("Applied: %d updated, %d created", n_u, n_c)
   if #diff.deletes > 0 then
     msg = msg .. string.format(" (%d deletes skipped)", #diff.deletes)
   end
-  vim.notify(msg, vim.log.levels.INFO)
+  log.info("%s", msg)
   vim.schedule(function()
     M.reload(bufnr)
     st.saving = false
@@ -2175,7 +2149,7 @@ end
 local function on_save(bufnr)
   local st = buf_states[bufnr]
   if not st then
-    vim.notify("[vault] Process buffer state lost — please reopen with :Vault process", vim.log.levels.WARN)
+    log.warn("Process buffer state lost — please reopen with :Vault process")
     vim.bo[bufnr].modified = false
     return
   end
@@ -2219,11 +2193,8 @@ local function on_save(bufnr)
         hl_group = "DiagnosticUnderlineWarn",
       })
     end
-    vim.notify(
-      string.format("[vault] %d edit(s) ignored: %s (line %d)",
-        #diff.errors, diff.errors[1].message, diff.errors[1].row + 1),
-      vim.log.levels.WARN
-    )
+    log.warn("%d edit(s) ignored: %s (line %d)",
+      #diff.errors, diff.errors[1].message, diff.errors[1].row + 1)
   else
     vim.api.nvim_buf_clear_namespace(bufnr, NS_ERR, 0, -1)
   end
@@ -2232,7 +2203,7 @@ local function on_save(bufnr)
   if total == 0 then
     vim.bo[bufnr].modified = false
     st.saving = false
-    vim.notify("[vault] No changes", vim.log.levels.INFO)
+    log.info("No changes")
     return
   end
 
@@ -2241,19 +2212,16 @@ local function on_save(bufnr)
 
   -- ── Hard cap on creates ──────────────────────────────────────────────────
   if #diff.creates > CREATE_HARD_CAP then
-    vim.notify(
-      string.format(
-        "[vault] SAFETY: Refusing to create %d notes (cap is %d). "
-          .. "This likely indicates extmark identity loss (lines without extmarks "
-          .. "are treated as new notes). Applying updates only. "
-          .. "Please close and reopen the process buffer.",
-        #diff.creates, CREATE_HARD_CAP
-      ),
-      vim.log.levels.ERROR
+    log.error(
+      "SAFETY: Refusing to create %d notes (cap is %d). "
+        .. "This likely indicates extmark identity loss (lines without extmarks "
+        .. "are treated as new notes). Applying updates only. "
+        .. "Please close and reopen the process buffer.",
+      #diff.creates, CREATE_HARD_CAP
     )
     local updates_only = { updates = diff.updates, deletes = {}, creates = {} }
     local n_u = apply_mutations(updates_only, st)
-    vim.notify(string.format("[vault] Applied: %d updated (creates refused)", n_u), vim.log.levels.INFO)
+    log.info("Applied: %d updated (creates refused)", n_u)
     vim.schedule(function()
       M.reload(bufnr)
       st.saving = false
@@ -2284,7 +2252,7 @@ local function on_save(bufnr)
         cleanup()
         st.saving = false
         vim.bo[bufnr].modified = true
-        vim.notify(cancel_message, vim.log.levels.INFO)
+        log.info("%s", cancel_message)
       end,
     })
 
@@ -2304,7 +2272,7 @@ local function on_save(bufnr)
           vim.bo[bufnr].modified = true
         end
         if opts.message then
-          vim.notify(opts.message, vim.log.levels.INFO)
+          log.info("%s", opts.message)
         end
       end,
     }
@@ -2343,22 +2311,16 @@ local function on_save(bufnr)
         end
         diff.creates = {}
         diff.deletes = {}
-        vim.notify(
-          string.format("[vault] Paired %d create+delete as title edits", n_paired),
-          vim.log.levels.INFO
-        )
+        log.info("Paired %d create+delete as title edits", n_paired)
       else
-        vim.notify(
-          string.format(
-            "[vault] SAFETY: Found %d creates AND %d deletes — likely extmark identity loss. "
-              .. "Applying %d updates only. Please close and reopen the process buffer.",
-            #diff.creates, #diff.deletes, #diff.updates
-          ),
-          vim.log.levels.WARN
+        log.warn(
+          "SAFETY: Found %d creates AND %d deletes — likely extmark identity loss. "
+            .. "Applying %d updates only. Please close and reopen the process buffer.",
+          #diff.creates, #diff.deletes, #diff.updates
         )
         local updates_only = { updates = diff.updates, deletes = {}, creates = {} }
         local n_u = apply_mutations(updates_only, st)
-        vim.notify(string.format("[vault] Applied: %d updated", n_u), vim.log.levels.INFO)
+        log.info("Applied: %d updated", n_u)
         vim.schedule(function()
           M.reload(bufnr)
           st.saving = false
@@ -2380,18 +2342,12 @@ local function on_save(bufnr)
         local new_path = vault_root .. "/" .. ren.new_slug .. ".md"
         -- Safety: refuse path escape
         if ren.new_slug:match("%.%.") then
-          vim.notify(
-            string.format("[vault] SAFETY: Refusing rename '%s' — contains '..'", ren.new_slug),
-            vim.log.levels.ERROR
-          )
+          log.error("SAFETY: Refusing rename '%s' — contains '..'", ren.new_slug)
           goto continue_rename
         end
         -- Safety: refuse collision
         if vim.fn.filereadable(new_path) == 1 and old_path ~= new_path then
-          vim.notify(
-            string.format("[vault] SAFETY: Cannot rename to '%s' — file already exists", ren.new_slug),
-            vim.log.levels.ERROR
-          )
+          log.error("SAFETY: Cannot rename to '%s' — file already exists", ren.new_slug)
           goto continue_rename
         end
         -- Execute rename via Note:move (handles wikilink patching).
@@ -2408,8 +2364,7 @@ local function on_save(bufnr)
                 old_path = old_path,
                 new_path = new_path,
               })
-            end
-            -- Update state maps
+            end            -- Update state maps
             st.note_paths[ren.new_slug] = new_path
             st.note_paths[ren.old_slug] = nil
             if st.note_mtimes then
@@ -2418,16 +2373,10 @@ local function on_save(bufnr)
             end
             n_renamed = n_renamed + 1
           else
-            vim.notify(
-              string.format("[vault] Failed to rename '%s': %s", ren.old_slug, tostring(move_result)),
-              vim.log.levels.ERROR
-            )
+            log.error("Failed to rename '%s': %s", ren.old_slug, tostring(move_result))
           end
         else
-          vim.notify(
-            string.format("[vault] Failed to load note '%s' for rename", ren.old_slug),
-            vim.log.levels.ERROR
-          )
+          log.error("Failed to load note '%s' for rename", ren.old_slug)
         end
         ::continue_rename::
       end
@@ -2446,7 +2395,7 @@ local function on_save(bufnr)
       if n_u      > 0 then table.insert(parts, string.format("%d updated", n_u))        end
       if n_c      > 0 then table.insert(parts, string.format("%d created", n_c))        end
       if #parts == 0 then parts = { "no changes" } end
-      vim.notify("[vault] Saved: " .. table.concat(parts, ", "), vim.log.levels.INFO)
+      log.info("Saved: %s", table.concat(parts, ", "))
       vim.schedule(function()
         M.reload(bufnr)
         st.saving = false
@@ -2456,14 +2405,11 @@ local function on_save(bufnr)
 
     -- ── Hard cap on deletes ──────────────────────────────────────────────────
     if #diff.deletes > DELETE_HARD_CAP then
-      vim.notify(
-        string.format(
-          "[vault] SAFETY: Refusing to delete %d notes (cap is %d). "
-            .. "This likely indicates a bug. Applying updates/creates only. "
-            .. "Please close and reopen the process buffer.",
-          #diff.deletes, DELETE_HARD_CAP
-        ),
-        vim.log.levels.ERROR
+      log.error(
+        "SAFETY: Refusing to delete %d notes (cap is %d). "
+          .. "This likely indicates a bug. Applying updates/creates only. "
+          .. "Please close and reopen the process buffer.",
+        #diff.deletes, DELETE_HARD_CAP
       )
       apply_safe_and_reload(bufnr, st, diff)
       return
@@ -2498,10 +2444,7 @@ local function on_save(bufnr)
           action = function()
             guard.proceed(function()
               local n_u, n_d, n_c = apply_mutations(diff, st)
-              vim.notify(
-                string.format("[vault] Applied: %d updated, %d trashed, %d created", n_u, n_d, n_c),
-                vim.log.levels.INFO
-              )
+              log.info("Applied: %d updated, %d trashed, %d created", n_u, n_d, n_c)
               vim.schedule(function()
                 M.reload(bufnr)
                 st.saving = false
@@ -2635,7 +2578,7 @@ function M.open(opts)
     if vim.api.nvim_buf_is_valid(bufnr) then
       if st.filter_desc == filter_desc then
         vim.api.nvim_set_current_buf(bufnr)
-        vim.notify("[vault] Switched to existing process buffer (" .. filter_desc .. ")", vim.log.levels.INFO)
+        log.info("Switched to existing process buffer (%s)", filter_desc)
         return
       end
     else
@@ -2657,7 +2600,7 @@ function M.open(opts)
   end
 
   if not next(notes_map) then
-    vim.notify("[vault] No notes match" .. (base and (" base '" .. base.data.name .. "'") or ""), vim.log.levels.INFO)
+    log.info("No notes match%s", base and (" base '" .. base.data.name .. "'") or "")
     return
   end
 
@@ -2922,7 +2865,7 @@ function M.open(opts)
     elseif undo_snapshots[bufnr] then
       M.undo(bufnr)
     else
-      vim.notify("[vault] Nothing to undo", vim.log.levels.INFO)
+      log.info("Nothing to undo")
     end
   end, vim.tbl_extend("force", kopts, { desc = "Vault: smart undo" }))
   vim.keymap.set("n", "J", function()
@@ -2932,19 +2875,19 @@ function M.open(opts)
     local row = vim.api.nvim_win_get_cursor(0)[1] - 1  -- 0-indexed
     local line_count = vim.api.nvim_buf_line_count(bufnr)
     if row + 1 >= line_count then
-      vim.notify("[vault] No next line to merge with", vim.log.levels.WARN)
+      log.warn("No next line to merge with")
       return
     end
     local slug_a = get_row_slug(bufnr, row, st)
     local slug_b = get_row_slug(bufnr, row + 1, st)
     if not slug_a or not slug_b then
-      vim.notify("[vault] Cannot determine note identity for merge", vim.log.levels.WARN)
+      log.warn("Cannot determine note identity for merge")
       return
     end
     local path_a = st.note_paths[slug_a]
     local path_b = st.note_paths[slug_b]
     if not path_a or not path_b then
-      vim.notify("[vault] Cannot find note paths for merge", vim.log.levels.WARN)
+      log.warn("Cannot find note paths for merge")
       return
     end
     require("vault.merge").merge(path_a, path_b, {
@@ -2961,12 +2904,12 @@ function M.open(opts)
     local row = vim.api.nvim_win_get_cursor(0)[1] - 1  -- 0-indexed
     local slug_a = get_row_slug(bufnr, row, st)
     if not slug_a then
-      vim.notify("[vault] Cannot determine note identity on current line", vim.log.levels.WARN)
+      log.warn("Cannot determine note identity on current line")
       return
     end
     local path_a = st.note_paths[slug_a]
     if not path_a then
-      vim.notify("[vault] Cannot find path for current note", vim.log.levels.WARN)
+      log.warn("Cannot find path for current note")
       return
     end
 
@@ -3051,7 +2994,7 @@ function M.open(opts)
       }):find()
     end)
     if not ok_tele then
-      vim.notify("[vault] gJ requires telescope.nvim: " .. tostring(_), vim.log.levels.WARN)
+      log.warn("gJ requires telescope.nvim: %s", tostring(_))
     end
   end, vim.tbl_extend("force", kopts, { desc = "Vault: pick any note to merge into current" }))
   vim.keymap.set("n", "g>", function() M.resize_cursor_column(bufnr, 5) end,
@@ -3073,12 +3016,9 @@ function M.open(opts)
   local sort_desc = st.sort_by
     and string.format(", sorted by %s %s", st.sort_by.col, st.sort_by.dir)
     or ""
-  vim.notify(
-    string.format(
-      "[vault] Processing %d notes (%s)%s — :w to apply, gs/gS to sort, gu to undo, g>/g< to resize",
-      #records, filter_desc, sort_desc
-    ),
-    vim.log.levels.INFO
+  log.info(
+    "Processing %d notes (%s)%s — :w to apply, gs/gS to sort, gu to undo, g>/g< to resize",
+    #records, filter_desc, sort_desc
   )
 end
 
@@ -3199,8 +3139,7 @@ function M.cycle_sort(bufnr, col_name, add_secondary)
   else
     desc = "default"
   end
-  vim.notify("[vault] Sort: " .. desc, vim.log.levels.INFO)
-end
+  log.info("Sort: %s", desc)end
 
 --- Get the column name under the cursor.
 ---@param bufnr integer
@@ -3240,7 +3179,7 @@ function M.undo(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   local snap = undo_snapshots[bufnr]
   if not snap then
-    vim.notify("[vault] No undo snapshot available for this buffer", vim.log.levels.WARN)
+    log.warn("No undo snapshot available for this buffer")
     return
   end
 
@@ -3257,10 +3196,7 @@ function M.undo(bufnr)
         if ok then
           renames_reversed = renames_reversed + 1
         else
-          vim.notify(
-            string.format("[vault] Failed to reverse rename %s → %s: %s", ren.new_path, ren.old_path, tostring(err)),
-            vim.log.levels.ERROR
-          )
+          log.error("Failed to reverse rename %s → %s: %s", ren.new_path, ren.old_path, tostring(err))
         end
       end
     end
@@ -3272,7 +3208,7 @@ function M.undo(bufnr)
     if ok then
       restored = restored + 1
     else
-      vim.notify("[vault] Failed to restore " .. path .. ": " .. (err or "unknown"), vim.log.levels.ERROR)
+      log.error("Failed to restore %s: %s", path, err or "unknown")
     end
   end
 
@@ -3292,10 +3228,7 @@ function M.undo(bufnr)
   if restored > 0 then table.insert(parts, string.format("restored %d file(s)", restored)) end
   if deleted > 0 then table.insert(parts, string.format("removed %d created", deleted)) end
   if renames_reversed > 0 then table.insert(parts, string.format("reversed %d rename(s)", renames_reversed)) end
-  vim.notify(
-    "[vault] Undo: " .. (#parts > 0 and table.concat(parts, ", ") or "nothing to undo"),
-    vim.log.levels.INFO
-  )
+  log.info("Undo: %s", #parts > 0 and table.concat(parts, ", ") or "nothing to undo")
 
   -- Reload the buffer to reflect the reverted state
   M.reload(bufnr)
@@ -3309,7 +3242,7 @@ end
 function M.save_range(bufnr, start_row, end_row)
   local st = buf_states[bufnr]
   if not st then
-    vim.notify("[vault] Process buffer state lost", vim.log.levels.WARN)
+    log.warn("Process buffer state lost")
     return
   end
   if st.saving then return end
@@ -3340,7 +3273,7 @@ function M.save_range(bufnr, start_row, end_row)
   end
 
   if #filtered_updates == 0 then
-    vim.notify("[vault] No changes in selected range", vim.log.levels.INFO)
+    log.info("No changes in selected range")
     st.saving = false
     return
   end
@@ -3348,7 +3281,7 @@ function M.save_range(bufnr, start_row, end_row)
   local partial_diff = { updates = filtered_updates, deletes = {}, creates = {} }
   snapshot_for_undo(partial_diff, st, bufnr)
   local n_u = apply_mutations(partial_diff, st)
-  vim.notify(string.format("[vault] Partial save: %d updated", n_u), vim.log.levels.INFO)
+  log.info("Partial save: %d updated", n_u)
 
   vim.schedule(function()
     M.reload(bufnr)
