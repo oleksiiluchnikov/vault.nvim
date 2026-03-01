@@ -4,17 +4,12 @@
 return function(opts)
     local vault_state = require("vault.core.state")
     local Log = require("plenary.log")
-    local Error = require("vault.utils.error")
     local entry_display = require("telescope.pickers.entry_display")
     local finders = require("telescope.finders")
     local pickers = require("telescope.pickers")
     local sorters = require("telescope.sorters")
     local actions = require("telescope.actions")
-    local actions_state = require("telescope.actions.state")
-    local utils = require("vault.utils")
-    local vault_previewers = require("telescope._extensions.vault.previewers")
-    local vault_mappings = require("telescope._extensions.vault.mappings")
-    local vault_layouts = require("telescope._extensions.vault.layouts")
+    local vault_hl = require("telescope._extensions.vault.highlights")
     local task_picker_actions = require("telescope._extensions.vault.pickers.tasks.actions")
     --- Constants for task display configuration
     local DISPLAY_CONFIG = {
@@ -43,41 +38,13 @@ return function(opts)
         HIGHLIGHT_GROUP = "VaultTask",
     }
 
-    --- Track whether gradient colors were successfully set up
-    local gradient_available = false
-
-    --- Setup gradient colors for tasks display
-    --- @return boolean success
-    local function setup_task_colors()
-        if vim.b.vault_task_colors_initialized then
-            gradient_available = true
-            return true
-        end
-
-        local display_config = DISPLAY_CONFIG.COLORS.GRADIENT
-        local ok, colors = pcall(function()
-            local Gradient = require("gradient")
-            return Gradient.from_stops(
-                display_config.STEPS,
-                display_config.START,
-                display_config.END,
-                display_config.TYPE
-            )
-        end)
-
-        if not ok or type(colors) ~= "table" then
-            gradient_available = false
-            return false
-        end
-
-        for i, color in ipairs(colors) do
-            pcall(vim.api.nvim_set_hl, 0, DISPLAY_CONFIG.HIGHLIGHT_GROUP .. i, { fg = color })
-        end
-
-        gradient_available = true
-        vim.b.vault_task_colors_initialized = true
-        return true
-    end
+    local gradient_steps = DISPLAY_CONFIG.COLORS.GRADIENT.STEPS
+    local hl_name = DISPLAY_CONFIG.HIGHLIGHT_GROUP
+    local colors = vault_hl.setup(hl_name, gradient_steps, {
+        DISPLAY_CONFIG.COLORS.GRADIENT.START,
+        DISPLAY_CONFIG.COLORS.GRADIENT.END,
+        DISPLAY_CONFIG.COLORS.GRADIENT.TYPE,
+    })
 
     --- Right align text in a fixed width
     --- @param text string|nil Text to align
@@ -116,30 +83,21 @@ return function(opts)
         Log.info("No tasks found in vault")
     end
 
-    local function enter(bufnr)
-        local selection = actions_state.get_selected_entry()
-        actions.close(bufnr)
-        vim.cmd(string.format("edit +%d %s", selection.value.line_number, selection.filename))
-    end
-
     local make_display = function(entry)
-        setup_task_colors()
-
         local task = entry.value
         local window_width = vim.api.nvim_list_uis()[1].width
-        -- local status_info = DISPLAY_CONFIG.COLORS.`STATUS[task.status]` or { symbol = "?", hl = "Normal" }
         local status_info = DISPLAY_CONFIG.COLORS.STATUS[task.data.status]
             or { symbol = "?", hl = "Normal" }
 
         -- Calculate gradient for description
         local desc_hl = "TelescopeResultsNormal"
-        if gradient_available then
+        if colors then
             local desc_length = task.data.description and #task.data.description or 0
             local gradient_idx = math.max(
                 1,
-                math.min(math.floor(desc_length / 16), DISPLAY_CONFIG.COLORS.GRADIENT.STEPS)
+                math.min(math.floor(desc_length / 16), gradient_steps)
             )
-            desc_hl = DISPLAY_CONFIG.HIGHLIGHT_GROUP .. gradient_idx
+            desc_hl = hl_name .. gradient_idx
         end
 
         local displayer = entry_display.create({
@@ -197,10 +155,9 @@ return function(opts)
             height = vim.api.nvim_list_uis()[1].height - 4,
             width = vim.api.nvim_list_uis()[1].width,
         },
-        attach_mappings = function(_, _)
+        attach_mappings = vault_hl.make_attach_mappings(function(prompt_bufnr, map)
             actions.select_default:replace(task_picker_actions.enter)
-            return true
-        end,
+        end, hl_name, colors),
     })
     vault_state.set_global_key("picker", picker)
     return picker

@@ -20,6 +20,8 @@ return function(opts)
     local wikilinks = opts.wikilinks or VaultWikilinks()
     local vault_state = require("vault.core.state")
     local utils = require("vault.utils")
+    local vault_hl = require("telescope._extensions.vault.highlights")
+    local make_filter = require("telescope._extensions.vault.on_input_filter")
 
     local results = opts._results or wikilinks:list() or {}
 
@@ -37,19 +39,7 @@ return function(opts)
 
     -- Gradient-based highlighting (best-effort)
     local hl_base = "VaultWikilink"
-    local colors = nil
-    do
-        local ok, maybe_colors = pcall(function()
-            local Gradient = require("gradient")
-            return Gradient.from_stops(steps, "Boolean", "Comment", "Normal", "String")
-        end)
-        if ok and type(maybe_colors) == "table" then
-            colors = maybe_colors
-            for i, color in ipairs(colors) do
-                pcall(vim.api.nvim_set_hl, 0, hl_base .. tostring(i), { fg = color })
-            end
-        end
-    end
+    local colors = vault_hl.setup(hl_base, steps, { "Boolean", "Comment", "Normal", "String" })
 
     -- Compute column widths
     local slug_max = 0
@@ -191,76 +181,6 @@ return function(opts)
         results = results,
         entry_maker = entry_maker,
     })
-
-    -- Interactive filter callback similar to the notes picker (supports trailing / pattern and negative prefix -)
-    local on_input_filter_cb = function(prompt)
-        local picker = vault_state.get_global_key("picker")
-        if not picker then
-            return { prompt = "" }
-        end
-
-        local default_finder = function()
-            local new_finder = finders.new_table({ results = results, entry_maker = entry_maker })
-            picker.finder:close()
-            picker.finder = new_finder
-            vault_state.set_global_key("prompt", prompt)
-            return { prompt = prompt or "" }
-        end
-
-        if prompt == nil or #prompt == 0 then
-            return default_finder()
-        end
-
-        if prompt:sub(-1) ~= "/" then
-            return default_finder()
-        end
-
-        local is_negative = false
-        if prompt:sub(1, 1) == "-" then
-            is_negative = true
-        end
-
-        local pattern = prompt:sub(1, -2)
-        pattern = pattern:sub(2)
-        if is_negative then
-            pattern = pattern:sub(2)
-        end
-
-        local new_results = {}
-        local results_without_excluded = {}
-        for _, entry in ipairs(picker.finder.results) do
-            local wl = entry.value
-            local slug = wl.data and wl.data.slug or ""
-            local ok = pcall(vim.fn.match, slug, pattern)
-            if not ok then
-                goto continue
-            end
-            if vim.fn.match(slug, pattern) ~= -1 then
-                table.insert(new_results, wl)
-                if is_negative then
-                    table.insert(results_without_excluded, wl)
-                end
-            end
-            ::continue::
-        end
-
-        if next(new_results) == nil then
-            return default_finder()
-        elseif is_negative then
-            new_results = {}
-            for _, entry in ipairs(picker.finder.results) do
-                if not vim.tbl_contains(results_without_excluded, entry.value) then
-                    table.insert(new_results, entry.value)
-                end
-            end
-        end
-
-        local new_finder = finders.new_table({ results = new_results, entry_maker = entry_maker })
-        picker.finder:close()
-        picker.finder = new_finder
-        vault_state.set_global_key("prompt", prompt)
-        return { prompt = "" }
-    end
 
     --- Rewrite [[old_slug]] → [[new_slug]] across all source files for a wikilink.
     --- @param wl vault.Wikilink
@@ -663,18 +583,15 @@ return function(opts)
         map("n", "<c-j>", merge_action)
 
         -- Cleanup gradient highlights on close
-        local function cleanup()
-            if colors then
-                for i = 1, #colors do
-                    pcall(vim.api.nvim_set_hl, 0, hl_base .. tostring(i), {})
-                end
-            end
+        if colors then
+            pcall(vim.api.nvim_create_autocmd, "BufWipeout", {
+                buffer = prompt_bufnr,
+                once = true,
+                callback = function()
+                    vault_hl.cleanup(hl_base, #colors)
+                end,
+            })
         end
-        pcall(vim.api.nvim_create_autocmd, "BufWipeout", {
-            buffer = prompt_bufnr,
-            once = true,
-            callback = cleanup,
-        })
 
         return true
     end
@@ -685,7 +602,7 @@ return function(opts)
         sorter = sorters.get_generic_fuzzy_sorter(),
         previewer = vault_previewers.wikilinks,
         attach_mappings = attach_mappings,
-        on_input_filter_cb = on_input_filter_cb,
+        on_input_filter_cb = make_filter(results, entry_maker),
         sorting_strategy = "ascending",
     }
 

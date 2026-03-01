@@ -1,5 +1,4 @@
 --- @class telescope_popup_options.vault.dirs: telescope_popup_options
---- @field query? string[] List of property names to show. If not provided, all properties will be shown.
 
 --- @param opts? table
 --- @return Picker
@@ -13,40 +12,27 @@ return function(opts)
     local Scanner = require("vault.scanner")
     local pickers = require("telescope.pickers")
     local vault_layouts = require("telescope._extensions.vault.layouts")
+    local vault_hl = require("telescope._extensions.vault.highlights")
+    local vault_actions = require("telescope._extensions.vault.actions")
+    local make_filter = require("telescope._extensions.vault.on_input_filter")
 
     opts = opts or {}
 
     local dirs_list = dirs:list()
     if next(dirs_list) == nil then
-        require("plenary.log").info("No properties found in vault")
+        require("plenary.log").info("No directories found in vault")
     end
 
-    local steps = math.min(vim.api.nvim_list_uis()[1].height, vim.tbl_count(dirs_list))
+    local uis = vim.api.nvim_list_uis()
+    local ui_height = (uis[1] and uis[1].height) or 40
+    local steps = math.min(ui_height, vim.tbl_count(dirs_list))
     local hl_name = dirs.class.name
-    --- @type table|nil
-    local colors = nil
-    do
-        local ok, maybe_colors = pcall(function()
-            local Gradient = require("gradient")
-            return Gradient.from_stops(steps, "Comment", "Normal", "String")
-        end)
-        if ok and type(maybe_colors) == "table" then
-            colors = maybe_colors
-            for i, color in ipairs(colors) do
-                pcall(vim.api.nvim_set_hl, 0, hl_name .. tostring(i), { fg = color })
-            end
-        end
-    end
+    local colors = vault_hl.setup(hl_name, steps, { "Comment", "Normal", "String" })
 
     local slugs = Scanner.slugs()
 
-    --- @param entry vault.TelescopeEntry
     local make_display = function(entry)
-        --- @type vault.Dir
         local directory = entry.value
-        -- local sources_count =
-        --     -- require("vault.notes")():filter("relpath",directory, "startswith", false):count()
-        --     notes:filter('slug',directory, "startswith", false):count()
         local sources_count = 0
         for slug, _ in pairs(slugs) do
             if utils.match(slug, directory.data.relpath, "startswith", false) then
@@ -54,46 +40,33 @@ return function(opts)
             end
         end
 
-        --- --
         local col_1 = directory.data.relpath
-        local col_1_width = 29
         local col_1_hl_name = "TelescopeResultsNormal"
         if colors then
             local i = math.min(math.floor(sources_count / 2), steps)
-            if i == 0 then
-                i = 1
-            end
+            if i == 0 then i = 1 end
             col_1_hl_name = hl_name .. tostring(i)
         end
-        --- --
 
         local col_2 = tostring(sources_count)
-        local col_2_width = #col_2
-        local col_2_hl_name = "TelescopeResultsNumber"
-        --- --
 
         local displayer = entry_display.create({
             separator = " ",
             items = {
-                { width = col_1_width },
-                { remaining = true },
-                { width = col_2_width },
+                { width = 29 },
                 { remaining = true },
             },
         })
 
         return displayer({
             { col_1, col_1_hl_name },
-            { col_2, col_2_hl_name },
+            { col_2, "TelescopeResultsNumber" },
         })
     end
 
-    --- @param directory vault.Dir
-    --- @return vault.TelescopeEntry
     local entry_maker = function(directory)
         return {
             value = directory,
-            -- ordinal = property.data.name .. " " .. tostring(property.data.count),
             ordinal = directory.data.relpath,
             display = make_display,
         }
@@ -107,137 +80,56 @@ return function(opts)
     opts.sort_by = opts.sort_by or "count"
 
     if opts.sort_by == "count" then
-        -- sort by count of notes in directory
         table.sort(dirs_list, function(a, b)
-            a = a.data.relpath
-            b = b.data.relpath
+            local a_relpath = a.data.relpath
+            local b_relpath = b.data.relpath
             local a_count = 0
             for slug, _ in pairs(slugs) do
-                if utils.match(slug, a, "startswith", false) then
+                if utils.match(slug, a_relpath, "startswith", false) then
                     a_count = a_count + 1
                 end
             end
-            a_count = a_count * 100
             local b_count = 0
             for slug, _ in pairs(slugs) do
-                if utils.match(slug, b, "startswith", false) then
+                if utils.match(slug, b_relpath, "startswith", false) then
                     b_count = b_count + 1
                 end
             end
-            b_count = b_count * 100
             return a_count > b_count
         end)
     elseif opts.sort_by == "name" then
         table.sort(dirs_list, function(a, b)
-            a = a.data.name or ""
-            b = b.data.name or ""
-            -- if underscore is first letter, put it at the top
-            if b:sub(1, 1) == "_" then
-                return false
-            elseif a:sub(1, 1) == "_" then
-                return true
-            end
-            return a < b
+            local an = a.data.name or ""
+            local bn = b.data.name or ""
+            if bn:sub(1, 1) == "_" then return false end
+            if an:sub(1, 1) == "_" then return true end
+            return an < bn
         end)
-    end
-
-    local on_input_filter_cb = function(prompt)
-        local picker = vault_state.get_global_key("picker")
-        if picker == nil then
-            vim.notify("No picker found")
-            return
-        end
-        local is_negative = false
-
-        local function default_finder()
-            local new_finder = finders.new_table({
-                results = dirs_list,
-                entry_maker = entry_maker,
-            })
-
-            picker.finder:close() -- TODO: Find a way to close picker without closing previewer
-            picker.finder = new_finder
-
-            vault_state.set_global_key("prompt", prompt)
-            return {
-                prompt = prompt or "",
-            }
-        end
-
-        if prompt:sub(-1) ~= "/" then
-            return default_finder()
-        end
-
-        if prompt:sub(1, 1) == "-" then
-            is_negative = true
-        end
-
-        local pattern = prompt:sub(1, -2)
-        pattern = pattern:sub(2)
-        if is_negative == true then
-            pattern = pattern:sub(2)
-        end
-        local new_results = {}
-        local results_without_excluded = {}
-
-        for _, entry in ipairs(picker.finder.results) do
-            local slug = entry.value
-            local is_valid_regex = pcall(vim.fn.match, slug, pattern)
-            if is_valid_regex == false then
-                goto continue
-            end
-            if vim.fn.match(slug, pattern) ~= -1 then
-                table.insert(new_results, slug)
-                if is_negative == true then
-                    table.insert(results_without_excluded, slug)
-                end
-            end
-            ::continue::
-        end
-        if next(new_results) == nil then
-            return default_finder()
-        elseif is_negative == true then
-            new_results = {}
-            for _, entry in ipairs(picker.finder.results) do -- TODO: Use results_without_excluded
-                if not vim.tbl_contains(results_without_excluded, entry.value) then
-                    table.insert(new_results, entry.value)
-                end
-            end
-        end
-
-        local new_finder = finders.new_table({
-            results = new_results,
-            entry_maker = entry_maker,
-        })
-        picker.finder:close()
-        picker.finder = new_finder
-
-        vault_state.set_global_key("prompt", prompt)
-
-        return {
-            prompt = "",
-        }
     end
 
     local picker = pickers.new(vault_layouts.mini(), {
         prompt_title = "Directories",
         finder = finder,
         sorter = sorters.get_fzy_sorter(),
-        on_input_filter_cb = on_input_filter_cb,
-        attach_mappings = function(_, map)
-            local dirs_picker_actions = require("telescope._extensions.vault.pickers.vault.actions")
+        on_input_filter_cb = make_filter(dirs_list, entry_maker),
+        attach_mappings = function(prompt_bufnr, map)
             local actions = require("telescope.actions")
-
-            -- select all entries in the picker
-            map("i", "<CR>", dirs_picker_actions.enter)
-            map("n", "<CR>", dirs_picker_actions.enter)
-
-            -- select all entries in the picker
+            map("i", "<CR>", vault_actions.directory.enter)
+            map("n", "<CR>", vault_actions.directory.enter)
             map("i", "<C-a>", actions.select_all)
             map("n", "<C-a>", actions.select_all)
-
             map("i", "<C-d>", actions.drop_all)
             map("n", "<C-d>", actions.drop_all)
+
+            if colors then
+                pcall(vim.api.nvim_create_autocmd, "BufWipeout", {
+                    buffer = prompt_bufnr,
+                    once = true,
+                    callback = function()
+                        vault_hl.cleanup(hl_name, #colors)
+                    end,
+                })
+            end
 
             return true
         end,

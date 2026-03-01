@@ -15,6 +15,7 @@ return function(opts)
     local vault_previewers = require("telescope._extensions.vault.previewers")
     local vault_mappings = require("telescope._extensions.vault.mappings")
     local vault_layouts = require("telescope._extensions.vault.layouts")
+    local vault_hl = require("telescope._extensions.vault.highlights")
 
     opts = opts or {}
     opts.bases = opts.bases or require("vault.bases")()
@@ -41,17 +42,7 @@ return function(opts)
 
     -- Gradient-based highlighting
     local hl_name = "VaultBase"
-    local colors = nil
-    local ok, maybe_colors = pcall(function()
-        local Gradient = require("gradient")
-        return Gradient.from_stops(steps, "Comment", "Normal", "String")
-    end)
-    if ok and type(maybe_colors) == "table" then
-        colors = maybe_colors
-        for i, color in ipairs(colors) do
-            pcall(vim.api.nvim_set_hl, 0, hl_name .. tostring(i), { fg = color })
-        end
-    end
+    local colors = vault_hl.setup(hl_name, steps, { "Comment", "Normal", "String" })
 
     -- Calculate column widths
     local name_maxwidth = 0
@@ -133,37 +124,12 @@ return function(opts)
         entry_maker = entry_maker,
     })
 
-    -- Attach mappings with cleanup
-    local attach_mappings = function(prompt_bufnr, map)
-        -- Apply base-specific mappings
-        if type(vault_mappings.bases) == "function" then
-            pcall(vault_mappings.bases, prompt_bufnr, map)
-        end
-
-        -- Cleanup highlights when picker buffer is closed
-        local function cleanup()
-            if colors then
-                for i = 1, #colors do
-                    pcall(vim.api.nvim_set_hl, 0, hl_name .. tostring(i), {})
-                end
-            end
-        end
-
-        pcall(vim.api.nvim_create_autocmd, "BufWipeout", {
-            buffer = prompt_bufnr,
-            once = true,
-            callback = cleanup,
-        })
-
-        return true
-    end
-
     local picker_opts = {
         prompt_title = "bases",
         finder = finder,
         sorter = sorters.get_fzy_sorter(),
         previewer = vault_previewers.bases or nil,
-        attach_mappings = attach_mappings,
+        attach_mappings = vault_hl.make_attach_mappings(vault_mappings.bases, hl_name, colors),
     }
     local picker = pickers.new(vault_layouts.bases(), picker_opts)
 
