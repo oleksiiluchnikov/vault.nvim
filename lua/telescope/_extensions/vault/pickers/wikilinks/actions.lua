@@ -247,7 +247,8 @@ function M.make_resolve(prompt_bufnr, ctx)
     end
 end
 
---- <C-j> merge action: absorb selected wikilink into another note.
+--- <C-j> merge action: compare two wikilinks in the resolver UI, or
+--- fall back to sub-picker for single selection.
 --- @param prompt_bufnr number
 --- @param ctx table { wikilinks, results, opts }
 --- @return function
@@ -257,6 +258,39 @@ function M.make_merge(prompt_bufnr, ctx)
     local reopen_picker = M.make_reopen(ctx)
 
     return function()
+        local picker = action_state.get_current_picker(prompt_bufnr)
+        local multi = picker:get_multi_selection()
+
+        -- Two items selected: open the resolver UI
+        if #multi == 2 then
+            local wl_a = multi[1].value
+            local wl_b = multi[2].value
+            if not wl_a or not wl_b then return end
+
+            local a_slug = wl_a.data and wl_a.data.slug or ""
+            local b_slug = wl_b.data and wl_b.data.slug or ""
+            if a_slug == b_slug then
+                vim.notify("[vault] Cannot compare a wikilink with itself", vim.log.levels.WARN)
+                return
+            end
+
+            actions.close(prompt_bufnr)
+            vim.schedule(function()
+                local resolver = require("vault.ui.resolver")
+                resolver.open({
+                    a = wl_a,
+                    b = wl_b,
+                    on_done = function()
+                        M.remove_from_results(ctx.results, wl_a)
+                        M.remove_from_results(ctx.results, wl_b)
+                        reopen_picker()
+                    end,
+                })
+            end)
+            return
+        end
+
+        -- Single selection: fall back to sub-picker
         local selection = action_state.get_selected_entry()
         if not selection or not selection.value then return end
         --- @type vault.Wikilink

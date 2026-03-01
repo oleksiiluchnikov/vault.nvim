@@ -202,7 +202,7 @@ return function(opts)
     end
 
     local picker_opts = {
-        prompt_title = "Wikilinks  <C-l>=resolve  <C-S-l>=batch  <C-S-c>=create-all  <C-j>=merge",
+        prompt_title = "Wikilinks  <C-l>=resolve  <C-S-l>=batch  <C-S-c>=create-all  <C-j>=compare/merge",
         finder = finder,
         sorter = sorters.get_generic_fuzzy_sorter(),
         previewer = vault_previewers.wikilinks,
