@@ -55,12 +55,12 @@ local function confirm(enabled, message, on_yes, on_no)
         on_yes()
         return
     end
-    local choice = vim.fn.confirm(message, "&Yes\n&No", 2)
-    if choice == 1 then
-        on_yes()
-    elseif on_no then
-        on_no()
-    end
+    require("vault.ui.confirm").confirm({
+        message = message,
+        title = "Vault",
+        on_yes = on_yes,
+        on_no = on_no or function() end,
+    })
 end
 
 --- <CR> action: open target (resolved) or create note (unresolved).
@@ -535,48 +535,36 @@ function M.make_batch_resolve(prompt_bufnr, ctx)
 
         vim.schedule(function()
             -- Pre-option: Create all, Resolve individually, or Cancel
-            vim.ui.select({
-                string.format("Create all %d notes", #queue),
-                "Resolve individually",
-                "Cancel",
-            }, {
-                prompt = string.format("Batch resolve %d unresolved wikilinks:", #queue),
-            }, function(choice, idx)
-                if not choice or idx == 3 then
-                    reopen_picker()
-                    return
-                end
+            local vault_confirm = require("vault.ui.confirm")
 
-                if idx == 1 then
-                    -- Batch create all
-                    local created = {}
-                    for _, wl in ipairs(queue) do
-                        local slug = wl.data and wl.data.slug or ""
-                        local ok, err = pcall(wl.create_target, wl)
-                        if ok then
-                            created[#created + 1] = slug
-                            M.remove_from_results(ctx.results, wl)
-                        else
-                            vim.notify(
-                                string.format("[vault] Failed to create [[%s]]: %s", slug, tostring(err)),
-                                vim.log.levels.WARN
-                            )
-                        end
-                    end
-                    if #created > 0 then
-                        local preview = #created <= 5
-                            and table.concat(created, ", ")
-                            or table.concat(vim.list_slice(created, 1, 5), ", ") .. string.format(" ... +%d more", #created - 5)
+            local function batch_create_all()
+                local created = {}
+                for _, wl in ipairs(queue) do
+                    local slug = wl.data and wl.data.slug or ""
+                    local ok, err = pcall(wl.create_target, wl)
+                    if ok then
+                        created[#created + 1] = slug
+                        M.remove_from_results(ctx.results, wl)
+                    else
                         vim.notify(
-                            string.format("[vault] Created %d note%s: %s", #created, #created == 1 and "" or "s", preview),
-                            vim.log.levels.INFO
+                            string.format("[vault] Failed to create [[%s]]: %s", slug, tostring(err)),
+                            vim.log.levels.WARN
                         )
                     end
-                    reopen_picker()
-                    return
                 end
+                if #created > 0 then
+                    local preview = #created <= 5
+                        and table.concat(created, ", ")
+                        or table.concat(vim.list_slice(created, 1, 5), ", ") .. string.format(" ... +%d more", #created - 5)
+                    vim.notify(
+                        string.format("[vault] Created %d note%s: %s", #created, #created == 1 and "" or "s", preview),
+                        vim.log.levels.INFO
+                    )
+                end
+                reopen_picker()
+            end
 
-                -- Resolve individually: walk the queue with Telescope pickers
+            local function resolve_individually()
                 local stats = { rewritten = 0, created = 0, skipped = 0 }
                 local qi = 0
 
@@ -595,7 +583,6 @@ function M.make_batch_resolve(prompt_bufnr, ctx)
                     local wl = queue[qi]
                     local slug = wl.data and wl.data.slug or ""
 
-                    -- Re-check: might have been resolved by a prior rewrite in this batch
                     if wl:is_resolved_on_disk() then
                         stats.skipped = stats.skipped + 1
                         vim.schedule(process_next)
@@ -627,7 +614,6 @@ function M.make_batch_resolve(prompt_bufnr, ctx)
                                 return
                             end
 
-                            -- Rewrite
                             local ok, err = pcall(wl.rewrite, wl, result.slug)
                             if ok then
                                 stats.rewritten = stats.rewritten + 1
@@ -648,7 +634,18 @@ function M.make_batch_resolve(prompt_bufnr, ctx)
                 end
 
                 vim.schedule(process_next)
-            end)
+            end
+
+            vault_confirm.select({
+                message = string.format("Batch resolve %d unresolved wikilinks:", #queue),
+                title = "Vault",
+                choices = {
+                    { key = "a", label = string.format("Create all %d notes", #queue), action = batch_create_all },
+                    { key = "r", label = "Resolve individually", action = resolve_individually },
+                    { key = "c", label = "Cancel", action = reopen_picker },
+                },
+                on_cancel = reopen_picker,
+            })
         end)
     end
 end
