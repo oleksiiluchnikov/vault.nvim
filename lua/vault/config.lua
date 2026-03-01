@@ -42,6 +42,7 @@
 --- @field features? { cmp: boolean, commands: boolean, blink: boolean } Feature toggles for plugin components. Example: { cmp = true, commands = true, blink = true }
 --- @field frontmatter? table YAML frontmatter configuration. Example: { keys = { tags = "tags" } }
 --- @field check_duplicate_basename? boolean Enable duplicate filename detection. Example: true
+--- @field wikilinks? { confirm_rewrite?: boolean, confirm_merge?: boolean, confirm_create?: boolean } Wikilink action confirmation settings
 ---
 --- @field telescope? table Telescope configuration. Example:
 ---   ```lua
@@ -247,6 +248,16 @@ local DEFAULT_OPTIONS = {
         prompt_on_rename = false,
         -- Frontmatter key to update on rename (e.g. `slug`). If nil, no frontmatter changes are made.
         frontmatter_key = "slug",
+    },
+
+    wikilinks = {
+        --- Confirm before rewriting [[old]] -> [[new]] across the vault.
+        --- When true, shows how many files will be affected and asks for confirmation.
+        confirm_rewrite = true,
+        --- Confirm before merging two notes (absorb + trash + rewrite links).
+        confirm_merge = true,
+        --- Confirm before creating a new note from an unresolved wikilink.
+        confirm_create = false,
     },
 
     bases = {
