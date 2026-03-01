@@ -208,21 +208,30 @@ function vault_actions.note.delete(bufnr)
     end
     actions.close(bufnr)
     highlights.detach()
-    local confirm = vim.fn.confirm(
-        string.format("Delete %d note(s)?\n%s", #slugs, table.concat(slugs, "\n")),
-        "&Trash\n&Permanent\n&Cancel", 3
-    )
-    if confirm == 3 or confirm == 0 then
-        vim.notify("[vault] Delete cancelled", vim.log.levels.INFO)
-        return
-    end
-    local permanent = (confirm == 2)
-    for _, sel in ipairs(selections) do
-        local ok, err = pcall(function() sel.value:delete(permanent, true) end)
-        if not ok then
-            vim.notify("[vault] Failed to delete " .. sel.value.data.slug .. ": " .. tostring(err), vim.log.levels.ERROR)
+
+    local function do_delete(permanent)
+        for _, sel in ipairs(selections) do
+            local ok, err = pcall(function() sel.value:delete(permanent, true) end)
+            if not ok then
+                vim.notify("[vault] Failed to delete " .. sel.value.data.slug .. ": " .. tostring(err), vim.log.levels.ERROR)
+            end
         end
     end
+
+    require("vault.ui.confirm").select({
+        message = string.format("Delete %d note(s)?\n%s", #slugs, table.concat(slugs, "\n")),
+        title = "Vault",
+        choices = {
+            { key = "t", label = "Trash", action = function() do_delete(false) end },
+            { key = "p", label = "Permanent", action = function() do_delete(true) end, danger = true },
+            { key = "c", label = "Cancel", action = function()
+                vim.notify("[vault] Delete cancelled", vim.log.levels.INFO)
+            end },
+        },
+        on_cancel = function()
+            vim.notify("[vault] Delete cancelled", vim.log.levels.INFO)
+        end,
+    })
 end
 
 --- @type table<string, fun(bufnr?: number, selections?: table<vault.TelescopeEntry>): nil>

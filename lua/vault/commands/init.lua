@@ -217,15 +217,14 @@ local function build_subcommands()
                     end
                     local note = require("vault.notes.note")(path)
                     local permanent = vim.tbl_contains(args, "--permanent")
-                    local confirm = vim.fn.confirm(
-                        string.format("Delete note '%s'?%s", note.data.slug, permanent and " (PERMANENT)" or " (move to .trash)"),
-                        "&Yes\n&No", 2
-                    )
-                    if confirm ~= 1 then
-                        vim.notify("[vault] Delete cancelled", vim.log.levels.INFO)
-                        return
-                    end
-                    note:delete(permanent)
+                    require("vault.ui.confirm").confirm({
+                        message = string.format("Delete note '%s'?%s", note.data.slug, permanent and " (PERMANENT)" or " (move to .trash)"),
+                        title = "Vault",
+                        on_yes = function() note:delete(permanent) end,
+                        on_no = function()
+                            vim.notify("[vault] Delete cancelled", vim.log.levels.INFO)
+                        end,
+                    })
                 end,
                 complete = function(prefix)
                     return completions.note_slugs(nil, "Vault note delete " .. prefix, nil) or {}
