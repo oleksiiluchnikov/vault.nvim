@@ -759,31 +759,34 @@ local function build_subcommands()
                 }, function(choice)
                     if not choice then return end
                     local full_path = trash_dir .. "/" .. choice
-                    local action = vim.fn.confirm(
-                        "Note: " .. choice,
-                        "&Restore\n&Permanent delete\n&Cancel", 3
-                    )
-                    if action == 1 then
-                        -- Restore to vault root
-                        local restore_path = config.options.root .. "/" .. choice
-                        if vim.fn.filereadable(restore_path) == 1 then
-                            vim.notify("[vault] A note with that name already exists in the vault", vim.log.levels.ERROR)
-                            return
-                        end
-                        local ok, err = (vim.uv or vim.loop).fs_rename(full_path, restore_path)
-                        if ok then
-                            vim.notify("[vault] Restored: " .. choice, vim.log.levels.INFO)
-                        else
-                            vim.notify("[vault] Restore failed: " .. tostring(err), vim.log.levels.ERROR)
-                        end
-                    elseif action == 2 then
-                        local ok, err = os.remove(full_path)
-                        if ok then
-                            vim.notify("[vault] Permanently deleted: " .. choice, vim.log.levels.INFO)
-                        else
-                            vim.notify("[vault] Delete failed: " .. tostring(err), vim.log.levels.ERROR)
-                        end
-                    end
+                    require("vault.ui.confirm").select({
+                        message = "Note: " .. choice,
+                        title = "Vault Trash",
+                        choices = {
+                            { key = "r", label = "Restore", action = function()
+                                local restore_path = config.options.root .. "/" .. choice
+                                if vim.fn.filereadable(restore_path) == 1 then
+                                    vim.notify("[vault] A note with that name already exists in the vault", vim.log.levels.ERROR)
+                                    return
+                                end
+                                local ok, err = (vim.uv or vim.loop).fs_rename(full_path, restore_path)
+                                if ok then
+                                    vim.notify("[vault] Restored: " .. choice, vim.log.levels.INFO)
+                                else
+                                    vim.notify("[vault] Restore failed: " .. tostring(err), vim.log.levels.ERROR)
+                                end
+                            end },
+                            { key = "d", label = "Permanent delete", action = function()
+                                local ok, err = os.remove(full_path)
+                                if ok then
+                                    vim.notify("[vault] Permanently deleted: " .. choice, vim.log.levels.INFO)
+                                else
+                                    vim.notify("[vault] Delete failed: " .. tostring(err), vim.log.levels.ERROR)
+                                end
+                            end, danger = true },
+                            { key = "c", label = "Cancel", action = function() end },
+                        },
+                    })
                 end)
             end,
         },

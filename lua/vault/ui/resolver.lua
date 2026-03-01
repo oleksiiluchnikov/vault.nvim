@@ -39,96 +39,18 @@ local M = {}
 
 local utils = require("vault.utils")
 
--- ── NUI confirmation popup ─────────────────────────────────────────────────
+-- ── NUI confirmation popup (delegates to shared module) ────────────────────
 
---- Show a yes/no confirmation popup via NUI (non-blocking).
+--- Show a yes/no confirmation popup via the shared vault.ui.confirm module.
 --- @param message string The confirmation message
 --- @param on_yes fun() Called if user presses 'y' or clicks Yes
 --- @param on_no fun() Called if user presses 'n' or clicks No
 local function confirm_popup(message, on_yes, on_no)
-    local ok, Popup = pcall(require, "nui.popup")
-    if not ok then
-        -- Fallback to vim.ui.select if NUI not available
-        vim.ui.select({ "Yes", "No" }, { prompt = message .. " " }, function(choice)
-            if choice == "Yes" then
-                on_yes()
-            else
-                on_no()
-            end
-        end)
-        return
-    end
-
-    -- Compute size from message content
-    local _, newline_count = message:gsub("\n", "\n")
-    local msg_height = newline_count + 1
-    local max_line_len = 0
-    for line in (message .. "\n"):gmatch("([^\n]*)\n") do
-        if #line > max_line_len then max_line_len = #line end
-    end
-
-    local popup = Popup({
-        position = "50%",
-        size = {
-            width = math.min(max_line_len + 10, 80),
-            height = msg_height + 4, -- message + blank + button row + padding
-        },
-        enter = true,
-        focusable = true,
-        border = {
-            padding = { 1, 2, 1, 2 },
-            style = "rounded",
-        },
-        buf_options = {
-            modifiable = false,
-            filetype = "nui_confirm",
-        },
-        win_options = {
-            winhighlight = "Normal:Normal,FloatBorder:FloatBorder",
-        },
-    })
-
-    popup:mount()
-    local bufnr = popup.bufnr
-
-    -- Display the message and buttons
-    -- Split message by newlines
-    local msg_lines = {}
-    for line in (message .. "\n"):gmatch("([^\n]*)\n") do
-        msg_lines[#msg_lines + 1] = line
-    end
-    
-    local lines = {}
-    for _, line in ipairs(msg_lines) do
-        lines[#lines + 1] = line
-    end
-    lines[#lines + 1] = ""
-    lines[#lines + 1] = "  [y]es    [n]o"
-    
-    vim.bo[bufnr].modifiable = true
-    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-    vim.bo[bufnr].modifiable = false
-
-    -- Keymaps
-    local closed = false
-    local close = function()
-        if closed then return end
-        closed = true
-        pcall(popup.unmount, popup)
-    end
-
-    vim.keymap.set("n", "y", function() close(); on_yes() end, { buffer = bufnr, noremap = true })
-    vim.keymap.set("n", "n", function() close(); on_no() end, { buffer = bufnr, noremap = true })
-    vim.keymap.set("n", "<CR>", function() close(); on_yes() end, { buffer = bufnr, noremap = true })
-    vim.keymap.set("n", "<Esc>", function() close(); on_no() end, { buffer = bufnr, noremap = true })
-
-    -- Close on BufLeave
-    vim.api.nvim_create_autocmd("BufLeave", {
-        buffer = bufnr,
-        once = true,
-        callback = function()
-            vim.schedule(close)
-        end,
+    require("vault.ui.confirm").confirm({
+        message = message,
+        title = "Vault Resolver",
+        on_yes = on_yes,
+        on_no = on_no,
     })
 end
 
