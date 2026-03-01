@@ -2336,11 +2336,12 @@ local function on_save(bufnr)
   end
 
   -- ── Process renames (slug column edits → file move + wikilink update) ───
+  local n_renamed = 0
+  local n_patched = 0  -- total wikilink files patched across all renames
   if #diff.renames > 0 then
     local Note = require("vault.notes.note")
     local config = require("vault.config")
     local vault_root = vim.fn.expand(config.options.root)
-    local n_renamed = 0
     for _, ren in ipairs(diff.renames) do
       local old_path = st.note_paths[ren.old_slug]
       if not old_path then goto continue_rename end
@@ -2361,11 +2362,14 @@ local function on_save(bufnr)
         )
         goto continue_rename
       end
-      -- Execute rename via Note:move (handles wikilink patching)
+      -- Execute rename via Note:move (handles wikilink patching).
+      -- verbose=false: suppress per-rename notify from note/init.lua.
+      -- Watcher notify is also suppressed via the silent flag set below.
       local ok, note = pcall(Note, old_path)
       if ok and note then
-        local move_ok, move_err = pcall(note.move, note, new_path, false, true)
+        local move_ok, move_result = pcall(note.move, note, new_path, false, false, { silent = true })
         if move_ok then
+          n_patched = n_patched + (move_result or 0)
           -- Track rename for undo
           if undo_snapshots[bufnr] then
             table.insert(undo_snapshots[bufnr].renames, {
@@ -2383,7 +2387,7 @@ local function on_save(bufnr)
           n_renamed = n_renamed + 1
         else
           vim.notify(
-            string.format("[vault] Failed to rename '%s': %s", ren.old_slug, tostring(move_err)),
+            string.format("[vault] Failed to rename '%s': %s", ren.old_slug, tostring(move_result)),
             vim.log.levels.ERROR
           )
         end
@@ -2395,21 +2399,22 @@ local function on_save(bufnr)
       end
       ::continue_rename::
     end
-    if n_renamed > 0 then
-      vim.notify(
-        string.format("[vault] Renamed %d note%s (wikilinks updated)", n_renamed, n_renamed == 1 and "" or "s"),
-        vim.log.levels.INFO
-      )
-    end
   end
 
   -- ── No deletes: apply immediately ────────────────────────────────────────
   if #diff.deletes == 0 then
     local n_u, _, n_c = apply_mutations(diff, st)
-    vim.notify(
-      string.format("[vault] Applied: %d updated, %d created", n_u, n_c),
-      vim.log.levels.INFO
-    )
+    -- Single consolidated summary notification
+    local parts = {}
+    if n_renamed > 0 then
+      local rename_msg = string.format("%d renamed", n_renamed)
+      if n_patched > 0 then rename_msg = rename_msg .. string.format(" (%d files patched)", n_patched) end
+      table.insert(parts, rename_msg)
+    end
+    if n_u      > 0 then table.insert(parts, string.format("%d updated", n_u))        end
+    if n_c      > 0 then table.insert(parts, string.format("%d created", n_c))        end
+    if #parts == 0 then parts = { "no changes" } end
+    vim.notify("[vault] Saved: " .. table.concat(parts, ", "), vim.log.levels.INFO)
     vim.schedule(function()
       M.reload(bufnr)
       st.saving = false
