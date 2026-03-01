@@ -38,6 +38,7 @@
 local M = {}
 
 local utils = require("vault.utils")
+local log = require("vault.log").scope("resolver")
 
 -- ── NUI confirmation popup (delegates to shared module) ────────────────────
 
@@ -403,10 +404,7 @@ local function execute_action(action_result, st, close_fn, on_done)
         confirm_popup(msg,
             function()
                 local patched = wl:rewrite(new_slug)
-                vim.notify(
-                    string.format("[vault] Rewrote [[%s]] → [[%s]] in %d file(s)", slug, new_slug, patched),
-                    vim.log.levels.INFO
-                )
+                log.info("Rewrote [[%s]] → [[%s]] in %d file(s)", slug, new_slug, patched)
                 close_fn()
                 on_done()
             end,
@@ -430,10 +428,10 @@ local function execute_action(action_result, st, close_fn, on_done)
                 if note_ok and note then
                     local move_ok, err = pcall(note.move, note, new_path, false, true)
                     if not move_ok then
-                        vim.notify("[vault] Rename failed: " .. tostring(err), vim.log.levels.ERROR)
+                        log.error("Rename failed: %s", tostring(err))
                     end
                 else
-                    vim.notify("[vault] Could not load note: " .. old_path, vim.log.levels.ERROR)
+                    log.error("Could not load note: %s", old_path)
                 end
                 close_fn()
                 on_done()
@@ -463,11 +461,8 @@ local function execute_action(action_result, st, close_fn, on_done)
                 function()
                     local pa = st.a:rewrite(new_slug)
                     local pb = st.b:rewrite(new_slug)
-                    vim.notify(
-                        string.format("[vault] Rewrote [[%s]] + [[%s]] → [[%s]] (%d + %d files)",
-                            a_slug, b_slug, new_slug, pa, pb),
-                        vim.log.levels.INFO
-                    )
+                    log.info("Rewrote [[%s]] + [[%s]] → [[%s]] (%d + %d files)",
+                        a_slug, b_slug, new_slug, pa, pb)
                     on_done()
                 end,
                 function()
@@ -512,9 +507,9 @@ local function execute_action(action_result, st, close_fn, on_done)
         local slug = wl.data and wl.data.slug or ""
         local ok, err = pcall(wl.create_target, wl)
         if ok then
-            vim.notify(string.format("[vault] Created note: %s", slug), vim.log.levels.INFO)
+            log.info("Created note: %s", slug)
         else
-            vim.notify(string.format("[vault] Failed to create [[%s]]: %s", slug, tostring(err)), vim.log.levels.WARN)
+            log.warn("Failed to create [[%s]]: %s", slug, tostring(err))
         end
         close_fn()
         on_done()
