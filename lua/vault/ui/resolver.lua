@@ -39,6 +39,78 @@ local M = {}
 
 local utils = require("vault.utils")
 
+-- ── NUI confirmation popup ─────────────────────────────────────────────────
+
+--- Show a yes/no confirmation popup via NUI (non-blocking).
+--- @param message string The confirmation message
+--- @param on_yes fun() Called if user presses 'y' or clicks Yes
+--- @param on_no fun() Called if user presses 'n' or clicks No
+local function confirm_popup(message, on_yes, on_no)
+    local ok, Popup = pcall(require, "nui.popup")
+    if not ok then
+        -- Fallback to vim.ui.select if NUI not available
+        vim.ui.select({ "Yes", "No" }, { prompt = message .. " " }, function(choice)
+            if choice == "Yes" then
+                on_yes()
+            else
+                on_no()
+            end
+        end)
+        return
+    end
+
+    local popup = Popup({
+        position = "50%",
+        size = {
+            width = math.min(string.len(message) + 10, 80),
+            height = 7,
+        },
+        enter = true,
+        focusable = true,
+        border = {
+            padding = { 1, 2, 1, 2 },
+            style = "rounded",
+        },
+        buf_options = {
+            modifiable = false,
+            filetype = "nui_confirm",
+        },
+        win_options = {
+            winhighlight = "Normal:Normal,FloatBorder:FloatBorder",
+        },
+    })
+
+    popup:mount()
+    local bufnr = popup.bufnr
+
+    -- Display the message and buttons
+    local lines = {
+        message,
+        "",
+        "  [y]es    [n]o",
+    }
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+
+    -- Keymaps
+    local close = function()
+        if popup:is_mounted() then popup:unmount() end
+    end
+
+    vim.keymap.set("n", "y", function() close(); on_yes() end, { buffer = bufnr, noremap = true })
+    vim.keymap.set("n", "n", function() close(); on_no() end, { buffer = bufnr, noremap = true })
+    vim.keymap.set("n", "<CR>", function() close(); on_yes() end, { buffer = bufnr, noremap = true })
+    vim.keymap.set("n", "<Esc>", function() close(); on_no() end, { buffer = bufnr, noremap = true })
+
+    -- Close on BufLeave
+    vim.api.nvim_create_autocmd("BufLeave", {
+        buffer = bufnr,
+        once = true,
+        callback = function()
+            vim.schedule(close)
+        end,
+    })
+end
+
 -- ── Highlight groups ───────────────────────────────────────────────────────
 
 local NS = vim.api.nvim_create_namespace("vault_resolver")
@@ -380,16 +452,21 @@ local function execute_action(action_result, st, close_fn, on_done)
         local slug = wl.data and wl.data.slug or ""
         local count, _ = wl:rewrite_preview(new_slug)
         local msg = string.format("Rewrite [[%s]] → [[%s]] in %d file(s)?", slug, new_slug, count)
-        local ok = vim.fn.confirm("[vault] " .. msg, "&Yes\n&No", 2)
-        if ok == 1 then
-            local patched = wl:rewrite(new_slug)
-            vim.notify(
-                string.format("[vault] Rewrote [[%s]] → [[%s]] in %d file(s)", slug, new_slug, patched),
-                vim.log.levels.INFO
-            )
-        end
-        close_fn()
-        on_done()
+        confirm_popup(msg,
+            function()
+                local patched = wl:rewrite(new_slug)
+                vim.notify(
+                    string.format("[vault] Rewrote [[%s]] → [[%s]] in %d file(s)", slug, new_slug, patched),
+                    vim.log.levels.INFO
+                )
+                close_fn()
+                on_done()
+            end,
+            function()
+                close_fn()
+                on_done()
+            end
+        )
 
     elseif kind == "rename" then
         local wl = action_result[2]
@@ -398,21 +475,26 @@ local function execute_action(action_result, st, close_fn, on_done)
         local old_path = utils.slug_to_path(target)
         local new_path = utils.slug_to_path(new_slug)
         local msg = string.format("Rename %s → %s? (file move + wikilink patch)", target, new_slug)
-        local ok = vim.fn.confirm("[vault] " .. msg, "&Yes\n&No", 2)
-        if ok == 1 then
-            local Note = require("vault.notes.note")
-            local note_ok, note = pcall(Note, old_path)
-            if note_ok and note then
-                local move_ok, err = pcall(note.move, note, new_path, false, true)
-                if not move_ok then
-                    vim.notify("[vault] Rename failed: " .. tostring(err), vim.log.levels.ERROR)
+        confirm_popup(msg,
+            function()
+                local Note = require("vault.notes.note")
+                local note_ok, note = pcall(Note, old_path)
+                if note_ok and note then
+                    local move_ok, err = pcall(note.move, note, new_path, false, true)
+                    if not move_ok then
+                        vim.notify("[vault] Rename failed: " .. tostring(err), vim.log.levels.ERROR)
+                    end
+                else
+                    vim.notify("[vault] Could not load note: " .. old_path, vim.log.levels.ERROR)
                 end
-            else
-                vim.notify("[vault] Could not load note: " .. old_path, vim.log.levels.ERROR)
+                close_fn()
+                on_done()
+            end,
+            function()
+                close_fn()
+                on_done()
             end
-        end
-        close_fn()
-        on_done()
+        )
 
     elseif kind == "merge_new" then
         close_fn()
@@ -429,17 +511,21 @@ local function execute_action(action_result, st, close_fn, on_done)
                 "Rewrite [[%s]] (%d files) and [[%s]] (%d files) → [[%s]]?",
                 a_slug, a_count, b_slug, b_count, new_slug
             )
-            local ok = vim.fn.confirm("[vault] " .. msg, "&Yes\n&No", 2)
-            if ok == 1 then
-                local pa = st.a:rewrite(new_slug)
-                local pb = st.b:rewrite(new_slug)
-                vim.notify(
-                    string.format("[vault] Rewrote [[%s]] + [[%s]] → [[%s]] (%d + %d files)",
-                        a_slug, b_slug, new_slug, pa, pb),
-                    vim.log.levels.INFO
-                )
-            end
-            on_done()
+            confirm_popup(msg,
+                function()
+                    local pa = st.a:rewrite(new_slug)
+                    local pb = st.b:rewrite(new_slug)
+                    vim.notify(
+                        string.format("[vault] Rewrote [[%s]] + [[%s]] → [[%s]] (%d + %d files)",
+                            a_slug, b_slug, new_slug, pa, pb),
+                        vim.log.levels.INFO
+                    )
+                    on_done()
+                end,
+                function()
+                    on_done()
+                end
+            )
         end)
 
     elseif kind == "merge_notes" then
@@ -460,16 +546,18 @@ local function execute_action(action_result, st, close_fn, on_done)
             source_slug, target_slug,
             source_slug
         )
-        local ok = vim.fn.confirm("[vault] " .. msg, "&Yes\n&No", 2)
-        if ok == 1 then
-            close_fn()
-            require("vault.merge").merge(target_path, source_path, {
-                on_done = on_done,
-            })
-            return
-        end
-        close_fn()
-        on_done()
+        confirm_popup(msg,
+            function()
+                close_fn()
+                require("vault.merge").merge(target_path, source_path, {
+                    on_done = on_done,
+                })
+            end,
+            function()
+                close_fn()
+                on_done()
+            end
+        )
 
     elseif kind == "create" then
         local wl = action_result[2]
