@@ -29,6 +29,10 @@ function Watcher:init()
 
     --- Flag to control whether to guard against oil.nvim conflicts
     self.oil_guard_enabled = true
+
+    --- Suppression flag: when true, on_event ignores fs events.
+    --- Set during wikilink patching to avoid the watcher reacting to its own writes.
+    self._writing = false
 end
 
 --- Normalize filename reported by fs_event into an absolute path
@@ -117,6 +121,11 @@ end
 --- We interpret rename as:
 ---     file disappeared -> (within rename_window_sec) new file appeared
 function Watcher:on_event(filename, events)
+    -- Ignore events triggered by our own wikilink patching writes
+    if self._writing then
+        return
+    end
+
     local root = config.options.root
     local full_path = normalize_event_path(root, filename)
     if not full_path then
@@ -277,7 +286,8 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silen
         end
     end
 
-    -- Apply pending changes
+    -- Apply pending changes — suppress watcher during writes to avoid self-triggered events
+    self._writing = true
     local updated = 0
     local updated_paths = {}
     for path, info in pairs(pending) do
@@ -330,6 +340,8 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silen
             end
         end
     end
+
+    self._writing = false
 
     -- Update open buffers: rename any buffer that pointed to the old path
     for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
