@@ -20,7 +20,7 @@ return function(opts)
 
     local dirs_list = dirs:list()
     if next(dirs_list) == nil then
-        require("plenary.log").info("No directories found in vault")
+        require("vault.log").scope("telescope").info("No directories found in vault")
     end
 
     local uis = vim.api.nvim_list_uis()

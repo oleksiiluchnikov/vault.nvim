@@ -404,7 +404,7 @@ vault_actions.invert = function()
     --- @type vault.Filter
     local filter = vault_state.get_global_key("filter")
     if not filter then
-        Log.warn("No recent filter found")
+        log.warn("No recent filter found")
         return
     end
     local notes = require("vault.notes")():filter(filter:invert())
