@@ -302,7 +302,10 @@ function M.absorb(path_a, path_b, resolved, opts)
   local fields_a, body_a, raw_a = parse_note(path_a)
   local fields_b, body_b, raw_b = parse_note(path_b)
   if not fields_a or not fields_b then
-    vim.notify("[vault] Failed to parse one or both notes", vim.log.levels.ERROR)
+    local missing = {}
+    if not fields_a then table.insert(missing, slug_a .. " (" .. path_a .. ")") end
+    if not fields_b then table.insert(missing, slug_b .. " (" .. path_b .. ")") end
+    vim.notify("[vault] Failed to parse: " .. table.concat(missing, ", "), vim.log.levels.ERROR)
     return
   end
 
@@ -418,7 +421,10 @@ function M.merge(path_a, path_b, opts)
   local fields_a = parse_note(path_a)
   local fields_b = parse_note(path_b)
   if not fields_a or not fields_b then
-    vim.notify("[vault] Failed to parse one or both notes", vim.log.levels.ERROR)
+    local missing = {}
+    if not fields_a then table.insert(missing, slug_a .. " (" .. path_a .. ")") end
+    if not fields_b then table.insert(missing, slug_b .. " (" .. path_b .. ")") end
+    vim.notify("[vault] Failed to parse: " .. table.concat(missing, ", "), vim.log.levels.ERROR)
     return
   end
 
