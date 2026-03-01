@@ -4,6 +4,7 @@ return {
         local utils = require("telescope._extensions.vault.utils")
         local vault_actions = require("telescope._extensions.vault.actions")
         local vault_utils = require("vault.utils")
+        local log = require("vault.log").scope("telescope")
 
         local _, selection, _ = utils.get_picker_selection(bufnr)
         vault_actions.close(bufnr)
@@ -11,7 +12,7 @@ return {
         local task = selection.value
         local sources = task.data.sources
         if not sources or next(sources) == nil then
-            vim.notify("[vault] No sources found for task", vim.log.levels.WARN)
+            log.warn("No sources found for task")
             return
         end
         -- Open the first source note at the task line
