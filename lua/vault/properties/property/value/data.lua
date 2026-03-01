@@ -1,4 +1,3 @@
-local PropertyValueDocumentation = require("vault.propertys.property.documentation")
 --- @alias vault.Property.Value.Data.name string - The name of the property. e.g., "foo-bar".
 --- @alias vault.Property.Value.Data.type string - The type of the property.
 --- @alias vault.Property.Value.Data.values vault.PropertyValue.Data.value[] - The values of the property.
@@ -31,7 +30,7 @@ end
 data.sources = function(property_data) end
 
 data.documentation = function(property_data)
-    return PropertyValueDocumentation(property_data.name)
+    return nil
 end
 
 data.type = function(property_data)

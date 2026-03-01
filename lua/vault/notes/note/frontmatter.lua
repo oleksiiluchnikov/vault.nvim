@@ -1,5 +1,5 @@
 local Object = require("vault.core.object")
-local Field = require("vault.fields.field")
+local Field = require("vault.fields").Field
 
 --- Frontmatter class
 --- @class vault.Note.Frontmatter: vault.Object - The frontmatter of a note.

@@ -3,6 +3,81 @@ local function scanner()
     return require("vault.scanner")
 end
 
+local Field = Object("VaultNoteFrontmatterField")
+
+local function parse_field_value(value)
+    if value:match('^".*"$') or value:match("^'.*'$") then
+        return value:sub(2, -2)
+    elseif value:match(".-\n.+") then
+        local array = {}
+        local elements = vim.split(value, "\n")
+        for _, element in ipairs(elements) do
+            if element:match("^%s*-%s+.+") then
+                element = element:match("^%s*-%s+(.+)")
+            end
+            table.insert(array, parse_field_value(element))
+        end
+        return array
+    elseif value:match("^%d+$") then
+        return tonumber(value)
+    elseif value:match("^%d+%.%d+$") then
+        return tonumber(value)
+    elseif value:lower() == "true" or value:lower() == "false" then
+        return value:lower() == "true"
+    elseif value:match("^%[%[[^%[%]]+%]%]$") then
+        return value
+    elseif value:match("^%[.*%]$") then
+        local array = {}
+        local inner = value:sub(2, -2)
+        local elements = vim.split(inner, ",%s*")
+        for _, element in ipairs(elements) do
+            table.insert(array, parse_field_value(element))
+        end
+        return array
+    elseif value:match("^%{.*%}$") then
+        local inner = value:sub(2, -2)
+        local elements = vim.split(inner, ",%s*")
+        local tbl = {}
+        local all_parsed = true
+        for _, element in ipairs(elements) do
+            local k, v = element:match("^%s*([%w_%-]+):%s*(.*)$")
+            if k == nil then
+                all_parsed = false
+                break
+            end
+            tbl[k] = parse_field_value(v)
+        end
+        if all_parsed then
+            return tbl
+        end
+        return value
+    elseif value:match("^%[%[.*%]%]$") then
+        return value:sub(3, -3)
+    else
+        return value
+    end
+end
+
+function Field:init(this)
+    if type(this) == "string" then
+        this = { line = this }
+    end
+    if not type(this.line) == "string" then
+        error("Invalid argument: " .. vim.inspect(this))
+    end
+    local key, value = this.line:match([[^([%w_%-]-):%s*(.*)$]])
+    if key == nil then
+        return nil
+    end
+    self.key = key
+    self.value = parse_field_value(value)
+    self.source = this.source
+end
+
+function Field:__tostring()
+    return self.key .. ":: " .. self.value
+end
+
 --- @alias vault.Field.map table<string, vault.Field>
 
 --- @class vault.Fields: vault.Object - Fields is key value pairs in the frontmatter, and Dataview inlines.
@@ -139,6 +214,7 @@ function Fields:sources_with_few_fields()
     return same_line
 end
 
+Fields.Field = Field
 return Fields
 -- print(vim.inspect(Fields():sources()))
 -- local fields = Fields()
