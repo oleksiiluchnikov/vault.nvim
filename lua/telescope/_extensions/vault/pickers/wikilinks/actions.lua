@@ -100,6 +100,44 @@ function M.make_enter(ctx)
     end
 end
 
+--- Build the suggestion choices list for an unresolved wikilink.
+--- @param wl vault.Wikilink
+--- @return table[] choices  Each entry: { label, slug?, action? }
+local function build_choices(wl)
+    local slug = wl.data and wl.data.slug or ""
+    local choices = {}
+    local suggestions = wl.data and wl.data.suggestions or {}
+    local strategy_order = { "jaro_winkler", "levenshtein", "contains", "prefix" }
+    local strategy_labels = {
+        jaro_winkler = "fuzzy",
+        levenshtein = "edit-dist",
+        contains = "substr",
+        prefix = "prefix",
+    }
+    local seen_slugs = {}
+    for _, strategy in ipairs(strategy_order) do
+        local candidates = suggestions[strategy]
+        if type(candidates) == "table" then
+            local strat_label = strategy_labels[strategy] or strategy
+            for _, s in ipairs(candidates) do
+                local cand_slug = s.slug or s[1] or ""
+                if cand_slug ~= "" and not seen_slugs[cand_slug] then
+                    seen_slugs[cand_slug] = true
+                    local score = s.score or s[2] or 0
+                    local pct = math.floor(score * 100 + 0.5)
+                    choices[#choices + 1] = {
+                        label = cand_slug .. " (" .. pct .. "% " .. strat_label .. ")",
+                        slug = cand_slug,
+                    }
+                end
+            end
+        end
+    end
+    choices[#choices + 1] = { label = "Create new note: " .. slug, slug = nil, action = "create" }
+    choices[#choices + 1] = { label = "Skip", slug = nil, action = "skip" }
+    return choices
+end
+
 --- <C-l> resolve action: close picker, show vim.ui.select, apply, reopen.
 --- @param prompt_bufnr number
 --- @param ctx table { wikilinks, results, opts }
@@ -130,36 +168,7 @@ function M.make_resolve(prompt_bufnr, ctx)
         end
 
         -- Build choices from strategy-grouped suggestions
-        local choices = {}
-        local suggestions = wl.data and wl.data.suggestions or {}
-        local strategy_order = { "jaro_winkler", "levenshtein", "contains", "prefix" }
-        local strategy_labels = {
-            jaro_winkler = "fuzzy",
-            levenshtein = "edit-dist",
-            contains = "substr",
-            prefix = "prefix",
-        }
-        local seen_slugs = {}
-        for _, strategy in ipairs(strategy_order) do
-            local candidates = suggestions[strategy]
-            if type(candidates) == "table" then
-                local strat_label = strategy_labels[strategy] or strategy
-                for _, s in ipairs(candidates) do
-                    local cand_slug = s.slug or s[1] or ""
-                    if cand_slug ~= "" and not seen_slugs[cand_slug] then
-                        seen_slugs[cand_slug] = true
-                        local score = s.score or s[2] or 0
-                        local pct = math.floor(score * 100 + 0.5)
-                        choices[#choices + 1] = {
-                            label = cand_slug .. " (" .. pct .. "% " .. strat_label .. ")",
-                            slug = cand_slug,
-                        }
-                    end
-                end
-            end
-        end
-        choices[#choices + 1] = { label = "Create new note: " .. slug, slug = nil, action = "create" }
-        choices[#choices + 1] = { label = "Cancel", slug = nil, action = "skip" }
+        local choices = build_choices(wl)
 
         local labels = {}
         for _, c in ipairs(choices) do
@@ -427,6 +436,229 @@ function M.make_merge(prompt_bufnr, ctx)
                     return true
                 end,
             }):find()
+        end)
+    end
+end
+
+--- <C-S-c> batch create: instantly create notes for all selected unresolved wikilinks.
+--- @param prompt_bufnr number
+--- @param ctx table { wikilinks, results, opts }
+--- @return function
+function M.make_batch_create(prompt_bufnr, ctx)
+    local actions = require("telescope.actions")
+    local action_state = require("telescope.actions.state")
+    local reopen_picker = M.make_reopen(ctx)
+
+    return function()
+        local picker = action_state.get_current_picker(prompt_bufnr)
+        local selections = picker:get_multi_selection()
+        if #selections == 0 then
+            vim.notify("[vault] No items selected -- use <Tab> to select wikilinks first", vim.log.levels.WARN)
+            return
+        end
+
+        -- Filter to unresolved only
+        local queue = {}
+        for _, sel in ipairs(selections) do
+            local wl = sel.value
+            if wl and not wl:is_resolved_on_disk() then
+                queue[#queue + 1] = wl
+            end
+        end
+        if #queue == 0 then
+            vim.notify("[vault] All selected wikilinks are already resolved", vim.log.levels.INFO)
+            return
+        end
+
+        actions.close(prompt_bufnr)
+
+        vim.schedule(function()
+            local created = {}
+            for _, wl in ipairs(queue) do
+                local slug = wl.data and wl.data.slug or ""
+                local ok, err = pcall(wl.create_target, wl)
+                if ok then
+                    created[#created + 1] = slug
+                    M.remove_from_results(ctx.results, wl)
+                else
+                    vim.notify(
+                        string.format("[vault] Failed to create [[%s]]: %s", slug, tostring(err)),
+                        vim.log.levels.WARN
+                    )
+                end
+            end
+
+            if #created > 0 then
+                local preview = #created <= 5
+                    and table.concat(created, ", ")
+                    or table.concat(vim.list_slice(created, 1, 5), ", ") .. string.format(" ... +%d more", #created - 5)
+                vim.notify(
+                    string.format("[vault] Created %d note%s: %s", #created, #created == 1 and "" or "s", preview),
+                    vim.log.levels.INFO
+                )
+            end
+
+            reopen_picker()
+        end)
+    end
+end
+
+--- <C-S-l> batch resolve: interactive queue with "Create all" pre-option.
+--- @param prompt_bufnr number
+--- @param ctx table { wikilinks, results, opts }
+--- @return function
+function M.make_batch_resolve(prompt_bufnr, ctx)
+    local actions = require("telescope.actions")
+    local action_state = require("telescope.actions.state")
+    local reopen_picker = M.make_reopen(ctx)
+
+    return function()
+        local picker = action_state.get_current_picker(prompt_bufnr)
+        local selections = picker:get_multi_selection()
+        if #selections == 0 then
+            vim.notify("[vault] No items selected -- use <Tab> to select wikilinks first", vim.log.levels.WARN)
+            return
+        end
+
+        -- Filter to unresolved only
+        local queue = {}
+        for _, sel in ipairs(selections) do
+            local wl = sel.value
+            if wl and not wl:is_resolved_on_disk() then
+                queue[#queue + 1] = wl
+            end
+        end
+        if #queue == 0 then
+            vim.notify("[vault] All selected wikilinks are already resolved", vim.log.levels.INFO)
+            return
+        end
+
+        actions.close(prompt_bufnr)
+
+        vim.schedule(function()
+            -- Pre-option: Create all, Resolve individually, or Cancel
+            vim.ui.select({
+                string.format("Create all %d notes", #queue),
+                "Resolve individually",
+                "Cancel",
+            }, {
+                prompt = string.format("Batch resolve %d unresolved wikilinks:", #queue),
+            }, function(choice, idx)
+                if not choice or idx == 3 then
+                    reopen_picker()
+                    return
+                end
+
+                if idx == 1 then
+                    -- Batch create all
+                    local created = {}
+                    for _, wl in ipairs(queue) do
+                        local slug = wl.data and wl.data.slug or ""
+                        local ok, err = pcall(wl.create_target, wl)
+                        if ok then
+                            created[#created + 1] = slug
+                            M.remove_from_results(ctx.results, wl)
+                        else
+                            vim.notify(
+                                string.format("[vault] Failed to create [[%s]]: %s", slug, tostring(err)),
+                                vim.log.levels.WARN
+                            )
+                        end
+                    end
+                    if #created > 0 then
+                        local preview = #created <= 5
+                            and table.concat(created, ", ")
+                            or table.concat(vim.list_slice(created, 1, 5), ", ") .. string.format(" ... +%d more", #created - 5)
+                        vim.notify(
+                            string.format("[vault] Created %d note%s: %s", #created, #created == 1 and "" or "s", preview),
+                            vim.log.levels.INFO
+                        )
+                    end
+                    reopen_picker()
+                    return
+                end
+
+                -- Resolve individually: walk the queue
+                local stats = { rewritten = 0, created = 0, skipped = 0 }
+                local qi = 0
+
+                local function process_next()
+                    qi = qi + 1
+                    if qi > #queue then
+                        vim.notify(
+                            string.format("[vault] Batch resolve: %d rewritten, %d created, %d skipped",
+                                stats.rewritten, stats.created, stats.skipped),
+                            vim.log.levels.INFO
+                        )
+                        reopen_picker()
+                        return
+                    end
+
+                    local wl = queue[qi]
+                    local slug = wl.data and wl.data.slug or ""
+
+                    -- Re-check: might have been resolved by a prior rewrite in this batch
+                    if wl:is_resolved_on_disk() then
+                        stats.skipped = stats.skipped + 1
+                        vim.schedule(process_next)
+                        return
+                    end
+
+                    local choices = build_choices(wl)
+                    local labels = {}
+                    for _, c in ipairs(choices) do
+                        labels[#labels + 1] = c.label
+                    end
+
+                    vim.ui.select(labels, {
+                        prompt = string.format("(%d/%d) Resolve [[%s]]:", qi, #queue, slug),
+                    }, function(sel, sel_idx)
+                        if not sel or not sel_idx then
+                            stats.skipped = stats.skipped + 1
+                            vim.schedule(process_next)
+                            return
+                        end
+
+                        local picked = choices[sel_idx]
+
+                        if picked.action == "skip" then
+                            stats.skipped = stats.skipped + 1
+                            vim.schedule(process_next)
+                            return
+                        end
+
+                        if picked.action == "create" then
+                            local ok, err = pcall(wl.create_target, wl)
+                            if ok then
+                                stats.created = stats.created + 1
+                                M.remove_from_results(ctx.results, wl)
+                            else
+                                vim.notify(
+                                    string.format("[vault] Failed to create [[%s]]: %s", slug, tostring(err)),
+                                    vim.log.levels.WARN
+                                )
+                            end
+                            vim.schedule(process_next)
+                            return
+                        end
+
+                        -- Rewrite
+                        local ok, err = pcall(wl.rewrite, wl, picked.slug)
+                        if ok then
+                            stats.rewritten = stats.rewritten + 1
+                            M.remove_from_results(ctx.results, wl)
+                        else
+                            vim.notify(
+                                string.format("[vault] Failed to rewrite [[%s]]: %s", slug, tostring(err)),
+                                vim.log.levels.WARN
+                            )
+                        end
+                        vim.schedule(process_next)
+                    end)
+                end
+
+                vim.schedule(process_next)
+            end)
         end)
     end
 end
