@@ -121,6 +121,47 @@ M.directories = function(_, map)
 end
 
 --- @param map vault.Picker.map
+M.tasks = function(_, map)
+    local task_actions = require("telescope._extensions.vault.pickers.tasks.actions")
+
+    map("i", "<C-c>", vault_actions.close)
+    map("n", "<C-c>", vault_actions.close)
+
+    map("i", "<CR>", task_actions.enter)
+    map("n", "<CR>", task_actions.enter)
+
+    map("i", "<C-s>", vault_actions.resort)
+    map("n", "<C-s>", vault_actions.resort)
+
+    -- select all entries in the picker
+    map("i", "<C-a>", require("telescope.actions").select_all)
+    map("n", "<C-a>", require("telescope.actions").select_all)
+
+    map("i", "<C-d>", require("telescope.actions").drop_all)
+    map("n", "<C-d>", require("telescope.actions").drop_all)
+
+    return true
+end
+
+--- @param map vault.Picker.map
+M.lines = function(_, map)
+    map("i", "<C-c>", vault_actions.close)
+    map("n", "<C-c>", vault_actions.close)
+
+    map("i", "<C-s>", vault_actions.resort)
+    map("n", "<C-s>", vault_actions.resort)
+
+    -- select all entries in the picker
+    map("i", "<C-a>", require("telescope.actions").select_all)
+    map("n", "<C-a>", require("telescope.actions").select_all)
+
+    map("i", "<C-d>", require("telescope.actions").drop_all)
+    map("n", "<C-d>", require("telescope.actions").drop_all)
+
+    return true
+end
+
+--- @param map vault.Picker.map
 M.bases = function(_, map)
     map("i", "<C-c>", vault_actions.close)
     map("n", "<C-c>", vault_actions.close)

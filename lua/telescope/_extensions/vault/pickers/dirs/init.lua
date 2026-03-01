@@ -13,7 +13,7 @@ return function(opts)
     local pickers = require("telescope.pickers")
     local vault_layouts = require("telescope._extensions.vault.layouts")
     local vault_hl = require("telescope._extensions.vault.highlights")
-    local vault_actions = require("telescope._extensions.vault.actions")
+    local vault_mappings = require("telescope._extensions.vault.mappings")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
 
     opts = opts or {}
@@ -112,27 +112,7 @@ return function(opts)
         finder = finder,
         sorter = sorters.get_fzy_sorter(),
         on_input_filter_cb = make_filter(dirs_list, entry_maker),
-        attach_mappings = function(prompt_bufnr, map)
-            local actions = require("telescope.actions")
-            map("i", "<CR>", vault_actions.directory.enter)
-            map("n", "<CR>", vault_actions.directory.enter)
-            map("i", "<C-a>", actions.select_all)
-            map("n", "<C-a>", actions.select_all)
-            map("i", "<C-d>", actions.drop_all)
-            map("n", "<C-d>", actions.drop_all)
-
-            if colors then
-                pcall(vim.api.nvim_create_autocmd, "BufWipeout", {
-                    buffer = prompt_bufnr,
-                    once = true,
-                    callback = function()
-                        vault_hl.cleanup(hl_name, #colors)
-                    end,
-                })
-            end
-
-            return true
-        end,
+        attach_mappings = vault_hl.make_attach_mappings(vault_mappings.directories, hl_name, colors),
     })
 
     vault_state.set_global_key("picker", picker)

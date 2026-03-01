@@ -8,9 +8,8 @@ return function(opts)
     local finders = require("telescope.finders")
     local pickers = require("telescope.pickers")
     local sorters = require("telescope.sorters")
-    local actions = require("telescope.actions")
+    local vault_mappings = require("telescope._extensions.vault.mappings")
     local vault_hl = require("telescope._extensions.vault.highlights")
-    local task_picker_actions = require("telescope._extensions.vault.pickers.tasks.actions")
     --- Constants for task display configuration
     local DISPLAY_CONFIG = {
         WIDTHS = {
@@ -155,9 +154,7 @@ return function(opts)
             height = vim.api.nvim_list_uis()[1].height - 4,
             width = vim.api.nvim_list_uis()[1].width,
         },
-        attach_mappings = vault_hl.make_attach_mappings(function(prompt_bufnr, map)
-            actions.select_default:replace(task_picker_actions.enter)
-        end, hl_name, colors),
+        attach_mappings = vault_hl.make_attach_mappings(vault_mappings.tasks, hl_name, colors),
     })
     vault_state.set_global_key("picker", picker)
     return picker
