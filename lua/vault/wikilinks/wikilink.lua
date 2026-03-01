@@ -334,6 +334,86 @@ function Wikilink.extract_from_text(text)
 end
 
 
+--- Check if this wikilink resolves to a readable file on disk.
+--- More reliable than :is_resolved() which only checks scanner cache.
+--- @return boolean
+function Wikilink:is_resolved_on_disk()
+    local target_slug = self.data.target
+    if not target_slug or target_slug == "" then
+        return false
+    end
+    local utils = require("vault.utils")
+    local abs_path = utils.slug_to_path(target_slug)
+    return vim.fn.filereadable(abs_path) == 1
+end
+
+
+--- Rewrite all occurrences of this wikilink's slug to a new slug across source files.
+--- @param new_slug string The new slug to replace the old one with.
+--- @return number patched Number of source files that were modified.
+function Wikilink:rewrite(new_slug)
+    local old_slug = self.data.slug or ""
+    if old_slug == "" or old_slug == new_slug then
+        return 0
+    end
+
+    local utils = require("vault.utils")
+    local sources = self.data.sources or {}
+    local patched = 0
+
+    -- Build all pattern variants to replace (stem and full slug)
+    local old_stem = self.data.stem or old_slug:match("([^/]+)$") or old_slug
+    local old_patterns = {}
+    for _, pat in ipairs({ old_slug, old_stem }) do
+        old_patterns[pat] = true
+    end
+
+    for source_slug, _ in pairs(sources) do
+        local source_path = utils.slug_to_path(source_slug)
+        if vim.fn.filereadable(source_path) == 1 then
+            local lines = vim.fn.readfile(source_path)
+            local changed = false
+            for i, line in ipairs(lines) do
+                local new_line = line
+                for old_pat, _ in pairs(old_patterns) do
+                    local escaped = old_pat:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
+                    new_line = new_line:gsub(
+                        "%[%[" .. escaped .. "(%]%])",
+                        "[[" .. new_slug .. "%1"
+                    )
+                    new_line = new_line:gsub(
+                        "%[%[" .. escaped .. "([#|])",
+                        "[[" .. new_slug .. "%1"
+                    )
+                end
+                if new_line ~= line then
+                    lines[i] = new_line
+                    changed = true
+                end
+            end
+            if changed then
+                vim.fn.writefile(lines, source_path)
+                patched = patched + 1
+            end
+        end
+    end
+
+    return patched
+end
+
+
+--- Create a target note for an unresolved wikilink.
+--- @return vault.Note note The newly created note.
+function Wikilink:create_target()
+    local utils = require("vault.utils")
+    local Note = require("vault.notes.note")
+    local path = utils.slug_to_path(self.data.slug)
+    local note = Note(path)
+    note:write(path)
+    return note
+end
+
+
 --- Expose slug validation for use by other modules (e.g. scanner filtering).
 --- @param slug string
 --- @return boolean

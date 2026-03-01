@@ -1,84 +1,10 @@
---- Wikilinks picker actions: resolve, merge, enter, and shared utilities.
+--- Wikilinks picker actions: resolve, merge, enter.
+--- Domain logic delegates to Wikilink methods; this module handles only UI orchestration.
 local M = {}
 
 local utils = require("vault.utils")
 
---- Check whether a wikilink resolves to an existing file.
---- @param wikilink vault.Wikilink
---- @return boolean
-function M.is_resolved(wikilink)
-    local target_slug = wikilink.data and wikilink.data.target
-    if not target_slug or target_slug == "" then
-        return false
-    end
-    local abs_path = utils.slug_to_path(target_slug)
-    return vim.fn.filereadable(abs_path) == 1
-end
-
---- Count sources (backlinks) for a wikilink.
---- @param wikilink vault.Wikilink
---- @return number
-function M.source_count(wikilink)
-    if wikilink.data and type(wikilink.data.sources) == "table" then
-        return vim.tbl_count(wikilink.data.sources)
-    end
-    return 0
-end
-
---- Rewrite [[old_slug]] -> [[new_slug]] across all source files for a wikilink.
---- @param wl vault.Wikilink
---- @param new_slug string
---- @return number patched Number of files patched
-function M.rewrite_wikilink(wl, new_slug)
-    local old_slug = wl.data and wl.data.slug or ""
-    if old_slug == "" or old_slug == new_slug then
-        return 0
-    end
-
-    local sources = wl.data and wl.data.sources or {}
-    local patched = 0
-
-    -- Build all pattern variants to replace (stem, slug, with/without alias/heading)
-    local old_stem = wl.data.stem or old_slug:match("([^/]+)$") or old_slug
-    local old_patterns = {}
-    for _, pat in ipairs({ old_slug, old_stem }) do
-        old_patterns[pat] = true
-    end
-
-    for source_slug, _ in pairs(sources) do
-        local source_path = utils.slug_to_path(source_slug)
-        if vim.fn.filereadable(source_path) == 1 then
-            local lines = vim.fn.readfile(source_path)
-            local changed = false
-            for i, line in ipairs(lines) do
-                local new_line = line
-                for old_pat, _ in pairs(old_patterns) do
-                    local escaped = old_pat:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
-                    new_line = new_line:gsub(
-                        "%[%[" .. escaped .. "(%]%])",
-                        "[[" .. new_slug .. "%1"
-                    )
-                    new_line = new_line:gsub(
-                        "%[%[" .. escaped .. "([#|])",
-                        "[[" .. new_slug .. "%1"
-                    )
-                end
-                if new_line ~= line then
-                    lines[i] = new_line
-                    changed = true
-                end
-            end
-            if changed then
-                vim.fn.writefile(lines, source_path)
-                patched = patched + 1
-            end
-        end
-    end
-
-    return patched
-end
-
---- Remove a wikilink from results in-place.
+--- Remove a wikilink from results in-place (picker-level bookkeeping).
 --- @param results vault.Wikilink[]
 --- @param wl vault.Wikilink
 function M.remove_from_results(results, wl)
@@ -109,7 +35,7 @@ function M.make_reopen(ctx)
 end
 
 --- <CR> action: open target (resolved) or create note (unresolved).
---- @param ctx table { results, is_resolved }
+--- @param ctx table
 --- @return function
 function M.make_enter(ctx)
     return function(prompt_bufnr)
@@ -120,6 +46,7 @@ function M.make_enter(ctx)
         if not selection or not selection.value then
             return
         end
+        --- @type vault.Wikilink
         local wl = selection.value
         local slug = wl.data and wl.data.slug or ""
         if slug == "" then
@@ -128,14 +55,11 @@ function M.make_enter(ctx)
 
         actions.close(prompt_bufnr)
 
-        if M.is_resolved(wl) then
+        if wl:is_resolved_on_disk() then
             local target = utils.slug_to_path(slug)
             vim.cmd("edit " .. vim.fn.fnameescape(target))
         else
-            local Note = require("vault.notes.note")
-            local path = utils.slug_to_path(slug)
-            local note = Note(path)
-            note:write(path)
+            local note = wl:create_target()
             note:edit()
         end
     end
@@ -155,13 +79,14 @@ function M.make_resolve(prompt_bufnr, ctx)
         if not selection or not selection.value then
             return
         end
+        --- @type vault.Wikilink
         local wl = selection.value
         local slug = wl.data and wl.data.slug or ""
         if slug == "" then
             return
         end
 
-        if M.is_resolved(wl) then
+        if wl:is_resolved_on_disk() then
             vim.notify("[vault] Already resolved -> " .. (wl.data.target or ""), vim.log.levels.INFO)
             return
         end
@@ -220,16 +145,12 @@ function M.make_resolve(prompt_bufnr, ctx)
 
                 if picked.action ~= "skip" then
                     if picked.action == "create" then
-                        local Note = require("vault.notes.note")
-                        local path = utils.slug_to_path(slug)
-                        local note = Note(path)
-                        note:write(path)
+                        wl:create_target()
                         vim.notify("[vault] Created: " .. slug, vim.log.levels.INFO)
                     else
-                        local new_slug = picked.slug
-                        local patched = M.rewrite_wikilink(wl, new_slug)
+                        local patched = wl:rewrite(picked.slug)
                         vim.notify(
-                            "[vault] [[" .. slug .. "]] -> [[" .. new_slug .. "]] | " .. patched .. " files patched",
+                            "[vault] [[" .. slug .. "]] -> [[" .. picked.slug .. "]] | " .. patched .. " files patched",
                             vim.log.levels.INFO
                         )
                     end
@@ -255,11 +176,12 @@ function M.make_merge(prompt_bufnr, ctx)
     return function()
         local selection = action_state.get_selected_entry()
         if not selection or not selection.value then return end
+        --- @type vault.Wikilink
         local wl = selection.value
         local slug = wl.data and wl.data.slug or ""
         if slug == "" then return end
 
-        local resolved = M.is_resolved(wl)
+        local resolved = wl:is_resolved_on_disk()
 
         -- Close picker before opening sub-picker
         actions.close(prompt_bufnr)
@@ -282,7 +204,6 @@ function M.make_merge(prompt_bufnr, ctx)
                 end
             end
 
-            -- Score candidates using Rust slug similarity
             local scored = scoring.suggest(slug, candidate_slugs, 200)
 
             if #scored == 0 then
@@ -336,7 +257,7 @@ function M.make_merge(prompt_bufnr, ctx)
                         if resolved then
                             local source_path = utils.slug_to_path(slug)
                             if target_exists then
-                                -- Both exist: full merge
+                                -- Both exist: full merge (domain service)
                                 require("vault.merge").merge(target_path, source_path, {
                                     on_done = function()
                                         M.remove_from_results(ctx.results, wl)
@@ -351,7 +272,7 @@ function M.make_merge(prompt_bufnr, ctx)
                                 else
                                     vim.fn.rename(source_path, target_path)
                                 end
-                                M.rewrite_wikilink(wl, target_slug)
+                                wl:rewrite(target_slug)
                                 M.remove_from_results(ctx.results, wl)
                                 vim.notify(
                                     "[vault] Renamed [[" .. slug .. "]] -> [[" .. target_slug .. "]]",
@@ -360,8 +281,8 @@ function M.make_merge(prompt_bufnr, ctx)
                                 reopen_picker()
                             end
                         else
-                            -- Source wikilink is unresolved
-                            local patched = M.rewrite_wikilink(wl, target_slug)
+                            -- Source wikilink is unresolved — rewrite via domain method
+                            local patched = wl:rewrite(target_slug)
                             local msg = target_exists
                                 and string.format("[vault] [[%s]] -> [[%s]] | %d files patched", slug, target_slug, patched)
                                 or string.format("[vault] [[%s]] -> [[%s]] (both unresolved) | %d files patched", slug, target_slug, patched)

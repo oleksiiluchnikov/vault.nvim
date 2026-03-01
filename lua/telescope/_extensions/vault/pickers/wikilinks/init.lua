@@ -58,12 +58,13 @@ return function(opts)
         local context = wikilink.data and (wikilink.data.context or wikilink.data.excerpt or "")
             or ""
 
-        local resolved = wl_actions.is_resolved(wikilink)
+        local resolved = wikilink:is_resolved_on_disk()
 
         local mark = resolved and "✓" or "○"
         local mark_hl = resolved and "TelescopeResultsDiffAdd" or "TelescopeResultsDiffChange"
 
-        local backlinks_count = wl_actions.source_count(wikilink)
+        local backlinks_count = (wikilink.data and type(wikilink.data.sources) == "table")
+            and vim.tbl_count(wikilink.data.sources) or 0
 
         local slug_hl = resolved and "TelescopeResultsNormal" or "TelescopeResultsComment"
         if resolved and colors then
@@ -95,7 +96,7 @@ return function(opts)
         local context = (entry.data and (entry.data.context or entry.data.excerpt or "")) or ""
 
         local filename = nil
-        if wl_actions.is_resolved(entry) then
+        if entry:is_resolved_on_disk() then
             filename = utils.slug_to_path(entry.data.target)
         else
             if entry.data and type(entry.data.sources) == "table" then
@@ -135,8 +136,8 @@ return function(opts)
         end)
     elseif opts.sort_by == "resolved" then
         table.sort(results, function(a, b)
-            local ra = wl_actions.is_resolved(a) and 1 or 0
-            local rb = wl_actions.is_resolved(b) and 1 or 0
+            local ra = a:is_resolved_on_disk() and 1 or 0
+            local rb = b:is_resolved_on_disk() and 1 or 0
             if ra == rb then
                 return (a.data.slug or "") < (b.data.slug or "")
             end

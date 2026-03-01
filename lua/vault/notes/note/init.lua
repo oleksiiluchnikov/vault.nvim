@@ -888,6 +888,22 @@ function Note:delete(permanent, verbose)
     end
 end
 
+--- Rename a note by slug or path. Delegates to Note:move().
+--- @param new_name string A slug (e.g. "foo/bar") or absolute path.
+--- @param force? boolean Overwrite target if exists (default false).
+--- @param verbose? boolean Show notification (default true).
+function Note:rename(new_name, force, verbose)
+    local new_path
+    if new_name:sub(1, 1) == "/" then
+        -- Already an absolute path
+        new_path = new_name
+    else
+        -- Treat as slug, convert to path
+        new_path = utils.slug_to_path(new_name)
+    end
+    return self:move(new_path, force, verbose)
+end
+
 --- @type vault.Note|vault.Note.constructor
 local VaultNote = Note
 VaultNote.Title = Title
