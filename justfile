@@ -1,4 +1,9 @@
-# vault.nvim justfile
+# vault.nvim — Obsidian vault integration for Neovim
+# https://github.com/oleksiiluchnikov/vault.nvim
+
+# Default: list available recipes
+default:
+    @just --list
 
 # System detection
 os := os()
