@@ -93,7 +93,12 @@ end
 
 function M.open_picker_property_values(property_name)
     local properties = require("vault.properties")()
-    local values = properties.map[property_name].data.values
+    local prop = properties.map[property_name]
+    if not prop then
+        log.warn("Property not found: %s", tostring(property_name))
+        return
+    end
+    local values = prop.data.values
     -- pick_value(opts, property_name, values, on_value_selected)
     safe_find(
         pickers.property_values({
@@ -106,8 +111,17 @@ end
 
 function M.open_picker_notes_with_property_value(property_name, value_name)
     local properties = require("vault.properties")()
-    local values = properties.map[property_name].data.values
+    local prop = properties.map[property_name]
+    if not prop then
+        log.warn("Property not found: %s", tostring(property_name))
+        return
+    end
+    local values = prop.data.values
     local value = values[value_name]
+    if not value then
+        log.warn("Value not found: %s[%s]", tostring(property_name), tostring(value_name))
+        return
+    end
     local sources = value.data.sources
     local slugs = vim.tbl_keys(sources)
 
