@@ -2,6 +2,7 @@
 --- Domain logic delegates to Wikilink methods; this module handles only UI orchestration.
 local M = {}
 
+local log = require("vault.log").scope("wikilinks")
 local utils = require("vault.utils")
 local resolve_picker = require("vault.ui.resolve_picker")
 
@@ -94,7 +95,7 @@ function M.make_enter(ctx)
                 function()
                     local note = wl:create_target()
                     note:edit()
-                    vim.notify(string.format("[vault] Created note: %s", slug), vim.log.levels.INFO)
+                    log.info("Created note: %s", slug)
                 end
             )
         end
@@ -113,19 +114,13 @@ local function handle_rewrite(wl, new_slug, ctx, on_done)
 
     local function do_rewrite()
         local patched = wl:rewrite(new_slug)
-        vim.notify(
-            string.format("[vault] Rewrote [[%s]] -> [[%s]] in %d file(s)", slug, new_slug, patched),
-            vim.log.levels.INFO
-        )
+        log.info("Rewrote [[%s]] -> [[%s]] in %d file(s)", slug, new_slug, patched)
         M.remove_from_results(ctx.results, wl)
         on_done()
     end
 
     if count == 0 then
-        vim.notify(
-            string.format("[vault] No files contain [[%s]], nothing to rewrite", slug),
-            vim.log.levels.INFO
-        )
+        log.info("No files contain [[%s]], nothing to rewrite", slug)
         on_done()
         return
     end
@@ -178,10 +173,7 @@ function M.make_resolve(prompt_bufnr, ctx)
         end
 
         if wl:is_resolved_on_disk() then
-            vim.notify(
-                string.format("[vault] [[%s]] already points to an existing note", slug),
-                vim.log.levels.INFO
-            )
+            log.info("[[%s]] already points to an existing note", slug)
             return
         end
 
@@ -197,7 +189,7 @@ function M.make_resolve(prompt_bufnr, ctx)
                     end
                     if result.action == "create" then
                         wl:create_target()
-                        vim.notify(string.format("[vault] Created note: %s", slug), vim.log.levels.INFO)
+                        log.info("Created note: %s", slug)
                         M.remove_from_results(ctx.results, wl)
                         reopen_picker()
                         return
@@ -234,7 +226,7 @@ function M.make_merge(prompt_bufnr, ctx)
             local a_slug = wl_a.data and wl_a.data.slug or ""
             local b_slug = wl_b.data and wl_b.data.slug or ""
             if a_slug == b_slug then
-                vim.notify("[vault] Cannot compare a wikilink with itself", vim.log.levels.WARN)
+                log.warn("Cannot compare a wikilink with itself")
                 return
             end
 
@@ -288,13 +280,7 @@ function M.make_merge(prompt_bufnr, ctx)
             local scored = scoring.suggest(slug, candidate_slugs, 200)
 
             if #scored == 0 then
-                vim.notify(
-                    string.format(
-                        "[vault] No similar notes found for [[%s]]. Try <C-l> to resolve manually instead.",
-                        slug
-                    ),
-                    vim.log.levels.WARN
-                )
+                log.warn("No similar notes found for [[%s]]. Try <C-l> to resolve manually instead.", slug)
                 reopen_picker()
                 return
             end
@@ -389,10 +375,7 @@ function M.make_merge(prompt_bufnr, ctx)
                                         end
                                         wl:rewrite(target_slug)
                                         M.remove_from_results(ctx.results, wl)
-                                        vim.notify(
-                                            string.format("[vault] Moved [[%s]] -> [[%s]]", slug, target_slug),
-                                            vim.log.levels.INFO
-                                        )
+                                        log.info("Moved [[%s]] -> [[%s]]", slug, target_slug)
                                         reopen_picker()
                                     end,
                                     reopen_picker
@@ -403,10 +386,7 @@ function M.make_merge(prompt_bufnr, ctx)
                             local count, affected = wl:rewrite_preview(target_slug)
 
                             if count == 0 then
-                                vim.notify(
-                                    string.format("[vault] No files contain [[%s]], nothing to rewrite", slug),
-                                    vim.log.levels.INFO
-                                )
+                                log.info("No files contain [[%s]], nothing to rewrite", slug)
                                 reopen_picker()
                                 return
                             end
@@ -420,10 +400,7 @@ function M.make_merge(prompt_bufnr, ctx)
                                 ),
                                 function()
                                     local patched = wl:rewrite(target_slug)
-                                    vim.notify(
-                                        string.format("[vault] Rewrote [[%s]] -> [[%s]] in %d file(s)", slug, target_slug, patched),
-                                        vim.log.levels.INFO
-                                    )
+                                    log.info("Rewrote [[%s]] -> [[%s]] in %d file(s)", slug, target_slug, patched)
                                     M.remove_from_results(ctx.results, wl)
                                     reopen_picker()
                                 end,
@@ -451,7 +428,7 @@ function M.make_batch_create(prompt_bufnr, ctx)
         local picker = action_state.get_current_picker(prompt_bufnr)
         local selections = picker:get_multi_selection()
         if #selections == 0 then
-            vim.notify("[vault] No items selected -- use <Tab> to select wikilinks first", vim.log.levels.WARN)
+            log.warn("No items selected -- use <Tab> to select wikilinks first")
             return
         end
 
@@ -464,7 +441,7 @@ function M.make_batch_create(prompt_bufnr, ctx)
             end
         end
         if #queue == 0 then
-            vim.notify("[vault] All selected wikilinks are already resolved", vim.log.levels.INFO)
+            log.info("All selected wikilinks are already resolved")
             return
         end
 
@@ -479,10 +456,7 @@ function M.make_batch_create(prompt_bufnr, ctx)
                     created[#created + 1] = slug
                     M.remove_from_results(ctx.results, wl)
                 else
-                    vim.notify(
-                        string.format("[vault] Failed to create [[%s]]: %s", slug, tostring(err)),
-                        vim.log.levels.WARN
-                    )
+                    log.warn("Failed to create [[%s]]: %s", slug, tostring(err))
                 end
             end
 
@@ -490,10 +464,7 @@ function M.make_batch_create(prompt_bufnr, ctx)
                 local preview = #created <= 5
                     and table.concat(created, ", ")
                     or table.concat(vim.list_slice(created, 1, 5), ", ") .. string.format(" ... +%d more", #created - 5)
-                vim.notify(
-                    string.format("[vault] Created %d note%s: %s", #created, #created == 1 and "" or "s", preview),
-                    vim.log.levels.INFO
-                )
+                log.info("Created %d note%s: %s", #created, #created == 1 and "" or "s", preview)
             end
 
             reopen_picker()
@@ -514,7 +485,7 @@ function M.make_batch_resolve(prompt_bufnr, ctx)
         local picker = action_state.get_current_picker(prompt_bufnr)
         local selections = picker:get_multi_selection()
         if #selections == 0 then
-            vim.notify("[vault] No items selected -- use <Tab> to select wikilinks first", vim.log.levels.WARN)
+            log.warn("No items selected -- use <Tab> to select wikilinks first")
             return
         end
 
@@ -527,7 +498,7 @@ function M.make_batch_resolve(prompt_bufnr, ctx)
             end
         end
         if #queue == 0 then
-            vim.notify("[vault] All selected wikilinks are already resolved", vim.log.levels.INFO)
+            log.info("All selected wikilinks are already resolved")
             return
         end
 
@@ -546,20 +517,14 @@ function M.make_batch_resolve(prompt_bufnr, ctx)
                         created[#created + 1] = slug
                         M.remove_from_results(ctx.results, wl)
                     else
-                        vim.notify(
-                            string.format("[vault] Failed to create [[%s]]: %s", slug, tostring(err)),
-                            vim.log.levels.WARN
-                        )
+                        log.warn("Failed to create [[%s]]: %s", slug, tostring(err))
                     end
                 end
                 if #created > 0 then
                     local preview = #created <= 5
                         and table.concat(created, ", ")
                         or table.concat(vim.list_slice(created, 1, 5), ", ") .. string.format(" ... +%d more", #created - 5)
-                    vim.notify(
-                        string.format("[vault] Created %d note%s: %s", #created, #created == 1 and "" or "s", preview),
-                        vim.log.levels.INFO
-                    )
+                    log.info("Created %d note%s: %s", #created, #created == 1 and "" or "s", preview)
                 end
                 reopen_picker()
             end
@@ -571,11 +536,8 @@ function M.make_batch_resolve(prompt_bufnr, ctx)
                 local function process_next()
                     qi = qi + 1
                     if qi > #queue then
-                        vim.notify(
-                            string.format("[vault] Batch resolve: %d rewritten, %d created, %d skipped",
-                                stats.rewritten, stats.created, stats.skipped),
-                            vim.log.levels.INFO
-                        )
+                        log.info("Batch resolve: %d rewritten, %d created, %d skipped",
+                            stats.rewritten, stats.created, stats.skipped)
                         reopen_picker()
                         return
                     end
@@ -605,10 +567,7 @@ function M.make_batch_resolve(prompt_bufnr, ctx)
                                     stats.created = stats.created + 1
                                     M.remove_from_results(ctx.results, wl)
                                 else
-                                    vim.notify(
-                                        string.format("[vault] Failed to create [[%s]]: %s", slug, tostring(err)),
-                                        vim.log.levels.WARN
-                                    )
+                                    log.warn("Failed to create [[%s]]: %s", slug, tostring(err))
                                 end
                                 vim.schedule(process_next)
                                 return
@@ -619,10 +578,7 @@ function M.make_batch_resolve(prompt_bufnr, ctx)
                                 stats.rewritten = stats.rewritten + 1
                                 M.remove_from_results(ctx.results, wl)
                             else
-                                vim.notify(
-                                    string.format("[vault] Failed to rewrite [[%s]]: %s", slug, tostring(err)),
-                                    vim.log.levels.WARN
-                                )
+                                log.warn("Failed to rewrite [[%s]]: %s", slug, tostring(err))
                             end
                             vim.schedule(process_next)
                         end,
