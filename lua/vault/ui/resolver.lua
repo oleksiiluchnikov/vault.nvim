@@ -59,11 +59,19 @@ local function confirm_popup(message, on_yes, on_no)
         return
     end
 
+    -- Compute size from message content
+    local _, newline_count = message:gsub("\n", "\n")
+    local msg_height = newline_count + 1
+    local max_line_len = 0
+    for line in (message .. "\n"):gmatch("([^\n]*)\n") do
+        if #line > max_line_len then max_line_len = #line end
+    end
+
     local popup = Popup({
         position = "50%",
         size = {
-            width = math.min(string.len(message) + 10, 80),
-            height = 7,
+            width = math.min(max_line_len + 10, 80),
+            height = msg_height + 4, -- message + blank + button row + padding
         },
         enter = true,
         focusable = true,
@@ -102,8 +110,11 @@ local function confirm_popup(message, on_yes, on_no)
     vim.bo[bufnr].modifiable = false
 
     -- Keymaps
+    local closed = false
     local close = function()
-        if popup:is_mounted() then popup:unmount() end
+        if closed then return end
+        closed = true
+        pcall(popup.unmount, popup)
     end
 
     vim.keymap.set("n", "y", function() close(); on_yes() end, { buffer = bufnr, noremap = true })
