@@ -2261,221 +2261,318 @@ local function on_save(bufnr)
     return
   end
 
-  -- ── Confirmation for creates > 5 ───────────────────────────────────────
-  if #diff.creates > 5 then
-    local choice = vim.fn.confirm(
-      string.format(
-        "Vault process: About to CREATE %d new notes. This seems unusual.\n\nProceed?",
-        #diff.creates
-      ),
-      "&Yes, create them\n&No, skip creates\n&Cancel (no changes)"
-    )
-    if choice == 3 or choice == 0 then
-      vim.bo[bufnr].modified = true
-      st.saving = false
-      return
+  local confirm_ui = require("vault.ui.confirm")
+
+  local function begin_confirm_guard(cancel_message)
+    st.saving = "confirming"
+    vim.bo[bufnr].modified = false
+    local active = true
+    local autocmd_id
+
+    local function cleanup()
+      if not active then return false end
+      active = false
+      if autocmd_id then pcall(vim.api.nvim_del_autocmd, autocmd_id) end
+      return true
     end
-    if choice == 2 then
-      diff.creates = {}
-    end
+
+    autocmd_id = vim.api.nvim_create_autocmd("TextChanged", {
+      buffer = bufnr,
+      once = true,
+      callback = function()
+        if not active or st.saving ~= "confirming" then return end
+        cleanup()
+        st.saving = false
+        vim.bo[bufnr].modified = true
+        vim.notify(cancel_message, vim.log.levels.INFO)
+      end,
+    })
+
+    return {
+      proceed = function(fn)
+        if not active or st.saving ~= "confirming" then return end
+        cleanup()
+        st.saving = true
+        fn()
+      end,
+      cancel = function(opts)
+        opts = opts or {}
+        if not active and st.saving ~= "confirming" then return end
+        cleanup()
+        st.saving = false
+        if opts.restore_modified ~= false then
+          vim.bo[bufnr].modified = true
+        end
+        if opts.message then
+          vim.notify(opts.message, vim.log.levels.INFO)
+        end
+      end,
+    }
   end
 
-  -- ── Safety: if creates ≈ deletes, it's likely extmark identity loss ──────
-  -- (lines lost their slug → flagged as "delete original + create new")
-  -- However, small numbers (e.g. 1 create + 1 delete) usually mean the user
-  -- edited a title, causing the old slug to appear as "deleted" and the new
-  -- title as "created". In that case, try to pair them as renames/updates.
-  if #diff.creates > 0 and #diff.deletes > 0 then
-    -- Try to pair creates with deletes by matching row proximity.
-    -- If counts are small (≤5), attempt to convert create+delete pairs into
-    -- updates by assigning the deleted slug to the created row's fields.
-    if #diff.creates <= 5 and #diff.deletes <= 5 and #diff.creates == #diff.deletes then
-      -- Pair them: each "create" is really an edit of the corresponding "delete"
-      -- (the extmark drifted, so the slug was lost for that row)
-      local n_paired = #diff.creates
-      -- Build formula set to filter out read-only columns
-      local formula_set = {}
-      if st.formula_cols then
-        for _, fc in ipairs(st.formula_cols) do formula_set[fc] = true end
-      end
-      for i, cr in ipairs(diff.creates) do
-        local del_slug = diff.deletes[i]
-        if del_slug then
-          -- Filter out formula columns from the paired update
-          local fields = {}
-          for k, v in pairs(cr.fields) do
-            if not formula_set[k] then fields[k] = v end
-          end
-          table.insert(diff.updates, { slug = del_slug, fields = fields })
+  local continue_after_creates
+  continue_after_creates = function()
+    -- ── Safety: if creates ≈ deletes, it's likely extmark identity loss ──────
+    -- (lines lost their slug → flagged as "delete original + create new")
+    -- However, small numbers (e.g. 1 create + 1 delete) usually mean the user
+    -- edited a title, causing the old slug to appear as "deleted" and the new
+    -- title as "created". In that case, try to pair them as renames/updates.
+    if #diff.creates > 0 and #diff.deletes > 0 then
+      -- Try to pair creates with deletes by matching row proximity.
+      -- If counts are small (≤5), attempt to convert create+delete pairs into
+      -- updates by assigning the deleted slug to the created row's fields.
+      if #diff.creates <= 5 and #diff.deletes <= 5 and #diff.creates == #diff.deletes then
+        -- Pair them: each "create" is really an edit of the corresponding "delete"
+        -- (the extmark drifted, so the slug was lost for that row)
+        local n_paired = #diff.creates
+        -- Build formula set to filter out read-only columns
+        local formula_set = {}
+        if st.formula_cols then
+          for _, fc in ipairs(st.formula_cols) do formula_set[fc] = true end
         end
+        for i, cr in ipairs(diff.creates) do
+          local del_slug = diff.deletes[i]
+          if del_slug then
+            -- Filter out formula columns from the paired update
+            local fields = {}
+            for k, v in pairs(cr.fields) do
+              if not formula_set[k] then fields[k] = v end
+            end
+            table.insert(diff.updates, { slug = del_slug, fields = fields })
+          end
+        end
+        diff.creates = {}
+        diff.deletes = {}
+        vim.notify(
+          string.format("[vault] Paired %d create+delete as title edits", n_paired),
+          vim.log.levels.INFO
+        )
+      else
+        vim.notify(
+          string.format(
+            "[vault] SAFETY: Found %d creates AND %d deletes — likely extmark identity loss. "
+              .. "Applying %d updates only. Please close and reopen the process buffer.",
+            #diff.creates, #diff.deletes, #diff.updates
+          ),
+          vim.log.levels.WARN
+        )
+        local updates_only = { updates = diff.updates, deletes = {}, creates = {} }
+        local n_u = apply_mutations(updates_only, st)
+        vim.notify(string.format("[vault] Applied: %d updated", n_u), vim.log.levels.INFO)
+        vim.schedule(function()
+          M.reload(bufnr)
+          st.saving = false
+        end)
+        return
       end
-      diff.creates = {}
-      diff.deletes = {}
-      vim.notify(
-        string.format("[vault] Paired %d create+delete as title edits", n_paired),
-        vim.log.levels.INFO
-      )
-    else
-      vim.notify(
-        string.format(
-          "[vault] SAFETY: Found %d creates AND %d deletes — likely extmark identity loss. "
-            .. "Applying %d updates only. Please close and reopen the process buffer.",
-          #diff.creates, #diff.deletes, #diff.updates
-        ),
-        vim.log.levels.WARN
-      )
-      local updates_only = { updates = diff.updates, deletes = {}, creates = {} }
-      local n_u = apply_mutations(updates_only, st)
-      vim.notify(string.format("[vault] Applied: %d updated", n_u), vim.log.levels.INFO)
+    end
+
+    -- ── Process renames (slug column edits → file move + wikilink update) ───
+    local n_renamed = 0
+    local n_patched = 0  -- total wikilink files patched across all renames
+    if #diff.renames > 0 then
+      local Note = require("vault.notes.note")
+      local config = require("vault.config")
+      local vault_root = vim.fn.expand(config.options.root)
+      for _, ren in ipairs(diff.renames) do
+        local old_path = st.note_paths[ren.old_slug]
+        if not old_path then goto continue_rename end
+        local new_path = vault_root .. "/" .. ren.new_slug .. ".md"
+        -- Safety: refuse path escape
+        if ren.new_slug:match("%.%.") then
+          vim.notify(
+            string.format("[vault] SAFETY: Refusing rename '%s' — contains '..'", ren.new_slug),
+            vim.log.levels.ERROR
+          )
+          goto continue_rename
+        end
+        -- Safety: refuse collision
+        if vim.fn.filereadable(new_path) == 1 and old_path ~= new_path then
+          vim.notify(
+            string.format("[vault] SAFETY: Cannot rename to '%s' — file already exists", ren.new_slug),
+            vim.log.levels.ERROR
+          )
+          goto continue_rename
+        end
+        -- Execute rename via Note:move (handles wikilink patching).
+        -- verbose=false: suppress per-rename notify from note/init.lua.
+        -- Watcher notify is also suppressed via the silent flag set below.
+        local ok, note = pcall(Note, old_path)
+        if ok and note then
+          local move_ok, move_result = pcall(note.move, note, new_path, false, false, { silent = true })
+          if move_ok then
+            n_patched = n_patched + (move_result or 0)
+            -- Track rename for undo
+            if undo_snapshots[bufnr] then
+              table.insert(undo_snapshots[bufnr].renames, {
+                old_path = old_path,
+                new_path = new_path,
+              })
+            end
+            -- Update state maps
+            st.note_paths[ren.new_slug] = new_path
+            st.note_paths[ren.old_slug] = nil
+            if st.note_mtimes then
+              st.note_mtimes[ren.new_slug] = st.note_mtimes[ren.old_slug]
+              st.note_mtimes[ren.old_slug] = nil
+            end
+            n_renamed = n_renamed + 1
+          else
+            vim.notify(
+              string.format("[vault] Failed to rename '%s': %s", ren.old_slug, tostring(move_result)),
+              vim.log.levels.ERROR
+            )
+          end
+        else
+          vim.notify(
+            string.format("[vault] Failed to load note '%s' for rename", ren.old_slug),
+            vim.log.levels.ERROR
+          )
+        end
+        ::continue_rename::
+      end
+    end
+
+    -- ── No deletes: apply immediately ────────────────────────────────────────
+    if #diff.deletes == 0 then
+      local n_u, _, n_c = apply_mutations(diff, st)
+      -- Single consolidated summary notification
+      local parts = {}
+      if n_renamed > 0 then
+        local rename_msg = string.format("%d renamed", n_renamed)
+        if n_patched > 0 then rename_msg = rename_msg .. string.format(" (%d files patched)", n_patched) end
+        table.insert(parts, rename_msg)
+      end
+      if n_u      > 0 then table.insert(parts, string.format("%d updated", n_u))        end
+      if n_c      > 0 then table.insert(parts, string.format("%d created", n_c))        end
+      if #parts == 0 then parts = { "no changes" } end
+      vim.notify("[vault] Saved: " .. table.concat(parts, ", "), vim.log.levels.INFO)
       vim.schedule(function()
         M.reload(bufnr)
         st.saving = false
       end)
       return
     end
-  end
 
-  -- ── Process renames (slug column edits → file move + wikilink update) ───
-  local n_renamed = 0
-  local n_patched = 0  -- total wikilink files patched across all renames
-  if #diff.renames > 0 then
-    local Note = require("vault.notes.note")
-    local config = require("vault.config")
-    local vault_root = vim.fn.expand(config.options.root)
-    for _, ren in ipairs(diff.renames) do
-      local old_path = st.note_paths[ren.old_slug]
-      if not old_path then goto continue_rename end
-      local new_path = vault_root .. "/" .. ren.new_slug .. ".md"
-      -- Safety: refuse path escape
-      if ren.new_slug:match("%.%.") then
-        vim.notify(
-          string.format("[vault] SAFETY: Refusing rename '%s' — contains '..'", ren.new_slug),
-          vim.log.levels.ERROR
-        )
-        goto continue_rename
-      end
-      -- Safety: refuse collision
-      if vim.fn.filereadable(new_path) == 1 and old_path ~= new_path then
-        vim.notify(
-          string.format("[vault] SAFETY: Cannot rename to '%s' — file already exists", ren.new_slug),
-          vim.log.levels.ERROR
-        )
-        goto continue_rename
-      end
-      -- Execute rename via Note:move (handles wikilink patching).
-      -- verbose=false: suppress per-rename notify from note/init.lua.
-      -- Watcher notify is also suppressed via the silent flag set below.
-      local ok, note = pcall(Note, old_path)
-      if ok and note then
-        local move_ok, move_result = pcall(note.move, note, new_path, false, false, { silent = true })
-        if move_ok then
-          n_patched = n_patched + (move_result or 0)
-          -- Track rename for undo
-          if undo_snapshots[bufnr] then
-            table.insert(undo_snapshots[bufnr].renames, {
-              old_path = old_path,
-              new_path = new_path,
-            })
-          end
-          -- Update state maps
-          st.note_paths[ren.new_slug] = new_path
-          st.note_paths[ren.old_slug] = nil
-          if st.note_mtimes then
-            st.note_mtimes[ren.new_slug] = st.note_mtimes[ren.old_slug]
-            st.note_mtimes[ren.old_slug] = nil
-          end
-          n_renamed = n_renamed + 1
-        else
-          vim.notify(
-            string.format("[vault] Failed to rename '%s': %s", ren.old_slug, tostring(move_result)),
-            vim.log.levels.ERROR
-          )
-        end
-      else
-        vim.notify(
-          string.format("[vault] Failed to load note '%s' for rename", ren.old_slug),
-          vim.log.levels.ERROR
-        )
-      end
-      ::continue_rename::
+    -- ── Hard cap on deletes ──────────────────────────────────────────────────
+    if #diff.deletes > DELETE_HARD_CAP then
+      vim.notify(
+        string.format(
+          "[vault] SAFETY: Refusing to delete %d notes (cap is %d). "
+            .. "This likely indicates a bug. Applying updates/creates only. "
+            .. "Please close and reopen the process buffer.",
+          #diff.deletes, DELETE_HARD_CAP
+        ),
+        vim.log.levels.ERROR
+      )
+      apply_safe_and_reload(bufnr, st, diff)
+      return
     end
-  end
 
-  -- ── No deletes: apply immediately ────────────────────────────────────────
-  if #diff.deletes == 0 then
-    local n_u, _, n_c = apply_mutations(diff, st)
-    -- Single consolidated summary notification
-    local parts = {}
-    if n_renamed > 0 then
-      local rename_msg = string.format("%d renamed", n_renamed)
-      if n_patched > 0 then rename_msg = rename_msg .. string.format(" (%d files patched)", n_patched) end
-      table.insert(parts, rename_msg)
+    -- ── Confirmation prompt for deletes ──────────────────────────────────────
+    local preview_slugs = {}
+    for i = 1, math.min(10, #diff.deletes) do
+      table.insert(preview_slugs, "  - " .. diff.deletes[i])
     end
-    if n_u      > 0 then table.insert(parts, string.format("%d updated", n_u))        end
-    if n_c      > 0 then table.insert(parts, string.format("%d created", n_c))        end
-    if #parts == 0 then parts = { "no changes" } end
-    vim.notify("[vault] Saved: " .. table.concat(parts, ", "), vim.log.levels.INFO)
-    vim.schedule(function()
-      M.reload(bufnr)
-      st.saving = false
-    end)
-    return
+    if #diff.deletes > 10 then
+      table.insert(preview_slugs, string.format("  ... and %d more", #diff.deletes - 10))
+    end
+
+    local prompt = string.format(
+      "Vault process: About to TRASH %d note%s:\n%s\n\nAlso: %d updated, %d created.\n\nProceed with deletes?",
+      #diff.deletes,
+      #diff.deletes == 1 and "" or "s",
+      table.concat(preview_slugs, "\n"),
+      #diff.updates,
+      #diff.creates
+    )
+
+    local guard = begin_confirm_guard("[vault] Buffer changed — save cancelled")
+    confirm_ui.select({
+      message = prompt,
+      title = "Vault Process",
+      choices = {
+        {
+          key = "y",
+          label = "Yes, trash them",
+          action = function()
+            guard.proceed(function()
+              local n_u, n_d, n_c = apply_mutations(diff, st)
+              vim.notify(
+                string.format("[vault] Applied: %d updated, %d trashed, %d created", n_u, n_d, n_c),
+                vim.log.levels.INFO
+              )
+              vim.schedule(function()
+                M.reload(bufnr)
+                st.saving = false
+              end)
+            end)
+          end,
+        },
+        {
+          key = "n",
+          label = "No, skip deletes",
+          action = function()
+            guard.proceed(function() apply_safe_and_reload(bufnr, st, diff) end)
+          end,
+        },
+        {
+          key = "c",
+          label = "Cancel (no changes)",
+          action = function()
+            guard.cancel({ message = "[vault] Save cancelled" })
+          end,
+        },
+      },
+      on_cancel = function()
+        guard.cancel({ message = "[vault] Save cancelled" })
+      end,
+    })
   end
 
-  -- ── Hard cap on deletes ──────────────────────────────────────────────────
-  if #diff.deletes > DELETE_HARD_CAP then
-    vim.notify(
-      string.format(
-        "[vault] SAFETY: Refusing to delete %d notes (cap is %d). "
-          .. "This likely indicates a bug. Applying updates/creates only. "
-          .. "Please close and reopen the process buffer.",
-        #diff.deletes, DELETE_HARD_CAP
+  -- ── Confirmation for creates > 5 ───────────────────────────────────────
+  if #diff.creates > 5 then
+    local guard = begin_confirm_guard("[vault] Buffer changed — save cancelled")
+    confirm_ui.select({
+      message = string.format(
+        "Vault process: About to CREATE %d new notes. This seems unusual.\n\nProceed?",
+        #diff.creates
       ),
-      vim.log.levels.ERROR
-    )
-    apply_safe_and_reload(bufnr, st, diff)
+      title = "Vault Process",
+      choices = {
+        {
+          key = "y",
+          label = "Yes, create them",
+          action = function()
+            guard.proceed(continue_after_creates)
+          end,
+        },
+        {
+          key = "n",
+          label = "No, skip creates",
+          action = function()
+            guard.proceed(function()
+              diff.creates = {}
+              continue_after_creates()
+            end)
+          end,
+        },
+        {
+          key = "c",
+          label = "Cancel (no changes)",
+          action = function()
+            guard.cancel({ message = "[vault] Save cancelled" })
+          end,
+        },
+      },
+      on_cancel = function()
+        guard.cancel({ message = "[vault] Save cancelled" })
+      end,
+    })
     return
   end
 
-  -- ── Confirmation prompt for deletes ──────────────────────────────────────
-  local preview_slugs = {}
-  for i = 1, math.min(10, #diff.deletes) do
-    table.insert(preview_slugs, "  - " .. diff.deletes[i])
-  end
-  if #diff.deletes > 10 then
-    table.insert(preview_slugs, string.format("  ... and %d more", #diff.deletes - 10))
-  end
-
-  local prompt = string.format(
-    "Vault process: About to TRASH %d note%s:\n%s\n\nAlso: %d updated, %d created.\n\nProceed with deletes?",
-    #diff.deletes,
-    #diff.deletes == 1 and "" or "s",
-    table.concat(preview_slugs, "\n"),
-    #diff.updates,
-    #diff.creates
-  )
-
-  local choice = vim.fn.confirm(prompt, "&Yes, trash them\n&No, skip deletes\n&Cancel (no changes)")
-
-  if choice == 1 then
-    -- Apply everything including deletes
-    local n_u, n_d, n_c = apply_mutations(diff, st)
-    vim.notify(
-      string.format("[vault] Applied: %d updated, %d trashed, %d created", n_u, n_d, n_c),
-      vim.log.levels.INFO
-    )
-    vim.schedule(function()
-      M.reload(bufnr)
-      st.saving = false
-    end)
-  elseif choice == 2 then
-    -- Apply updates + creates only, skip deletes
-    apply_safe_and_reload(bufnr, st, diff)
-  else
-    -- Cancel entirely
-    vim.notify("[vault] Save cancelled", vim.log.levels.INFO)
-    st.saving = false
-  end
+  continue_after_creates()
 end
 
 -- ─── Public API ───────────────────────────────────────────────────────────────
