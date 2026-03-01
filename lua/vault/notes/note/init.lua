@@ -110,29 +110,20 @@ function Title:sync(path)
 
     local new_path = vim.fn.fnamemodify(path, ":h") .. "/" .. title .. ".md"
     if vim.fn.filereadable(new_path) == 1 then
-        vim.notify("File already exists: " .. new_path, vim.log.levels.ERROR, {
-            title = "Knowledge",
-            timeout = 200,
-        })
+        vim.notify("[vault] File already exists: " .. new_path, vim.log.levels.ERROR)
         return
     end
 
     local rename_success = vim.fn.rename(path, new_path)
     if rename_success == 0 then
-        vim.notify("Renamed: " .. path .. " -> " .. new_path, vim.log.levels.INFO, {
-            title = "Knowledge",
-            timeout = 200,
-        })
+        vim.notify("[vault] Renamed: " .. path .. " -> " .. new_path, vim.log.levels.INFO)
 
         local inlinks = note.inlinks(path)
         if #inlinks > 0 then
             note.update_inlinks(path)
         end
     else
-        vim.notify("Failed to rename: " .. path .. " -> " .. new_path, vim.log.levels.ERROR, {
-            title = "Knowledge",
-            timeout = 200,
-        })
+        vim.notify("[vault] Failed to rename: " .. path .. " -> " .. new_path, vim.log.levels.ERROR)
         return
     end
 
@@ -405,7 +396,7 @@ function Note:write(path, force)
     if vim.fn.filereadable(path) == 1 then
         vim.fn.writefile(content_lines, path)
         if config.options.notify.on_write == true then
-            vim.notify("Note created: " .. path)
+            vim.notify("[vault] Note created: " .. path, vim.log.levels.INFO)
         end
         return
     end
@@ -420,7 +411,7 @@ function Note:write(path, force)
         for _, t in pairs(paths) do
             local stem = vim.fn.fnamemodify(t.path, ":t:r")
             if utils.match(stem, new_stem, "exact", false) == true then
-                vim.notify("Note with same stem already exists: " .. vim.inspect(t.slug))
+                vim.notify("[vault] A note with the same name already exists: " .. tostring(t.slug), vim.log.levels.WARN)
                 return
             end
         end
@@ -431,7 +422,7 @@ function Note:write(path, force)
 
     vim.fn.writefile(content_lines, path)
     if config.options.notify.on_write == true then
-        vim.notify("Note created: " .. path)
+        vim.notify("[vault] Note created: " .. path, vim.log.levels.INFO)
     end
 end
 
@@ -469,7 +460,7 @@ function Note:preview()
     local previewer = config.options.previewer or "glow"
 
     if vim.fn.executable(previewer) == 0 and package.loaded["glow"] == nil then
-        vim.notify("Glow is not installed")
+        vim.notify("[vault] Preview requires 'glow' — install with: brew install glow", vim.log.levels.WARN)
         return
     end
     vim.cmd("Glow " .. self.data.path)
@@ -563,7 +554,7 @@ function Note:update_inlinks(path)
         f:close()
         content = content:gsub(inlink.link, new_link)
         utils.safe_write(inlink.source.data.path, content)
-        vim.notify(inlink.link .. " -> " .. new_link)
+        vim.notify("[vault] " .. inlink.link .. " -> " .. new_link, vim.log.levels.INFO)
     end
 end
 
@@ -598,7 +589,7 @@ function Note:open_in_obsidian(path)
     end)
 
     if not success then
-        vim.notify("Failed to open Obsidian: " .. tostring(err), vim.log.levels.ERROR)
+        vim.notify("[vault] Failed to open Obsidian: " .. tostring(err):match("[^\n]+"), vim.log.levels.ERROR)
     end
 end
 

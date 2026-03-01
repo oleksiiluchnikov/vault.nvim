@@ -1,5 +1,5 @@
 if not pcall(require, "nui.popup") then
-    vim.notify("nui.nvim is required to run vault.nvim", vim.log.levels.ERROR)
+    vim.notify("[vault] nui.nvim is required for the fleeting note popup", vim.log.levels.ERROR)
     return
 end
 
@@ -43,7 +43,7 @@ end
 --- @return nil
 local function write_note(path, content, opts)
     if check_if_note_exists(path) then
-        -- TODO: Handle note already exists case
+        vim.notify("[vault] Note already exists: " .. vim.fn.fnamemodify(path, ":t:r"), vim.log.levels.WARN)
         return nil
     end
     -- Concatenate multiline content for performance
@@ -54,7 +54,7 @@ local function write_note(path, content, opts)
     end
 
     if content == "" then
-        vim.notify("Dismissing note creation: " .. path, vim.log.levels.INFO)
+        vim.notify("[vault] Note creation cancelled (empty content)", vim.log.levels.INFO)
         return nil
     end
 
@@ -65,7 +65,7 @@ local function write_note(path, content, opts)
     -- Check parent directory exists before writing
     local parent = vim.fn.fnamemodify(path, ":h")
     if vim.fn.isdirectory(parent) == 0 then
-        vim.notify("Directory does not exist: " .. parent, vim.log.levels.ERROR)
+        vim.notify("[vault] Directory does not exist: " .. parent, vim.log.levels.ERROR)
         return nil
     end
 

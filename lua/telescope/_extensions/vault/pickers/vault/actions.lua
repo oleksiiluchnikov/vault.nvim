@@ -6,7 +6,7 @@ return {
         vault_actions.close(bufnr)
 
         if not selections or next(selections) == nil then
-            vim.notify("No selection made", vim.log.levels.WARN)
+            vim.notify("[vault] No selection made", vim.log.levels.WARN)
             return
         end
 
@@ -15,7 +15,7 @@ return {
         --- @type fun(): Picker
         local picker_fn = require("telescope._extensions.vault.pickers")[entry.value.name]
         if not picker_fn then
-            vim.notify("No picker found for '" .. entry.value.name .. "'", vim.log.levels.ERROR)
+            vim.notify("[vault] No picker found for '" .. entry.value.name .. "'", vim.log.levels.ERROR)
             return
         end
 

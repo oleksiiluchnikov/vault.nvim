@@ -26,7 +26,7 @@ return function(opts)
 
     local results = opts.notes:list()
     if next(results) == nil then
-        Log.info("No notes found in vault")
+        vim.notify("[vault] No notes found", vim.log.levels.INFO)
         return
     end
 
