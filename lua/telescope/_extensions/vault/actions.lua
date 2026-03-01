@@ -3,6 +3,7 @@ local actions = require("telescope.actions")
 local vault_state = require("vault.core.state")
 local highlights = require("vault.highlights")
 local utils = require("telescope._extensions.vault.utils")
+local log = require("vault.log").scope("telescope")
 
 local Popup = require("nui.popup")
 local event = require("nui.utils.autocmd").event
@@ -148,16 +149,16 @@ local batch_rename = function(_, selections)
     local function on_enter()
         local lines = vim.api.nvim_buf_get_lines(popup.bufnr, 0, -1, false)
         if next(lines) == nil then
-            vim.notify("[vault] Nothing to rename — buffer is empty", vim.log.levels.WARN)
+            log.warn("Nothing to rename — buffer is empty")
             return
         end
         if #lines ~= #strings_to_rename then
-            vim.notify("[vault] Line count changed — keep lines unchanged if you don't want to rename them", vim.log.levels.WARN)
+            log.warn("Line count changed — keep lines unchanged if you don't want to rename them")
             return
         end
         local class_name = selections[1].value.class and selections[1].value.class.name
         if not class_name then
-            vim.notify("[vault] Cannot determine type of selected items", vim.log.levels.ERROR)
+            log.error("Cannot determine type of selected items")
             return
         end
         if class_name == "VaultNote" then
@@ -213,7 +214,7 @@ function vault_actions.note.delete(bufnr)
         for _, sel in ipairs(selections) do
             local ok, err = pcall(function() sel.value:delete(permanent, true) end)
             if not ok then
-                vim.notify("[vault] Failed to delete " .. sel.value.data.slug .. ": " .. tostring(err), vim.log.levels.ERROR)
+                log.error("Failed to delete %s: %s", sel.value.data.slug, tostring(err))
             end
         end
     end
@@ -225,11 +226,11 @@ function vault_actions.note.delete(bufnr)
             { key = "t", label = "Trash", action = function() do_delete(false) end },
             { key = "p", label = "Permanent", action = function() do_delete(true) end, danger = true },
             { key = "c", label = "Cancel", action = function()
-                vim.notify("[vault] Delete cancelled", vim.log.levels.INFO)
+                log.info("Delete cancelled")
             end },
         },
         on_cancel = function()
-            vim.notify("[vault] Delete cancelled", vim.log.levels.INFO)
+            log.info("Delete cancelled")
         end,
     })
 end
