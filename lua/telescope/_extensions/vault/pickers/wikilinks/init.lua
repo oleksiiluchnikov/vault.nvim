@@ -172,6 +172,16 @@ return function(opts)
         map("i", "<c-l>", resolve)
         map("n", "<c-l>", resolve)
 
+        -- <C-S-l> — batch resolve (interactive queue with "Create all" option)
+        local batch_resolve = wl_actions.make_batch_resolve(prompt_bufnr, ctx)
+        map("i", "<c-s-l>", batch_resolve)
+        map("n", "<c-s-l>", batch_resolve)
+
+        -- <C-S-c> — batch create (instant, no prompts)
+        local batch_create = wl_actions.make_batch_create(prompt_bufnr, ctx)
+        map("i", "<c-s-c>", batch_create)
+        map("n", "<c-s-c>", batch_create)
+
         -- <C-j> — merge
         local merge = wl_actions.make_merge(prompt_bufnr, ctx)
         map("i", "<c-j>", merge)
@@ -192,7 +202,7 @@ return function(opts)
     end
 
     local picker_opts = {
-        prompt_title = "Wikilinks  <C-l>=resolve  <C-j>=merge",
+        prompt_title = "Wikilinks  <C-l>=resolve  <C-S-l>=batch  <C-S-c>=create-all  <C-j>=merge",
         finder = finder,
         sorter = sorters.get_generic_fuzzy_sorter(),
         previewer = vault_previewers.wikilinks,
