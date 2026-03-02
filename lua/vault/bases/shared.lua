@@ -356,7 +356,7 @@ end
 ---@param col_name? string
 ---@return string
 function M.fmt_value(value, col_name)
-  if value == nil or value == "" then return M.get_empty_cell() end
+  if value == nil or value == vim.NIL or type(value) == "userdata" or value == "" then return M.get_empty_cell() end
   if type(value) == "boolean" then return value and "true" or "false" end
   if type(value) == "table" then
     if value._type == "date" then return os.date("%Y-%m-%d", value.epoch) or M.get_empty_cell() end
