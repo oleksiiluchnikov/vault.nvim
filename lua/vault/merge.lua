@@ -397,7 +397,12 @@ function M.absorb(path_a, path_b, resolved, opts)
   local Note = require("vault.notes.note")
   local ok_note, note_b = pcall(Note, path_b)
   if ok_note and note_b then
-    pcall(note_b.delete, note_b, false, false)
+    local ok_del, del_err = pcall(note_b.delete, note_b, false, false)
+    if not ok_del then
+      log.warn("Failed to delete absorbed note %s: %s", path_b, tostring(del_err))
+    end
+  else
+    log.warn("Failed to create Note object for deletion: %s — %s", path_b, tostring(note_b))
   end
 
   log.info("Merged %s ← %s (%d wikilinks patched)", slug_a, slug_b, patched)

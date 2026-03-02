@@ -35,15 +35,17 @@ function TagData:init(this)
     if self.name:find("/") then
         self.root = self.root:match("^[^/]+")
     end
-    self.sources = this.sources or nil
+    self.sources = this.sources or {}
 
     -- Count the number of sources
     self.count = 0
     self.occurences = 0
     for _, occurences in pairs(self.sources) do
         self.count = self.count + 1
-        for _, _ in pairs(occurences) do
-            self.occurences = self.occurences + 1
+        if type(occurences) == "table" then
+            for _, _ in pairs(occurences) do
+                self.occurences = self.occurences + 1
+            end
         end
     end
     -- self.count = this.count or #self.sources
