@@ -669,6 +669,77 @@ local function build_subcommands()
             end,
         },
 
+        -- :Vault grid [filter] — Grid-backed metadata editor (new, opt-in sibling to :Vault process)
+        grid = {
+            run = function(args)
+                local grid_editor = require("vault.bases.grid_editor")
+                local filter = args[1]
+                local notes, desc
+
+                local columns_arg = nil
+                if filter and filter:find(",") then
+                    columns_arg = vim.split(filter, ",", { plain = true })
+                    for i, c in ipairs(columns_arg) do
+                        columns_arg[i] = vim.trim(c)
+                    end
+                    columns_arg = vim.tbl_filter(function(c) return c ~= "" end, columns_arg)
+                    filter = args[2]
+                    args = vim.list_slice(args, 2)
+                end
+
+                if filter == "undo" then
+                    grid_editor.undo()
+                    return
+                elseif not filter or filter == "" then
+                    notes = require("vault.notes")()
+                    desc = "all notes"
+                elseif filter == "orphans" then
+                    notes = require("vault.notes")():orphans()
+                    desc = "orphan notes"
+                elseif filter == "leaves" then
+                    notes = require("vault.notes")():leaves()
+                    desc = "leaf notes"
+                elseif filter == "empty" then
+                    notes = require("vault.notes")():filter("content", [[^\s*$]], "regex", false)
+                    desc = "empty notes"
+                elseif filter == "base" then
+                    if args[2] then
+                        local base_name = table.concat(vim.list_slice(args, 2), " ")
+                        local Bases = require("vault.bases")
+                        local bases = Bases()
+                        local base = bases:get(base_name)
+                        if not base then
+                            log.error("Base not found: %s", base_name)
+                            return
+                        end
+                        grid_editor.open({ base = base, columns = columns_arg })
+                    else
+                        log.warn("Usage: :Vault grid base <name>")
+                    end
+                    return
+                else
+                    notes = require("vault.notes")():filter("slug", filter, "fuzzy")
+                    desc = "filter:" .. filter
+                end
+
+                grid_editor.open({ notes = notes, filter_desc = desc, columns = columns_arg })
+            end,
+            complete = function(prefix, line)
+                if line and line:match("grid%s+base%s+") then
+                    local ok, Bases = pcall(require, "vault.bases")
+                    if ok then
+                        local bases = Bases()
+                        local names = bases:names()
+                        local sub = line:match("grid%s+base%s+(.*)") or ""
+                        return vim.tbl_filter(function(s) return s:find(sub, 1, true) == 1 end, names)
+                    end
+                    return {}
+                end
+                local subs = { "base", "undo", "orphans", "leaves", "empty" }
+                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+            end,
+        },
+
         -- :Vault today           — open today's journal
         -- :Vault today append    — append a line
         -- :Vault today dictate   — dictate a line via ask --dictate
