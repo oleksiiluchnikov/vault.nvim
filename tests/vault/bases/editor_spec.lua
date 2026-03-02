@@ -283,7 +283,7 @@ describe("bases.editor", function()
       for _, line in ipairs(lines) do
         local cells = vim.split(line, " \x1f ", { plain = true })
         local cell = vim.trim(cells[name_upper_idx] or "")
-        if cell ~= "" and cell ~= "∅" then
+        if cell ~= "" and cell ~= "_" then
           found_value = true
           -- Verify it's actually uppercased
           assert.are.equal(cell, cell:upper(), "formula should produce uppercased name")
@@ -715,7 +715,7 @@ describe("bases.editor", function()
       -- Find a note with status and edit both status and tags
       local target_slug = nil
       for slug, snap in pairs(st.snapshot) do
-        if snap.status and snap.status ~= "∅" then
+        if snap.status and snap.status ~= "_" then
           target_slug = slug
           break
         end
@@ -785,7 +785,7 @@ describe("bases.editor", function()
       local target_slug = nil
       local original_status = nil
       for slug, snap in pairs(st.snapshot) do
-        if snap.status and snap.status ~= "∅" and snap.status ~= "" then
+        if snap.status and snap.status ~= "_" and snap.status ~= "" then
           target_slug = slug
           original_status = snap.status
           break

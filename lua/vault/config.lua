@@ -270,6 +270,7 @@ local DEFAULT_OPTIONS = {
     bases = {
         ext = ".base", -- File extension for base files
         dirs = nil, -- Specific directories to scan for .base files (nil = scan entire vault)
+        empty_cell = "_", --- Symbol displayed for nil/empty cells in process buffer
     },
 }
 
