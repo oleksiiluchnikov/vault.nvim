@@ -155,6 +155,18 @@ local DEFAULT_OPTIONS = {
     process = {
         columns = { "slug", "title", "status", "tags" }, -- Default columns for :Vault process
     },
+    kanban = {
+        group_field = "status",                          -- Frontmatter field, "tags/<prefix>", or "directory"
+        display_fields = { "title", "tags" },            -- Fields shown on each card
+        group_values = nil,                              --- @type string[]|nil Ordered column values (nil = auto-derive)
+        render_mode = "card",                            -- "card" (bordered multi-line) or "table" (single-line rows)
+        layout = {
+            width_ratio = 0.95,
+            height_ratio = 0.90,
+            column_gap = 1,
+            min_column_width = 25,
+        },
+    },
     notify = {
         on_write = true,
     },

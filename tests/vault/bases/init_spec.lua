@@ -215,11 +215,11 @@ describe("VaultBases", function()
             assert.are.equal("name_upper", formula_names[2])
         end)
 
-        it("projects base should have 2 views", function()
+        it("projects base should have 3 views", function()
             local bases = Bases()
             local projects = bases:get("projects")
             assert.is_not_nil(projects)
-            assert.are.equal(2, projects:view_count())
+            assert.are.equal(3, projects:view_count())
         end)
 
         it("projects base should have display names", function()

@@ -660,7 +660,102 @@ local function build_subcommands()
             end,
         },
 
+        -- :Vault kanban [filter] — Kanban board view grouped by frontmatter/tags/directory
+        -- Supports: base <name>, group=<field>, fields=<f1,f2>,
+        --           tag <name>, dir <path>
+        kanban = {
+            run = function(args)
+                local grid_kanban = require("vault.bases.grid_kanban")
+                local filter = args[1]
+                local notes, desc
 
+                -- Parse key=value args anywhere in the arg list
+                local group_field, display_fields, render_mode
+                local remaining = {}
+                for _, arg in ipairs(args) do
+                    local k, v = arg:match("^(%w+)=(.+)$")
+                    if k == "group" then
+                        group_field = v
+                    elseif k == "fields" then
+                        display_fields = vim.split(v, ",", { plain = true })
+                        for i, f in ipairs(display_fields) do display_fields[i] = vim.trim(f) end
+                    elseif k == "mode" then
+                        render_mode = v
+                    else
+                        table.insert(remaining, arg)
+                    end
+                end
+                filter = remaining[1]
+
+                if not filter or filter == "" then
+                    notes = require("vault.notes")()
+                    desc = "all notes"
+                elseif filter == "base" then
+                    if remaining[2] then
+                        local base_name = table.concat(vim.list_slice(remaining, 2), " ")
+                        local Bases = require("vault.bases")
+                        local bases = Bases()
+                        local base = bases:get(base_name)
+                        if not base then
+                            log.error("Base not found: %s", base_name)
+                            return
+                        end
+                        grid_kanban.open({
+                            base = base,
+                            group_field = group_field,
+                            display_fields = display_fields,
+                            render_mode = render_mode,
+                        })
+                    else
+                        -- No base name given — open Telescope bases picker
+                        local ok, picker = pcall(require, "telescope._extensions.vault.pickers.bases")
+                        if ok then
+                            picker():find()
+                        else
+                            log.error("Telescope bases picker not available: %s", tostring(picker))
+                        end
+                    end
+                    return
+                elseif filter == "tag" and remaining[2] then
+                    notes = require("vault.notes")():filter({
+                        search_term = "tags",
+                        include = { remaining[2] },
+                        exclude = {},
+                        match_opt = "exact",
+                        mode = "all",
+                    })
+                    desc = "tag:" .. remaining[2]
+                elseif filter == "dir" and remaining[2] then
+                    notes = require("vault.notes")():filter("relpath", remaining[2], "startswith", false)
+                    desc = "dir:" .. remaining[2]
+                else
+                    notes = require("vault.notes")():filter("slug", filter, "fuzzy")
+                    desc = "filter:" .. filter
+                end
+
+                grid_kanban.open({
+                    notes = notes,
+                    filter_desc = desc,
+                    group_field = group_field,
+                    display_fields = display_fields,
+                    render_mode = render_mode,
+                })
+            end,
+            complete = function(prefix, line)
+                if line and line:match("kanban%s+base%s+") then
+                    local ok, Bases = pcall(require, "vault.bases")
+                    if ok then
+                        local bases = Bases()
+                        local names = bases:names()
+                        local sub = line:match("kanban%s+base%s+(.*)") or ""
+                        return vim.tbl_filter(function(s) return s:find(sub, 1, true) == 1 end, names)
+                    end
+                    return {}
+                end
+                local subs = { "base", "tag", "dir", "group=", "fields=", "mode=" }
+                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+            end,
+        },
 
         -- :Vault today           — open today's journal
         -- :Vault today append    — append a line
