@@ -969,6 +969,10 @@ local function make_on_save(st)
       log.info("Saved: %s", table.concat(parts, ", "))
       st.saving = false
       done(nil)
+      -- Reload the grid to rebuild snapshot from current state.
+      -- Without this, incremental saves compare against the stale
+      -- snapshot and re-detect already-applied changes.
+      M.reload(bufnr)
     end
 
     if #diff.deletes > 0 then
