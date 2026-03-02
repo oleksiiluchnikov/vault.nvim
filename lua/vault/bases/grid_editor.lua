@@ -174,7 +174,9 @@ local function validate_path_in_vault(path)
     return nil, string.format("config.options.root expanded to invalid path: %s", tostring(root))
   end
   local resolved = vim.fn.resolve(vim.fn.expand(path))
-  if not resolved:find(root, 1, true) then
+  -- Strict prefix check: path must start with root/ (not just contain root)
+  local prefix = root:match("/$") and root or (root .. "/")
+  if resolved ~= root and not vim.startswith(resolved, prefix) then
     return nil, string.format("Path %s escapes vault root %s", resolved, root)
   end
   return resolved, nil
@@ -639,10 +641,12 @@ local function snapshot_for_undo(diff, st, bufnr)
       files[path] = vim.fn.readfile(path)
     end
   end
+  local deleted_paths = {} --- @type table<string, string>  slug → path
   for _, slug in ipairs(diff.deletes) do
     local path = st.note_paths[slug]
     if path and vim.fn.filereadable(path) == 1 then
       files[path] = vim.fn.readfile(path)
+      deleted_paths[slug] = path
     end
   end
   -- Snapshot wikilink targets for renames
@@ -655,9 +659,10 @@ local function snapshot_for_undo(diff, st, bufnr)
         end
         local scanner = require("vault.scanner")
         local paths = scanner.paths()
-        local old_stem = vim.fn.fnamemodify(old_path or "", ":t:r")
+        local old_stem = old_path and vim.fn.fnamemodify(old_path, ":t:r") or nil
         local esc_slug = vim.pesc(c.extra.old_slug)
-        local esc_stem = vim.pesc(old_stem)
+        -- Only build stem pattern if stem is valid (non-nil, non-empty)
+        local esc_stem = (old_stem and old_stem ~= "") and vim.pesc(old_stem) or nil
         for _, entry in pairs(paths) do
           local np = entry.path
           if not files[np] and vim.fn.filereadable(np) == 1 then
@@ -665,7 +670,11 @@ local function snapshot_for_undo(diff, st, bufnr)
             if f then
               local content = f:read("*all")
               f:close()
-              if content:match("%[%[" .. esc_slug) or content:match("%[%[" .. esc_stem) then
+              local has_link = content:match("%[%[" .. esc_slug)
+              if not has_link and esc_stem then
+                has_link = content:match("%[%[" .. esc_stem)
+              end
+              if has_link then
                 files[np] = vim.split(content, "\n", { plain = true })
               end
             end
@@ -677,6 +686,7 @@ local function snapshot_for_undo(diff, st, bufnr)
   undo_snapshots[bufnr] = {
     files = files,
     created_paths = {},
+    deleted_paths = deleted_paths,
     renames = {},
     timestamp = os.time(),
     description = string.format("%d updates, %d deletes, %d creates, %d renames",
@@ -714,6 +724,10 @@ local function apply_mutations(diff, st)
       if new_dir == "/" then new_dir = "" end
       if new_dir:match("%.%.") then
         log.error("SAFETY: Refusing move with '..': %s", new_dir); goto continue
+      end
+      -- Ensure trailing / on non-empty dir
+      if new_dir ~= "" and not new_dir:match("/$") then
+        new_dir = new_dir .. "/"
       end
       local config = require("vault.config")
       local basename = vim.fn.fnamemodify(path, ":t")
@@ -768,12 +782,16 @@ local function apply_mutations(diff, st)
       if not safe_del then
         log.error("SAFETY: Skipping delete — %s", del_err); goto del_continue
       end
-      pcall(function()
+      local del_ok = pcall(function()
         local Note = require("vault.notes.note")
         local note = Note(safe_del)
         note:delete(false, false)
       end)
-      n_deletes = n_deletes + 1
+      if del_ok then
+        n_deletes = n_deletes + 1
+      else
+        log.error("Delete failed for: %s", slug)
+      end
     end
     ::del_continue::
   end
@@ -794,6 +812,10 @@ local function apply_mutations(diff, st)
     if dir == "/" then dir = "" end
     if dir:match("%.%.") then
       log.error("SAFETY: Refusing create with '..': %s", dir); goto cr_continue
+    end
+    -- Ensure trailing / on non-empty dir
+    if dir ~= "" and not dir:match("/$") then
+      dir = dir .. "/"
     end
     local base_slug = slug
     local path = config.options.root .. "/" .. dir .. slug .. config.options.ext
@@ -838,6 +860,10 @@ local function apply_mutations(diff, st)
       if undo_snapshots[st.grid:bufnr()] then
         table.insert(undo_snapshots[st.grid:bufnr()].created_paths, safe_create)
       end
+      -- Register created note so M.reload() can find it.
+      -- The slug key is dir + deduped slug (the relative path stem).
+      local created_slug = dir .. slug
+      st.note_paths[created_slug] = safe_create
       n_creates = n_creates + 1
     end
     ::cr_continue::
@@ -890,17 +916,29 @@ local function make_on_save(st)
     end
 
     -- ── Suspicious create+delete pairing ──
+    -- When create and delete counts match (≤5 each), they are likely extmark
+    -- drift artifacts (identity lost → looks like a create + a delete). Pair
+    -- them as updates to the deleted slug's record instead.
     if #diff.creates > 0 and #diff.deletes > 0 then
-      if #diff.creates <= 5 and #diff.deletes <= 5 and #diff.creates == #diff.deletes then
+      local n_paired = #diff.creates
+      if n_paired <= 5 and #diff.deletes <= 5 and n_paired == #diff.deletes then
         for i, cr in ipairs(diff.creates) do
           local del_slug = diff.deletes[i]
           if del_slug then
-            table.insert(diff.updates, { id = del_slug, fields = cr.fields })
+            -- Strip identity/structural fields that should not be written to
+            -- frontmatter — they are part of the file identity, not metadata.
+            local safe_fields = {}
+            local skip = { slug = true, ["file.slug"] = true, ["file.name"] = true,
+                           ["file.folder"] = true, ["file.path"] = true, dir = true }
+            for k, v in pairs(cr.fields) do
+              if not skip[k] then safe_fields[k] = v end
+            end
+            table.insert(diff.updates, { id = del_slug, fields = safe_fields })
           end
         end
         diff.creates = {}
         diff.deletes = {}
-        log.info("Paired %d create+delete as edits", #diff.creates)
+        log.info("Paired %d create+delete as edits", n_paired)
       else
         log.warn("SAFETY: %d creates + %d deletes — applying updates only",
           #diff.creates, #diff.deletes)
@@ -938,6 +976,11 @@ local function make_on_save(st)
             if st.note_mtimes then
               st.note_mtimes[ren.new_slug] = st.note_mtimes[ren.old_slug]
               st.note_mtimes[ren.old_slug] = nil
+            end
+            -- Remap any pending updates from old_slug to new_slug so they
+            -- can find the path after rename.
+            for _, upd in ipairs(diff.updates) do
+              if upd.id == ren.old_slug then upd.id = ren.new_slug end
             end
             n_renamed = n_renamed + 1
           else
@@ -1080,6 +1123,15 @@ function M.undo(bufnr)
       if vim.fn.filereadable(path) == 1 then
         vim.fn.delete(path)
         deleted = deleted + 1
+      end
+    end
+  end
+  -- Re-register deleted note paths so M.reload can find them
+  local st = buf_states[bufnr]
+  if st and snap.deleted_paths then
+    for slug, path in pairs(snap.deleted_paths) do
+      if vim.fn.filereadable(path) == 1 then
+        st.note_paths[slug] = path
       end
     end
   end
