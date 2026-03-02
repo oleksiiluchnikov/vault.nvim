@@ -131,13 +131,24 @@ local function get_logger()
         teolog.sinks.NotifySink.new("vault", VIM_LEVELS[cfg.level] or vim.log.levels.INFO)
     )
 
-    -- Sink 2: async NDJSON file (when file=true)
+    -- Sink 2: shared teolog NDJSON file (always, so :Teolog live can see vault events)
+    table.insert(sinks, teolog.sinks.FileSink.new())
+
+    -- Sink 3: vault-specific log file (when file=true, separate from shared log)
     if cfg.file then
         local path = cfg.file_path or get_file_path()
-        table.insert(sinks, teolog.sinks.FileSink.new(path))
+        if path ~= (vim.fn.stdpath("log") .. "/teolog.log") then
+            table.insert(sinks, teolog.sinks.FileSink.new(path))
+        end
     end
 
-    -- Sink 3: callback sink (for process buffer log pane, tests, etc.)
+    -- Sink 4: live panel (direct delivery to :Teolog live if open)
+    local panel_ok, panel = pcall(require, "teolog.panel")
+    if panel_ok then
+        table.insert(sinks, panel.PanelSink.new())
+    end
+
+    -- Sink 5: callback sink (for process buffer log pane, tests, etc.)
     if cfg.on_message and type(cfg.on_message) == "function" then
         local cb = cfg.on_message
         table.insert(

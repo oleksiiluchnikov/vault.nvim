@@ -105,12 +105,39 @@
         -- Optional: Previewer tool (default: "glow")
         previewer = "glow",
 
+        -- Optional: Default columns for :Vault process
+        process = {
+            columns = { "slug", "title", "status", "tags" },
+        },
+
         -- Optional: Feature toggles
         features = {
-            cmp = true,      -- Enable completion
-            commands = true, -- Enable commands
-            -- blink = true    -- Enable blink.cmp integration. TODO: Not implemented yet
-        }
+            cmp = true,       -- Enable nvim-cmp completion
+            commands = true,  -- Enable :Vault commands
+            watcher = false,  -- Enable file watcher for auto wikilink patching
+        },
+
+        -- Optional: File watcher settings (only used when features.watcher = true)
+        watcher = {
+            debounce_ms = 500,           -- Debounce delay for batch processing
+            auto_update_links = true,    -- Automatically update wikilinks on rename
+            notify_on_rename = true,     -- Show notifications for renames
+            prompt_on_rename = false,    -- Ask before applying link updates
+            frontmatter_key = "slug",    -- Frontmatter key to update on rename (nil to skip)
+        },
+
+        -- Optional: Wikilink action confirmations
+        wikilinks = {
+            confirm_rewrite = true,  -- Confirm before rewriting [[old]] -> [[new]]
+            confirm_merge = true,    -- Confirm before merging two notes
+            confirm_create = false,  -- Confirm before creating from unresolved wikilink
+        },
+
+        -- Optional: Bases configuration
+        bases = {
+            ext = ".base",  -- File extension for base files
+            dirs = nil,     -- Directories to scan for .base files (nil = entire vault)
+        },
     }
 }
 ```
