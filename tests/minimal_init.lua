@@ -35,8 +35,8 @@ ensure_plugin("hrsh7th/nvim-cmp")
 ensure_plugin("oleksiiluchnikov/gradient.nvim")
 ensure_plugin("oleksiiluchnikov/dates.nvim")
 
--- Add teolog to runtimepath (structured logging backend)
-local teolog_path = vim.fn.expand("~/projects/teolog")
+-- Add teolog.nvim to runtimepath (structured logging backend)
+local teolog_path = vim.fn.expand("~/projects/teolog.nvim")
 if vim.fn.isdirectory(teolog_path) == 1 then
   vim.opt.runtimepath:append(teolog_path)
 end
