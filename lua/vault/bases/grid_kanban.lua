@@ -122,6 +122,7 @@ local function resolve_group_field(notes_map, group_field, explicit_values)
     if info.mode == "frontmatter" then
       local fm = note.data and note.data.frontmatter or {}
       value = fm[group_field]
+      if value == vim.NIL or type(value) == "userdata" then value = nil end
       if type(value) == "table" then value = value[1] end
       if value == nil or value == "" then value = "" end
       value = tostring(value)
@@ -244,6 +245,7 @@ local function flatten_notes(notes_map, display_fields, group_info, base)
       -- Frontmatter group field
       if group_info.mode == "frontmatter" then
         local gv = fm[group_info.field_key]
+        if gv == vim.NIL or type(gv) == "userdata" then gv = nil end
         if type(gv) == "table" then gv = gv[1] end
         flat[group_info.field_key] = gv and tostring(gv) or ""
       elseif group_info.mode == "tag_prefix" then

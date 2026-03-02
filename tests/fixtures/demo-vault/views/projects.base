@@ -31,3 +31,14 @@ views:
     order:
       - file.name
       - file.folder
+  - type: kanban
+    name: "Project Board"
+    group_by: status
+    group_values:
+      - active
+      - planned
+      - done
+      - on-hold
+    display_fields:
+      - file.name
+      - tags
