@@ -336,15 +336,15 @@ function M.absorb(path_a, path_b, resolved, opts)
   end
 
   -- Store undo snapshot if we have a process buffer
-  local editor = require("vault.bases.grid_editor")
-  if opts.bufnr and editor._undo_snapshots then
-    editor._undo_snapshots[opts.bufnr] = {
+  if opts.bufnr then
+    local vt_undo = require("vimtable.undo")
+    vt_undo.snapshot(opts.bufnr, {
       files = snapshot_files,
       created_paths = {},
       renames = {},
       timestamp = os.time(),
       description = string.format("merge %s ← %s", slug_a, slug_b),
-    }
+    })
   end
 
   -- Merge fields

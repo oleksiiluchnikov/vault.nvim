@@ -662,7 +662,8 @@ describe("grid_editor (integration)", function()
 
       -- Should not error, just log a warning
       ge.undo(bufnr)
-      assert.is_nil(ge._undo_snapshots[bufnr])
+      local vt_undo = require("vimtable.undo")
+      assert.is_false(vt_undo.has(bufnr))
     end)
   end)
 
@@ -698,7 +699,8 @@ describe("grid_editor (integration)", function()
       vim.cmd("w")
       assert.truthy(vim.api.nvim_buf_is_valid(bufnr))
       -- No undo snapshot should be created for no-op save
-      assert.is_nil(ge._undo_snapshots[bufnr])
+      local vt_undo = require("vimtable.undo")
+      assert.is_false(vt_undo.has(bufnr))
     end)
   end)
 end)

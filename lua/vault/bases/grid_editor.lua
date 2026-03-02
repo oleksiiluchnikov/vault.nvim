@@ -68,7 +68,7 @@ end
 ---@field saving boolean|string
 
 local buf_states = {} --- @type table<integer, vault.GridEditorState>
-local undo_snapshots = {} --- @type table<integer, vault.ProcessUndoSnapshot>
+local vt_undo = require("vimtable.undo")
 
 -- ─── Shared helpers (copied from editor.lua — vault-specific) ─────────────────
 
@@ -683,7 +683,8 @@ local function snapshot_for_undo(diff, st, bufnr)
       end
     end
   end
-  undo_snapshots[bufnr] = {
+  --- @type vault.ProcessUndoSnapshot
+  local payload = {
     files = files,
     created_paths = {},
     deleted_paths = deleted_paths,
@@ -693,14 +694,17 @@ local function snapshot_for_undo(diff, st, bufnr)
       #diff.updates, #diff.deletes, #diff.creates,
       diff.custom and #diff.custom or 0),
   }
+  vt_undo.snapshot(bufnr, payload)
+  return payload
 end
 
 -- ─── Mutation engine ──────────────────────────────────────────────────────────
 
 ---@param diff table
 ---@param st vault.GridEditorState
+---@param undo_payload? vault.ProcessUndoSnapshot  Live undo payload to append created_paths/renames
 ---@return integer, integer, integer
-local function apply_mutations(diff, st)
+local function apply_mutations(diff, st, undo_payload)
   local n_updates, n_deletes, n_creates = 0, 0, 0
   local empty = get_empty_cell()
 
@@ -857,8 +861,8 @@ local function apply_mutations(diff, st)
     if vim.fn.isdirectory(parent) == 0 then vim.fn.mkdir(parent, "p") end
     local write_ok = atomic_writefile(safe_create, fm)
     if write_ok then
-      if undo_snapshots[st.grid:bufnr()] then
-        table.insert(undo_snapshots[st.grid:bufnr()].created_paths, safe_create)
+      if undo_payload then
+        table.insert(undo_payload.created_paths, safe_create)
       end
       -- Register created note so M.reload() can find it.
       -- The slug key is dir + deduped slug (the relative path stem).
@@ -906,7 +910,7 @@ local function make_on_save(st)
     end
 
     -- ── Snapshot for undo ──
-    snapshot_for_undo(diff, st, bufnr)
+    local undo_payload = snapshot_for_undo(diff, st, bufnr)
 
     -- ── Hard cap on creates ──
     if #diff.creates > CREATE_HARD_CAP then
@@ -968,8 +972,8 @@ local function make_on_save(st)
           local move_ok, result = pcall(note.move, note, new_path, false, false, { silent = true })
           if move_ok then
             n_patched = n_patched + (result or 0)
-            if undo_snapshots[bufnr] then
-              table.insert(undo_snapshots[bufnr].renames, { old_path = old_path, new_path = new_path })
+            if undo_payload then
+              table.insert(undo_payload.renames, { old_path = old_path, new_path = new_path })
             end
             st.note_paths[ren.new_slug] = new_path
             st.note_paths[ren.old_slug] = nil
@@ -998,7 +1002,7 @@ local function make_on_save(st)
     end
 
     local function finish_save()
-      local n_u, n_d, n_c = apply_mutations(diff, st)
+      local n_u, n_d, n_c = apply_mutations(diff, st, undo_payload)
       local parts = {}
       if n_renamed > 0 then
         local msg = string.format("%d renamed", n_renamed)
@@ -1094,14 +1098,11 @@ end
 
 -- ─── Undo ─────────────────────────────────────────────────────────────────────
 
----@param bufnr? integer
-function M.undo(bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-  local snap = undo_snapshots[bufnr]
-  if not snap then
-    log.warn("No undo snapshot available")
-    return
-  end
+--- Apply an undo snapshot (internal — used by both M.undo and on_undo callback).
+---
+---@param bufnr integer
+---@param snap vault.ProcessUndoSnapshot
+function M._apply_undo(bufnr, snap)
   local uv = vim.uv or vim.loop
   local restored, deleted, renames_reversed = 0, 0, 0
   if snap.renames then
@@ -1135,13 +1136,23 @@ function M.undo(bufnr)
       end
     end
   end
-  undo_snapshots[bufnr] = nil
   local parts = {}
   if restored > 0 then table.insert(parts, string.format("restored %d", restored)) end
   if deleted > 0 then table.insert(parts, string.format("removed %d created", deleted)) end
   if renames_reversed > 0 then table.insert(parts, string.format("reversed %d rename(s)", renames_reversed)) end
   log.info("Undo: %s", #parts > 0 and table.concat(parts, ", ") or "nothing to undo")
   M.reload(bufnr)
+end
+
+---@param bufnr? integer
+function M.undo(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local snap = vt_undo.restore(bufnr)
+  if not snap then
+    log.warn("No undo snapshot available")
+    return
+  end
+  M._apply_undo(bufnr, snap)
 end
 
 -- ─── Partial save ─────────────────────────────────────────────────────────────
@@ -1185,8 +1196,8 @@ function M.save_range(bufnr, start_row, end_row)
   end
 
   local partial = { updates = filtered, deletes = {}, creates = {}, custom = {}, errors = {} }
-  snapshot_for_undo(partial, st, bufnr)
-  local n_u = apply_mutations(partial, st)
+  local undo_payload = snapshot_for_undo(partial, st, bufnr)
+  local n_u = apply_mutations(partial, st, undo_payload)
   log.info("Partial save: %d updated", n_u)
   vim.schedule(function()
     M.reload(bufnr)
@@ -1363,6 +1374,11 @@ function M.open(opts)
     buf_name = "vault://grid-process/" .. filter_desc:gsub("%s+", "-"),
     filetype = "vault_process",
     on_save = make_on_save(st),
+    on_undo = function(payload, done)
+      -- payload is already popped from vt_undo by Grid's gu handler
+      M._apply_undo(st.grid:bufnr(), payload)
+      done(nil)
+    end,
     classify = make_classify(st),
     sort_keys = sort_keys,
     hl = {
@@ -1405,7 +1421,7 @@ function M.open(opts)
     buffer = bufnr,
     callback = function()
       buf_states[bufnr] = nil
-      undo_snapshots[bufnr] = nil
+      vt_undo.clear(bufnr)
     end,
   })
 
@@ -1419,13 +1435,12 @@ function M.open(opts)
   end, vim.tbl_extend("force", kopts, { desc = "Vault: add secondary sort" }))
   vim.keymap.set("n", "gR", function() M.reload(bufnr) end,
     vim.tbl_extend("force", kopts, { desc = "Vault: reload buffer" }))
-  vim.keymap.set("n", "gu", function() M.undo(bufnr) end,
-    vim.tbl_extend("force", kopts, { desc = "Vault: undo last save" }))
+  -- Note: `gu` keymap is handled by vimtable Grid via on_undo callback
   vim.keymap.set("n", "u", function()
     local tree = vim.fn.undotree()
     if #tree.entries > 0 then
       vim.cmd("undo")
-    elseif undo_snapshots[bufnr] then
+    elseif vt_undo.has(bufnr) then
       M.undo(bufnr)
     else
       log.info("Nothing to undo")
@@ -1551,7 +1566,7 @@ end
 -- ─── Debug / test exports ─────────────────────────────────────────────────────
 
 M._buf_states = buf_states
-M._undo_snapshots = undo_snapshots
+M._vt_undo = vt_undo  -- for merge.lua and tests
 
 -- Pure-function exports for unit testing (prefixed with _ to signal internal use)
 M._normalize_col = normalize_col
