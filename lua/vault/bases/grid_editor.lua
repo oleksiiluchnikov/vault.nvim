@@ -1518,9 +1518,29 @@ function M.open(opts)
   )
 end
 
--- ─── Debug exports ────────────────────────────────────────────────────────────
+-- ─── Debug / test exports ─────────────────────────────────────────────────────
 
 M._buf_states = buf_states
 M._undo_snapshots = undo_snapshots
+
+-- Pure-function exports for unit testing (prefixed with _ to signal internal use)
+M._normalize_col = normalize_col
+M._base_key_to_col = base_key_to_col
+M._columns_from_base = columns_from_base
+M._yaml_quote = yaml_quote
+M._validate_path_in_vault = validate_path_in_vault
+M._fmt_value = fmt_value
+M._parse_value = parse_value
+M._make_classify = make_classify
+M._build_records = build_records
+M._build_grid_columns = build_grid_columns
+M._sort_from_base = sort_from_base
+M._atomic_writefile = atomic_writefile
+M._read_frontmatter_fields = read_frontmatter_fields
+M._set_frontmatter_field = set_frontmatter_field
+M._set_frontmatter_fields = set_frontmatter_fields
+M._snapshot_for_undo = snapshot_for_undo
+M._apply_mutations = apply_mutations
+M._make_on_save = make_on_save
 
 return M
