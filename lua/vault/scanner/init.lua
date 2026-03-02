@@ -10,6 +10,8 @@ local Dir = require("vault.dirs.dir")
 local Property = require("vault.properties.property")
 local PropertyValue = require("vault.properties.property.value")
 
+local log = require("vault.log").scope("scanner")
+
 local Scanner = {}
 
 --- Helper to determine root and ignore patterns based on options
@@ -94,6 +96,7 @@ function Scanner.wikilinks(opts)
 
         if not ok then
             -- Skip malformed wikilinks returned by the Rust scanner
+            log.debug("Skipped malformed wikilink: [[%s]] — %s", stem, tostring(wl))
             goto continue
         end
 
@@ -225,6 +228,9 @@ function Scanner.lines(opts)
     for slug, note_data in pairs(paths) do
         local path = note_data.path
         local ok, file_lines = pcall(vim.fn.readfile, path)
+        if not ok then
+            log.debug("Skipped unreadable file: %s — %s", path, tostring(file_lines))
+        end
         if ok then
             for lnum, raw in ipairs(file_lines) do
                 -- Match lines starting with "- " (list items)
