@@ -452,7 +452,12 @@ function Note:edit(path)
         log.error("File not found: %s", path)
         return
     end
-    vim.cmd("e " .. vim.fn.fnameescape(path))
+    local ok, err = pcall(vim.cmd, "e " .. vim.fn.fnameescape(path))
+    if not ok and err and err:match("E37") then
+        vim.cmd("e! " .. vim.fn.fnameescape(path))
+    elseif not ok then
+        log.error("Failed to edit: %s", err)
+    end
 end
 
 --- Preview with Glow.nvim
