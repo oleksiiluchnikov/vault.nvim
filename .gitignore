@@ -72,6 +72,7 @@ coverage/
 .gitmodules_local
 VAULT_PROCESS_BUGS.md
 PLAN.md
+BACKLOG.md
 
 # Local scratch lua files
 lua/vault/_*.lua
