@@ -45,7 +45,14 @@ local SEP          = " \x1f "       -- real delimiter: SPACE + Unit Separator (0
 local SEP_DISPLAY  = " │ "         -- visual replacement shown via conceal
 local SEP_CHAR     = "\x1f"        -- bare delimiter byte (for split_cells)
 local SEP_DISPLAY_WIDTH = 3        -- display columns of " │ " (space + pipe + space)
-local EMPTY_CELL   = "∅"
+local EMPTY_CELL -- lazy-initialized from config.options.bases.empty_cell
+local function get_empty_cell()
+    if not EMPTY_CELL then
+        local ok, cfg = pcall(require, "vault.config")
+        EMPTY_CELL = (ok and cfg.options.bases and cfg.options.bases.empty_cell) or "_"
+    end
+    return EMPTY_CELL
+end
 local NS           = vim.api.nvim_create_namespace("vault_bases_editor")
 local NS_DIFF      = vim.api.nvim_create_namespace("vault_oil_diff")
 local NS_ERR       = vim.api.nvim_create_namespace("vault_bases_errors")
@@ -2541,6 +2548,7 @@ end
 ---@param opts? { notes?: vault.Notes, columns?: string[], filter_desc?: string, base?: vault.Base }
 function M.open(opts)
   opts = opts or {}
+  get_empty_cell() -- initialize EMPTY_CELL from config
 
   -- Clear winfixbuf so we can switch buffers (e.g. after Telescope closes)
   local win = vim.api.nvim_get_current_win()
@@ -3044,6 +3052,7 @@ end
 function M.reload(bufnr)
   local st = buf_states[bufnr]
   if not st then return end
+  EMPTY_CELL = nil; get_empty_cell() -- re-read from config on reload
 
   -- Build a notes_map (slug → Note) from st.note_paths so we can reuse
   -- build_records() for all column types (including file.* and formulas).
