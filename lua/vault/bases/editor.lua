@@ -2704,6 +2704,9 @@ function M.open(opts)
   st.winid = winid
   st._last_line_count = #records
 
+  -- Place cursor at top — nvim_buf_set_lines leaves cursor at last line
+  vim.api.nvim_win_set_cursor(winid, { 1, 0 })
+
   -- Disable auto-formatters for this buffer.
   -- formatter.nvim checks vim.b.formatter_skip_buf (format.lua:69).
   vim.b[bufnr].formatter_skip_buf  = true   -- formatter.nvim
@@ -3087,6 +3090,9 @@ function M.reload(bufnr)
     st.note_mtimes[rec.slug] = get_mtime(rec.path)
   end
 
+  -- Save cursor before replacing lines (set_buffer_lines can move it)
+  local saved_view = vim.fn.winsaveview()
+
   local lines = build_data_lines(st, records)
   set_buffer_lines(bufnr, lines)
   vim.bo[bufnr].modifiable = true
@@ -3096,6 +3102,10 @@ function M.reload(bufnr)
   vim.api.nvim_buf_clear_namespace(bufnr, NS_DIFF, 0, -1)
   vim.api.nvim_buf_clear_namespace(bufnr, NS_VALID, 0, -1)
   vim.bo[bufnr].modified = false
+
+  -- Restore cursor (clamped to new line count)
+  saved_view.lnum = math.min(saved_view.lnum, #lines)
+  vim.fn.winrestview(saved_view)
 
   -- Refresh winbar (col_widths or sort indicator may have changed)
   if st.winid and vim.api.nvim_win_is_valid(st.winid) then
