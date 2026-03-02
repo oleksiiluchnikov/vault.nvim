@@ -35,38 +35,38 @@ local M = {}
 --- Numeric level values for comparison
 --- @type table<vault.LogLevel, number>
 local LEVELS = {
-  trace = 0,
-  debug = 1,
-  info = 2,
-  warn = 3,
-  error = 4,
+    trace = 0,
+    debug = 1,
+    info = 2,
+    warn = 3,
+    error = 4,
 }
 
 --- Map to vim.log.levels
 --- @type table<vault.LogLevel, number>
 local VIM_LEVELS = {
-  trace = vim.log.levels.TRACE,
-  debug = vim.log.levels.DEBUG,
-  info = vim.log.levels.INFO,
-  warn = vim.log.levels.WARN,
-  error = vim.log.levels.ERROR,
+    trace = vim.log.levels.TRACE,
+    debug = vim.log.levels.DEBUG,
+    info = vim.log.levels.INFO,
+    warn = vim.log.levels.WARN,
+    error = vim.log.levels.ERROR,
 }
 
 --- @return vault.LogConfig
 local function get_config()
-  local ok, cfg = pcall(function()
-    return require("vault.config").options.log
-  end)
-  if ok and cfg then
-    return cfg
-  end
-  return { level = "info", file = false }
+    local ok, cfg = pcall(function()
+        return require("vault.config").options.log
+    end)
+    if ok and cfg then
+        return cfg
+    end
+    return { level = "info", file = false }
 end
 
 --- @return string
 local function get_file_path()
-  local cfg = get_config()
-  return cfg.file_path or (vim.fn.stdpath("cache") .. "/vault.log")
+    local cfg = get_config()
+    return cfg.file_path or (vim.fn.stdpath("cache") .. "/vault.log")
 end
 
 -------------------------------------------------------------------------------
@@ -79,15 +79,15 @@ local _teolog_checked = false
 local _teolog = nil
 
 local function get_teolog()
-  if _teolog_checked then
+    if _teolog_checked then
+        return _teolog
+    end
+    _teolog_checked = true
+    local ok, mod = pcall(require, "teolog")
+    if ok then
+        _teolog = mod
+    end
     return _teolog
-  end
-  _teolog_checked = true
-  local ok, mod = pcall(require, "teolog")
-  if ok then
-    _teolog = mod
-  end
-  return _teolog
 end
 
 --- Lazily build the teolog Logger instance.
@@ -98,64 +98,72 @@ local _logger_config_hash = ""
 
 --- Build a config hash to detect changes.
 local function config_hash()
-  local cfg = get_config()
-  return string.format("%s:%s:%s:%s",
-    tostring(cfg.level),
-    tostring(cfg.file),
-    tostring(cfg.file_path),
-    tostring(cfg.on_message ~= nil))
+    local cfg = get_config()
+    return string.format(
+        "%s:%s:%s:%s",
+        tostring(cfg.level),
+        tostring(cfg.file),
+        tostring(cfg.file_path),
+        tostring(cfg.on_message ~= nil)
+    )
 end
 
 --- Get or create the teolog Logger, rebuilding if config changed.
 --- @return teolog.Logger|nil
 local function get_logger()
-  local teolog = get_teolog()
-  if not teolog then
-    return nil
-  end
+    local teolog = get_teolog()
+    if not teolog then
+        return nil
+    end
 
-  local hash = config_hash()
-  if _logger and _logger_config_hash == hash then
+    local hash = config_hash()
+    if _logger and _logger_config_hash == hash then
+        return _logger
+    end
+
+    local cfg = get_config()
+    local sinks = {}
+
+    -- Sink 1: vim.notify (filtered by configured level)
+    local notify_min = LEVELS[cfg.level] or LEVELS.info
+    table.insert(
+        sinks,
+        teolog.sinks.NotifySink.new("vault", VIM_LEVELS[cfg.level] or vim.log.levels.INFO)
+    )
+
+    -- Sink 2: async NDJSON file (when file=true)
+    if cfg.file then
+        local path = cfg.file_path or get_file_path()
+        table.insert(sinks, teolog.sinks.FileSink.new(path))
+    end
+
+    -- Sink 3: callback sink (for process buffer log pane, tests, etc.)
+    if cfg.on_message and type(cfg.on_message) == "function" then
+        local cb = cfg.on_message
+        table.insert(
+            sinks,
+            teolog.sinks.CallbackSink.new(function(event)
+                -- Adapt teolog event back to vault callback signature: (level, scope, msg)
+                local scope = (event.ctx and event.ctx.scope) or ""
+                pcall(cb, event.lvl, scope, event.msg)
+            end)
+        )
+    end
+
+    local sink
+    if #sinks == 1 then
+        sink = sinks[1]
+    else
+        sink = teolog.sinks.MultiSink.new(sinks)
+    end
+
+    _logger = teolog.new("vault.nvim", sink)
+    -- Set teolog level to TRACE so all filtering is done per-sink
+    -- (NotifySink handles its own min_level, FileSink gets everything)
+    _logger:set_level(teolog.Level.TRACE)
+    _logger_config_hash = hash
+
     return _logger
-  end
-
-  local cfg = get_config()
-  local sinks = {}
-
-  -- Sink 1: vim.notify (filtered by configured level)
-  local notify_min = LEVELS[cfg.level] or LEVELS.info
-  table.insert(sinks, teolog.sinks.NotifySink.new("vault", VIM_LEVELS[cfg.level] or vim.log.levels.INFO))
-
-  -- Sink 2: async NDJSON file (when file=true)
-  if cfg.file then
-    local path = cfg.file_path or get_file_path()
-    table.insert(sinks, teolog.sinks.FileSink.new(path))
-  end
-
-  -- Sink 3: callback sink (for process buffer log pane, tests, etc.)
-  if cfg.on_message and type(cfg.on_message) == "function" then
-    local cb = cfg.on_message
-    table.insert(sinks, teolog.sinks.CallbackSink.new(function(event)
-      -- Adapt teolog event back to vault callback signature: (level, scope, msg)
-      local scope = (event.ctx and event.ctx.scope) or ""
-      pcall(cb, event.lvl, scope, event.msg)
-    end))
-  end
-
-  local sink
-  if #sinks == 1 then
-    sink = sinks[1]
-  else
-    sink = teolog.sinks.MultiSink.new(sinks)
-  end
-
-  _logger = teolog.new("vault.nvim", sink)
-  -- Set teolog level to TRACE so all filtering is done per-sink
-  -- (NotifySink handles its own min_level, FileSink gets everything)
-  _logger:set_level(teolog.Level.TRACE)
-  _logger_config_hash = hash
-
-  return _logger
 end
 
 -------------------------------------------------------------------------------
@@ -165,24 +173,24 @@ end
 --- @param level vault.LogLevel
 --- @return boolean
 local function should_display(level)
-  local cfg = get_config()
-  local min = LEVELS[cfg.level] or LEVELS.info
-  return (LEVELS[level] or LEVELS.info) >= min
+    local cfg = get_config()
+    local min = LEVELS[cfg.level] or LEVELS.info
+    return (LEVELS[level] or LEVELS.info) >= min
 end
 
 --- Write a line to the log file (synchronous fallback)
 --- @param line string
 local function write_file(line)
-  local cfg = get_config()
-  if not cfg.file then
-    return
-  end
-  local f = io.open(get_file_path(), "a")
-  if f then
-    f:write(line)
-    f:write("\n")
-    f:close()
-  end
+    local cfg = get_config()
+    if not cfg.file then
+        return
+    end
+    local f = io.open(get_file_path(), "a")
+    if f then
+        f:write(line)
+        f:write("\n")
+        f:close()
+    end
 end
 
 --- Fallback emit (no teolog). Preserves original behavior exactly.
@@ -191,43 +199,43 @@ end
 --- @param fmt string
 --- @param ... any
 local function emit_fallback(level, scope, fmt, ...)
-  local needs_display = should_display(level)
-  local cfg = get_config()
-  local needs_file = cfg.file
-  local needs_callback = cfg.on_message ~= nil
+    local needs_display = should_display(level)
+    local cfg = get_config()
+    local needs_file = cfg.file
+    local needs_callback = cfg.on_message ~= nil
 
-  if not needs_display and not needs_file and not needs_callback then
-    return
-  end
-
-  local ok, msg = pcall(string.format, fmt, ...)
-  if not ok then
-    local parts = { fmt }
-    for i = 1, select("#", ...) do
-      parts[#parts + 1] = tostring(select(i, ...))
+    if not needs_display and not needs_file and not needs_callback then
+        return
     end
-    msg = table.concat(parts, " ")
-  end
 
-  local prefix = scope ~= "" and string.format("[vault.%s]", scope) or "[vault]"
-  local prefixed = string.format("%s %s", prefix, msg)
-
-  if needs_display then
-    vim.notify(prefixed, VIM_LEVELS[level])
-  end
-
-  if needs_file then
-    local timestamp = os.date("%Y-%m-%d %H:%M:%S")
-    local lvl_tag = level:upper()
-    write_file(string.format("[%s] [%s] %s", timestamp, lvl_tag, prefixed))
-  end
-
-  if needs_callback then
-    local cb = cfg.on_message
-    if type(cb) == "function" then
-      pcall(cb, level, scope, msg)
+    local ok, msg = pcall(string.format, fmt, ...)
+    if not ok then
+        local parts = { fmt }
+        for i = 1, select("#", ...) do
+            parts[#parts + 1] = tostring(select(i, ...))
+        end
+        msg = table.concat(parts, " ")
     end
-  end
+
+    local prefix = scope ~= "" and string.format("[vault.%s]", scope) or "[vault]"
+    local prefixed = string.format("%s %s", prefix, msg)
+
+    if needs_display then
+        vim.notify(prefixed, VIM_LEVELS[level])
+    end
+
+    if needs_file then
+        local timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        local lvl_tag = level:upper()
+        write_file(string.format("[%s] [%s] %s", timestamp, lvl_tag, prefixed))
+    end
+
+    if needs_callback then
+        local cb = cfg.on_message
+        if type(cb) == "function" then
+            pcall(cb, level, scope, msg)
+        end
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -236,11 +244,11 @@ end
 
 --- teolog level map
 local TEOLOG_LEVELS = {
-  trace = 0,
-  debug = 1,
-  info = 2,
-  warn = 3,
-  error = 4,
+    trace = 0,
+    debug = 1,
+    info = 2,
+    warn = 3,
+    error = 4,
 }
 
 --- Core emit function. All public methods funnel through here.
@@ -249,31 +257,31 @@ local TEOLOG_LEVELS = {
 --- @param fmt string
 --- @param ... any
 local function emit(level, scope, fmt, ...)
-  local logger = get_logger()
+    local logger = get_logger()
 
-  if not logger then
-    -- No teolog available — use original fallback
-    emit_fallback(level, scope, fmt, ...)
-    return
-  end
-
-  -- Format the message (same fallback logic as before)
-  local ok, msg = pcall(string.format, fmt, ...)
-  if not ok then
-    local parts = { fmt }
-    for i = 1, select("#", ...) do
-      parts[#parts + 1] = tostring(select(i, ...))
+    if not logger then
+        -- No teolog available — use original fallback
+        emit_fallback(level, scope, fmt, ...)
+        return
     end
-    msg = table.concat(parts, " ")
-  end
 
-  -- Emit through teolog with scope as context
-  local teolog_level = TEOLOG_LEVELS[level] or TEOLOG_LEVELS.info
-  if scope ~= "" then
-    logger:emit(teolog_level, msg, { scope = scope, module = scope })
-  else
-    logger:emit(teolog_level, msg)
-  end
+    -- Format the message (same fallback logic as before)
+    local ok, msg = pcall(string.format, fmt, ...)
+    if not ok then
+        local parts = { fmt }
+        for i = 1, select("#", ...) do
+            parts[#parts + 1] = tostring(select(i, ...))
+        end
+        msg = table.concat(parts, " ")
+    end
+
+    -- Emit through teolog with scope as context
+    local teolog_level = TEOLOG_LEVELS[level] or TEOLOG_LEVELS.info
+    if scope ~= "" then
+        logger:emit(teolog_level, msg, { scope = scope, module = scope })
+    else
+        logger:emit(teolog_level, msg)
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -284,47 +292,47 @@ end
 --- @param scope string
 --- @return table
 local function make_logger(scope)
-  local logger = {}
+    local logger = {}
 
-  --- @param fmt string
-  --- @param ... any
-  function logger.trace(fmt, ...)
-    emit("trace", scope, fmt, ...)
-  end
+    --- @param fmt string
+    --- @param ... any
+    function logger.trace(fmt, ...)
+        emit("trace", scope, fmt, ...)
+    end
 
-  --- @param fmt string
-  --- @param ... any
-  function logger.debug(fmt, ...)
-    emit("debug", scope, fmt, ...)
-  end
+    --- @param fmt string
+    --- @param ... any
+    function logger.debug(fmt, ...)
+        emit("debug", scope, fmt, ...)
+    end
 
-  --- @param fmt string
-  --- @param ... any
-  function logger.info(fmt, ...)
-    emit("info", scope, fmt, ...)
-  end
+    --- @param fmt string
+    --- @param ... any
+    function logger.info(fmt, ...)
+        emit("info", scope, fmt, ...)
+    end
 
-  --- @param fmt string
-  --- @param ... any
-  function logger.warn(fmt, ...)
-    emit("warn", scope, fmt, ...)
-  end
+    --- @param fmt string
+    --- @param ... any
+    function logger.warn(fmt, ...)
+        emit("warn", scope, fmt, ...)
+    end
 
-  --- @param fmt string
-  --- @param ... any
-  function logger.error(fmt, ...)
-    emit("error", scope, fmt, ...)
-  end
+    --- @param fmt string
+    --- @param ... any
+    function logger.error(fmt, ...)
+        emit("error", scope, fmt, ...)
+    end
 
-  --- Create a sub-scoped logger
-  --- @param sub string
-  --- @return table
-  function logger.scope(sub)
-    local new_scope = scope ~= "" and (scope .. "." .. sub) or sub
-    return make_logger(new_scope)
-  end
+    --- Create a sub-scoped logger
+    --- @param sub string
+    --- @return table
+    function logger.scope(sub)
+        local new_scope = scope ~= "" and (scope .. "." .. sub) or sub
+        return make_logger(new_scope)
+    end
 
-  return logger
+    return logger
 end
 
 -- M is the root logger (scope = "")
@@ -339,20 +347,20 @@ M.scope = root.scope
 --- Get the log file path (useful for :Vault log commands)
 --- @return string
 function M.get_file_path()
-  return get_file_path()
+    return get_file_path()
 end
 
 --- Tail the log file into a scratch buffer
 function M.open()
-  local path = M.get_file_path()
-  if vim.fn.filereadable(path) == 0 then
-    M.info("No log file yet: %s", path)
-    return
-  end
-  vim.cmd("split " .. vim.fn.fnameescape(path))
-  vim.bo.buftype = ""
-  vim.bo.modifiable = false
-  vim.cmd("normal! G")
+    local path = M.get_file_path()
+    if vim.fn.filereadable(path) == 0 then
+        M.info("No log file yet: %s", path)
+        return
+    end
+    vim.cmd("split " .. vim.fn.fnameescape(path))
+    vim.bo.buftype = ""
+    vim.bo.modifiable = false
+    vim.cmd("normal! G")
 end
 
 return M
