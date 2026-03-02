@@ -1379,6 +1379,36 @@ function M.open(opts)
   -- Attach to current window
   grid:attach()
 
+  -- Disable auto-formatters for this buffer
+  vim.b[bufnr].formatter_skip_buf = true   -- formatter.nvim
+  vim.b[bufnr].autoformat         = false  -- conform.nvim
+
+  -- Allow :q without "no write" error when there are no real changes
+  vim.api.nvim_create_autocmd("QuitPre", {
+    buffer = bufnr,
+    callback = function()
+      local s = buf_states[bufnr]
+      if not s then
+        vim.bo[bufnr].modified = false
+        return
+      end
+      local diff = s.grid:diff()
+      local total = #diff.updates + #diff.deletes + #diff.creates + #(diff.custom or {})
+      if total == 0 then
+        vim.bo[bufnr].modified = false
+      end
+    end,
+  })
+
+  -- Cleanup on buffer delete
+  vim.api.nvim_create_autocmd("BufDelete", {
+    buffer = bufnr,
+    callback = function()
+      buf_states[bufnr] = nil
+      undo_snapshots[bufnr] = nil
+    end,
+  })
+
   -- Buffer-local keymaps
   local kopts = { buffer = bufnr, silent = true }
   vim.keymap.set("n", "gs", function() M.sort_by_cursor(bufnr) end,
