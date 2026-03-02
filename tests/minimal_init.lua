@@ -44,6 +44,12 @@ end
 -- Add current plugin to runtimepath
 vim.opt.runtimepath:prepend(root_cwd)
 
+-- Add vimtable.nvim (shared grid infrastructure)
+local vimtable_path = vim.fn.expand("~/projects/vimtable.nvim")
+if vim.fn.isdirectory(vimtable_path) == 1 then
+  vim.opt.runtimepath:append(vimtable_path)
+end
+
 -- 3. CONFIGURATION
 vim.opt.swapfile = false
 vim.opt.termguicolors = true
