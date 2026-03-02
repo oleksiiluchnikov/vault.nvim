@@ -101,7 +101,14 @@ local undo_snapshots = {}  -- [bufnr] = vault.ProcessUndoSnapshot
 ---@return string|nil error
 local function validate_path_in_vault(path)
   local config = require("vault.config")
-  local root = vim.fn.resolve(vim.fn.expand(config.options.root))
+  local raw_root = config.options.root
+  if not raw_root or type(raw_root) ~= "string" or raw_root == "" then
+    return nil, string.format("config.options.root is invalid: %s", tostring(raw_root))
+  end
+  local root = vim.fn.resolve(vim.fn.expand(raw_root))
+  if not root or root == "" or root == "v:null" then
+    return nil, string.format("config.options.root expanded to invalid path: %s", tostring(root))
+  end
   local resolved = vim.fn.resolve(vim.fn.expand(path))
   if resolved:sub(1, #root) ~= root then
     return nil, string.format("Path escapes vault root: %s (root: %s)", resolved, root)
@@ -1933,7 +1940,9 @@ local function apply_mutations(diff, st, on_done)
     -- Phase 1: dir move
     if upd.fields.dir ~= nil then
       local config = require("vault.config")
-      local new_dir = upd.fields.dir or ""
+      local new_dir = upd.fields.dir
+      -- Guard against vim.NIL (truthy userdata from JSON null) — treat as empty
+      if type(new_dir) ~= "string" then new_dir = "" end
       if new_dir == "/" then new_dir = "" end
       -- Safety: reject paths that escape the vault root
       if new_dir:match("%.%.") then
@@ -2031,7 +2040,9 @@ local function apply_mutations(diff, st, on_done)
     local slug = source:lower():gsub("%s+", "-"):gsub("[%c%[%]#|^]", "")
     if slug == "" then slug = "untitled" end
     local config = require("vault.config")
-    local dir = create.fields.dir or ""
+    local dir = create.fields.dir
+    -- Guard against vim.NIL (truthy userdata from JSON null) — treat as empty
+    if type(dir) ~= "string" then dir = "" end
     if dir == "/" then dir = "" end
     -- Safety: reject paths that escape the vault root (e.g., "../" in dir)
     if dir:match("%.%.") then
@@ -2335,7 +2346,12 @@ local function on_save(bufnr)
     if #diff.renames > 0 then
       local Note = require("vault.notes.note")
       local config = require("vault.config")
-      local vault_root = vim.fn.expand(config.options.root)
+      local raw_root = config.options.root
+      if not raw_root or raw_root == "" or type(raw_root) ~= "string" then
+        log.error("SAFETY: config.options.root is %s — aborting renames", tostring(raw_root))
+        goto skip_renames
+      end
+      local vault_root = vim.fn.expand(raw_root)
       for _, ren in ipairs(diff.renames) do
         local old_path = st.note_paths[ren.old_slug]
         if not old_path then goto continue_rename end
@@ -2381,6 +2397,7 @@ local function on_save(bufnr)
         ::continue_rename::
       end
     end
+    ::skip_renames::
 
     -- ── No deletes: apply immediately ────────────────────────────────────────
     if #diff.deletes == 0 then
