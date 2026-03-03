@@ -191,4 +191,26 @@ M.bases = function(_, map)
     return true
 end
 
+--- @param map vault.Picker.map
+M.vault = function(_, map)
+    local vault_picker_actions = require("telescope._extensions.vault.pickers.vault.actions")
+
+    map("i", "<C-c>", vault_actions.close)
+    map("n", "<C-c>", vault_actions.close)
+
+    map("i", "<CR>", vault_picker_actions.find)
+    map("n", "<CR>", vault_picker_actions.find)
+
+    map("i", "<C-s>", vault_actions.resort)
+    map("n", "<C-s>", vault_actions.resort)
+
+    map("i", "<C-a>", require("telescope.actions").select_all)
+    map("n", "<C-a>", require("telescope.actions").select_all)
+
+    map("i", "<C-d>", require("telescope.actions").drop_all)
+    map("n", "<C-d>", require("telescope.actions").drop_all)
+
+    return true
+end
+
 return M
