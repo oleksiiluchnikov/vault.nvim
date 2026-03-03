@@ -1229,21 +1229,27 @@ function M.open(opts)
   vim.keymap.set("n", "gp", function() M.toggle_preview(bufnr) end,
     vim.tbl_extend("force", kopts, { desc = "Vault: toggle note preview on hover" }))
   vim.keymap.set("v", "g=", function()
-    local sr = vim.fn.line("'<") - 1
-    local er = vim.fn.line("'>") - 1
+    -- Exit visual mode first so '< '> marks are set
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
-    vim.ui.input({ prompt = "Set status: " }, function(value)
-      if not value or value == "" then return end
-      M.batch_set_field(bufnr, "status", value, sr, er)
+    vim.schedule(function()
+      local sr = vim.fn.line("'<") - 1
+      local er = vim.fn.line("'>") - 1
+      vim.ui.input({ prompt = "Set status: " }, function(value)
+        if not value or value == "" then return end
+        M.batch_set_field(bufnr, "status", value, sr, er)
+      end)
     end)
   end, vim.tbl_extend("force", kopts, { desc = "Vault: batch set status on selection" }))
   vim.keymap.set("v", "gt", function()
-    local sr = vim.fn.line("'<") - 1
-    local er = vim.fn.line("'>") - 1
+    -- Exit visual mode first so '< '> marks are set
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
-    vim.ui.input({ prompt = "Add tag: " }, function(tag)
-      if not tag or tag == "" then return end
-      M.batch_append_tag(bufnr, tag, sr, er)
+    vim.schedule(function()
+      local sr = vim.fn.line("'<") - 1
+      local er = vim.fn.line("'>") - 1
+      vim.ui.input({ prompt = "Add tag: " }, function(tag)
+        if not tag or tag == "" then return end
+        M.batch_append_tag(bufnr, tag, sr, er)
+      end)
     end)
   end, vim.tbl_extend("force", kopts, { desc = "Vault: batch add tag to selection" }))
 
