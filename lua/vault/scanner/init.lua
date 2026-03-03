@@ -11,6 +11,7 @@ local Property = require("vault.properties.property")
 local PropertyValue = require("vault.properties.property.value")
 
 local log = require("vault.log").scope("scanner")
+local progress = require("vault.progress")
 
 local Scanner = {}
 
@@ -36,14 +37,19 @@ local function get_scan_args(opts)
     return root, ignores
 end
 
+--- @param opts? { ignore: boolean|string[] }
+--- @return table<string, table>
 function Scanner.paths(opts)
     local core = require("vault_core")
     local root, ignores = get_scan_args(opts)
 
-    -- 2. Performance: Rust scan
+    local handle = progress.start("Scanning notes", "Reading vault…")
     local map = core.paths(root, ignores)
 
-    -- 3. Cache Miss: Only save to cache if we used standard defaults
+    local count = 0
+    for _ in pairs(map) do count = count + 1 end
+    handle:finish(("%d notes"):format(count))
+
     if not opts then
         state.set_global_key("cache.notes.paths", map)
     end
@@ -51,18 +57,29 @@ function Scanner.paths(opts)
     return map
 end
 
+--- @return table<string, string>
 function Scanner.slugs()
     local core = require("vault_core")
     local root, ignores = get_scan_args()
+
+    local handle = progress.start("Scanning slugs")
     local slugs = core.slugs(root, ignores)
+    local count = 0
+    for _ in pairs(slugs) do count = count + 1 end
+    handle:finish(("%d slugs"):format(count))
+
     state.set_global_key("cache.notes.slugs", slugs)
-    state.set_global_key("cache.notes.basename_index", nil) -- invalidate derived index
+    state.set_global_key("cache.notes.basename_index", nil)
     return slugs
 end
 
+--- @param opts? { ignore: boolean|string[] }
+--- @return table<string, vault.Tag>
 function Scanner.tags(opts)
     local core = require("vault_core")
     local root, ignores = get_scan_args(opts)
+
+    local handle = progress.start("Scanning tags")
     local raw_tags = core.tags(root, ignores)
 
     -- Convert raw tag data to Tag objects
@@ -77,12 +94,20 @@ function Scanner.tags(opts)
         })
     end
 
+    local count = 0
+    for _ in pairs(tags_map) do count = count + 1 end
+    handle:finish(("%d tags"):format(count))
+
     return tags_map
 end
 
+--- @param opts? { ignore: boolean|string[] }
+--- @return table<string, vault.Wikilink>
 function Scanner.wikilinks(opts)
     local core = require("vault_core")
     local root, ignores = get_scan_args(opts)
+
+    local handle = progress.start("Scanning wikilinks")
     local raw_wikilinks = core.wikilinks(root, ignores)
 
     -- Convert raw wikilink data to Wikilink objects
@@ -110,12 +135,20 @@ function Scanner.wikilinks(opts)
         ::continue::
     end
 
+    local wl_count = 0
+    for _ in pairs(wikilinks_map) do wl_count = wl_count + 1 end
+    handle:finish(("%d wikilinks"):format(wl_count))
+
     return wikilinks_map
 end
 
+--- @param opts? { ignore: boolean|string[] }
+--- @return table<string, vault.Task>
 function Scanner.tasks(opts)
     local core = require("vault_core")
     local root, ignores = get_scan_args(opts)
+
+    local handle = progress.start("Scanning tasks")
     local raw_tasks = core.tasks(root, ignores)
 
     -- Convert raw task data to Task objects
@@ -129,26 +162,50 @@ function Scanner.tasks(opts)
         tasks_map[description].data.count = task_data.count
     end
 
+    local task_count = 0
+    for _ in pairs(tasks_map) do task_count = task_count + 1 end
+    handle:finish(("%d tasks"):format(task_count))
+
     return tasks_map
 end
 
+--- @param opts? { ignore: boolean|string[] }
+--- @return table
 function Scanner.links(opts)
     local core = require("vault_core")
     local root, ignores = get_scan_args(opts)
-    -- External links are already in simple format, no object wrapping needed
-    return core.links(root, ignores)
+
+    local handle = progress.start("Scanning links")
+    local result = core.links(root, ignores)
+    local count = 0
+    for _ in pairs(result) do count = count + 1 end
+    handle:finish(("%d links"):format(count))
+
+    return result
 end
 
+--- @param opts? { ignore: boolean|string[] }
+--- @return table
 function Scanner.fields(opts)
     local core = require("vault_core")
     local root, ignores = get_scan_args(opts)
-    -- Fields are already in the right format (nested map structure)
-    return core.fields(root, ignores)
+
+    local handle = progress.start("Scanning fields")
+    local result = core.fields(root, ignores)
+    local count = 0
+    for _ in pairs(result) do count = count + 1 end
+    handle:finish(("%d fields"):format(count))
+
+    return result
 end
 
+--- @param opts? { ignore: boolean|string[] }
+--- @return table<string, vault.Property>
 function Scanner.properties(opts)
     local core = require("vault_core")
     local root, ignores = get_scan_args(opts)
+
+    local handle = progress.start("Scanning properties")
     local raw_properties = core.properties(root, ignores)
 
     -- Convert raw property data to Property objects with PropertyValue children
@@ -173,12 +230,20 @@ function Scanner.properties(opts)
         properties_map[prop_name] = property
     end
 
+    local prop_count = 0
+    for _ in pairs(properties_map) do prop_count = prop_count + 1 end
+    handle:finish(("%d properties"):format(prop_count))
+
     return properties_map
 end
 
+--- @param opts? { ignore: boolean|string[] }
+--- @return table<string, vault.Dir>
 function Scanner.dirs(opts)
     local core = require("vault_core")
     local root, ignores = get_scan_args(opts)
+
+    local handle = progress.start("Scanning directories")
     local raw_dirs = core.dirs(root, ignores)
 
     -- Convert raw dir data to Dir objects
@@ -190,6 +255,10 @@ function Scanner.dirs(opts)
             relpath = relpath,
         })
     end
+
+    local dir_count = 0
+    for _ in pairs(dirs_map) do dir_count = dir_count + 1 end
+    handle:finish(("%d directories"):format(dir_count))
 
     state.set_global_key("dirs", dirs_map)
     return dirs_map
@@ -204,7 +273,10 @@ function Scanner.base_files(opts)
     local core = require("vault_core")
     local root, ignores = get_scan_args(opts)
     local ext = config.options.bases and config.options.bases.ext or ".base"
+
+    local handle = progress.start("Scanning bases")
     local raw = core.base_files(root, ignores, ext)
+    handle:finish(("%d bases"):format(#raw))
 
     if not opts then
         state.set_global_key("cache.bases.raw", raw)
@@ -223,6 +295,7 @@ function Scanner.lines(opts)
     local root, ignores = get_scan_args(opts)
     local paths = Scanner.paths(opts)
 
+    local handle = progress.start("Scanning lines", "Reading files…")
     local lines_map = {} --- @type table<string, vault.Line>
 
     for slug, note_data in pairs(paths) do
@@ -255,6 +328,10 @@ function Scanner.lines(opts)
             end
         end
     end
+
+    local line_count = 0
+    for _ in pairs(lines_map) do line_count = line_count + 1 end
+    handle:finish(("%d unique lines"):format(line_count))
 
     return lines_map
 end
