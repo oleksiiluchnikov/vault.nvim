@@ -156,6 +156,15 @@ local function sort_from_base(base)
   return { col = col, dir = dir }
 end
 
+--- Extract group_by from base view definition.
+--- @param base vault.Base
+--- @return string|nil
+local function group_by_from_base(base)
+  if not base.data.views or not base.data.views[1] then return nil end
+  local view = base.data.views[1]
+  return view.group_by
+end
+
 local get_mtime = shared.get_mtime
 local yaml_quote = shared.yaml_quote
 local validate_path_in_vault = shared.validate_path_in_vault
@@ -980,7 +989,7 @@ end
 
 -- ─── Open ─────────────────────────────────────────────────────────────────────
 
----@param opts? { notes?: vault.Notes, columns?: string[], filter_desc?: string, base?: vault.Base }
+---@param opts? { notes?: vault.Notes, columns?: string[], filter_desc?: string, base?: vault.Base, group_by?: string }
 function M.open(opts)
   opts = opts or {}
   get_empty_cell()
@@ -1083,6 +1092,9 @@ function M.open(opts)
   ensure_row_hl_groups()
   local row_hl_fn = build_row_hl()
 
+  -- Group-by from base definition or command opts
+  local group_by = opts.group_by or (base and group_by_from_base(base)) or nil
+
   -- Create Grid
   local Grid = get_Grid()
   local grid = Grid.new({
@@ -1104,6 +1116,7 @@ function M.open(opts)
     classify = make_classify(st),
     sort_keys = sort_keys,
     row_hl = row_hl_fn,
+    group_by = group_by,
     hl = {
       header = "VaultProcessHeader",
       separator = "VaultProcessSep",
