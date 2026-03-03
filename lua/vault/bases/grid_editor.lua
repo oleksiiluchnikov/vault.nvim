@@ -1200,6 +1200,18 @@ function M.open(opts)
     end)
     if not ok_tele then log.warn("gJ requires telescope.nvim") end
   end, vim.tbl_extend("force", kopts, { desc = "Vault: pick note to merge" }))
+  vim.keymap.set("n", "gf", function()
+    local st = buf_states[bufnr]
+    if not st then return end
+    local picker = require("vault.filter_picker")
+    picker.open(st.grid, st.visible_columns)
+  end, vim.tbl_extend("force", kopts, { desc = "Vault: open filter picker" }))
+  vim.keymap.set("n", "gF", function()
+    local st = buf_states[bufnr]
+    if not st or not st.grid then return end
+    st.grid:clear_pipeline()
+    log.info("Pipeline cleared")
+  end, vim.tbl_extend("force", kopts, { desc = "Vault: clear all filters" }))
   vim.keymap.set("n", "g>", function() M.resize_cursor_column(bufnr, 5) end,
     vim.tbl_extend("force", kopts, { desc = "Vault: widen column" }))
   vim.keymap.set("n", "g<", function() M.resize_cursor_column(bufnr, -5) end,
