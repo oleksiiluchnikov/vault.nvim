@@ -926,6 +926,20 @@ function M.open(opts)
   -- Attach (opens floating windows)
   board:attach()
 
+  -- Add filter keymaps to each column buffer
+  for _, col in ipairs(board:columns()) do
+    local kopts = { buffer = col.bufnr, silent = true, nowait = true }
+    vim.keymap.set("n", "gf", function()
+      local picker = require("vault.filter_picker")
+      picker.open(board, st.display_fields)
+    end, vim.tbl_extend("force", kopts, { desc = "Vault Kanban: open filter picker" }))
+
+    vim.keymap.set("n", "gF", function()
+      board:clear_pipeline()
+      log.info("Pipeline cleared")
+    end, vim.tbl_extend("force", kopts, { desc = "Vault Kanban: clear all filters" }))
+  end
+
   log.info(
     "Kanban board: %d notes, grouped by '%s' (%s), %d columns — H/L to move, <C-s> to save, q to close",
     #records, group_field, group_info.mode, #group_info.values

@@ -674,7 +674,7 @@ local function build_subcommands()
                 local remaining = {}
                 for _, arg in ipairs(args) do
                     local k, v = arg:match("^(%w+)=(.+)$")
-                    if k == "group" then
+                    if k == "group" or k == "field" then
                         group_field = v
                     elseif k == "fields" then
                         display_fields = vim.split(v, ",", { plain = true })
