@@ -531,6 +531,21 @@ local function build_subcommands()
         process = {
             run = function(args)
                 local grid_editor = require("vault.bases.views.grid")
+
+                -- Extract key=value options (e.g. group_by=status) before
+                -- interpreting positional args.
+                local kv_opts = {} --- @type table<string, string>
+                local positional = {} --- @type string[]
+                for _, a in ipairs(args) do
+                    local k, v = a:match("^([%w_]+)=(.+)$")
+                    if k then
+                        kv_opts[k] = v
+                    else
+                        table.insert(positional, a)
+                    end
+                end
+                args = positional
+
                 local filter = args[1]
                 local notes, desc
 
@@ -588,7 +603,7 @@ local function build_subcommands()
                             log.error("Base not found: %s", base_name)
                             return
                         end
-                        grid_editor.open({ base = base, columns = columns_arg })
+                        grid_editor.open({ base = base, columns = columns_arg, group_by = kv_opts.group_by })
                     else
                         -- No base name given — open Telescope bases picker
                         local ok, picker = pcall(require, "telescope._extensions.vault.pickers.bases")
@@ -633,7 +648,7 @@ local function build_subcommands()
                     desc = "filter:" .. filter
                 end
 
-                grid_editor.open({ notes = notes, filter_desc = desc, columns = columns_arg })
+                grid_editor.open({ notes = notes, filter_desc = desc, columns = columns_arg, group_by = kv_opts.group_by })
             end,
             complete = function(prefix, line)
                 if line and line:match("process%s+base%s+") then
@@ -681,7 +696,14 @@ local function build_subcommands()
                     local base_part = last_comma and col_arg:sub(1, last_comma - 1) or ""
                     return vim.tbl_map(function(s) return base_part .. s end, matches)
                 end
-                local subs = { "base", "undo", "orphans", "leaves", "empty", "no-frontmatter", "dir", "tag", "empty-property", "candidates-delete" }
+                -- Complete group_by= with known column names
+                if prefix:match("^group_by=") then
+                    local gp = prefix:match("^group_by=(.*)$") or ""
+                    local cols = { "status", "tags", "title", "dir" }
+                    return vim.tbl_map(function(c) return "group_by=" .. c end,
+                        vim.tbl_filter(function(c) return c:find(gp, 1, true) == 1 end, cols))
+                end
+                local subs = { "base", "undo", "orphans", "leaves", "empty", "no-frontmatter", "dir", "tag", "empty-property", "candidates-delete", "group_by=" }
                 return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
             end,
         },
