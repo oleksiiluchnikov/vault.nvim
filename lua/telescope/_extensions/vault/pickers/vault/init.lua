@@ -37,7 +37,6 @@ return function(opts)
     -- end
     --
     local vault_layouts = require("telescope._extensions.vault.layouts")
-    local vault_actions = require("telescope._extensions.vault.actions")
     opts = opts or {}
 
     -- Calculate optimal widths based on content
@@ -109,28 +108,7 @@ return function(opts)
         prompt_title = "",
         finder = finder,
         sorter = sorters.get_fzy_sorter(),
-        attach_mappings = function(_, map)
-            local vault_picker_actions =
-                require("telescope._extensions.vault.pickers.vault.actions")
-            local actions = require("telescope.actions")
-            map("i", "<C-c>", vault_actions.close)
-            map("n", "<C-c>", vault_actions.close)
-
-            map("i", "<CR>", vault_picker_actions.find)
-            map("n", "<CR>", vault_picker_actions.find)
-
-            map("i", "<C-s>", vault_actions.resort)
-            map("n", "<C-s>", vault_actions.resort)
-
-            -- select all entries in the picker
-            map("i", "<C-a>", actions.select_all)
-            map("n", "<C-a>", actions.select_all)
-
-            map("i", "<C-d>", actions.drop_all)
-            map("n", "<C-d>", actions.drop_all)
-
-            return true
-        end,
+        attach_mappings = require("telescope._extensions.vault.mappings").vault,
     })
     vault_state.set_global_key("picker", picker)
     return picker
