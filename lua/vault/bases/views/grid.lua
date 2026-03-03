@@ -1226,6 +1226,26 @@ function M.open(opts)
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
     M.save_range(bufnr, sr, er)
   end, vim.tbl_extend("force", kopts, { desc = "Vault: save selected rows only" }))
+  vim.keymap.set("n", "gp", function() M.toggle_preview(bufnr) end,
+    vim.tbl_extend("force", kopts, { desc = "Vault: toggle note preview on hover" }))
+  vim.keymap.set("v", "g=", function()
+    local sr = vim.fn.line("'<") - 1
+    local er = vim.fn.line("'>") - 1
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+    vim.ui.input({ prompt = "Set status: " }, function(value)
+      if not value or value == "" then return end
+      M.batch_set_field(bufnr, "status", value, sr, er)
+    end)
+  end, vim.tbl_extend("force", kopts, { desc = "Vault: batch set status on selection" }))
+  vim.keymap.set("v", "gt", function()
+    local sr = vim.fn.line("'<") - 1
+    local er = vim.fn.line("'>") - 1
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+    vim.ui.input({ prompt = "Add tag: " }, function(tag)
+      if not tag or tag == "" then return end
+      M.batch_append_tag(bufnr, tag, sr, er)
+    end)
+  end, vim.tbl_extend("force", kopts, { desc = "Vault: batch add tag to selection" }))
 
   local sort_desc = initial_sort
     and string.format(", sorted by %s %s", initial_sort.col, initial_sort.dir)
@@ -1234,6 +1254,208 @@ function M.open(opts)
     "Processing %d notes (%s)%s [grid] — :w to apply, gs/gS to sort, gu to undo, g>/g< to resize",
     #records, filter_desc, sort_desc
   )
+end
+
+-- ─── Inline note preview (CursorHold float) ──────────────────────────────────
+
+local PREVIEW_MAX_LINES = 15
+local PREVIEW_MAX_WIDTH = 80
+
+--- Close the preview float if it exists.
+---@param st vault.GridEditorState
+local function close_preview(st)
+  if st._preview_win and vim.api.nvim_win_is_valid(st._preview_win) then
+    vim.api.nvim_win_close(st._preview_win, true)
+  end
+  st._preview_win = nil
+  st._preview_slug = nil
+end
+
+--- Show a floating preview of the note under the cursor.
+---@param bufnr integer
+---@param st vault.GridEditorState
+local function show_preview(bufnr, st)
+  if not st.grid then return end
+  local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local header_lines = st.grid:state().header_lines
+  if row < header_lines then close_preview(st); return end
+
+  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1]
+  if not line then close_preview(st); return end
+
+  local render = require("vimtable.views.grid.render")
+  local vt_id = require("vimtable.identity")
+  local slug = vt_id.parse(line, { separator = render.SEP_CHAR })
+  if not slug then close_preview(st); return end
+
+  -- Don't re-open for same slug
+  if st._preview_slug == slug and st._preview_win
+      and vim.api.nvim_win_is_valid(st._preview_win) then
+    return
+  end
+  close_preview(st)
+
+  local path = st.note_paths[slug]
+  if not path then return end
+
+  local ok, file_lines = pcall(vim.fn.readfile, path, "", PREVIEW_MAX_LINES)
+  if not ok or #file_lines == 0 then return end
+
+  -- Compute float size
+  local width = 0
+  for _, l in ipairs(file_lines) do
+    local len = vim.fn.strdisplaywidth(l)
+    if len > width then width = len end
+  end
+  width = math.min(width + 2, PREVIEW_MAX_WIDTH)
+  width = math.max(width, 20)
+  local height = math.min(#file_lines, PREVIEW_MAX_LINES)
+
+  local preview_buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(preview_buf, 0, -1, false, file_lines)
+  vim.bo[preview_buf].modifiable = false
+  vim.bo[preview_buf].bufhidden = "wipe"
+  vim.bo[preview_buf].filetype = "markdown"
+
+  local ui = vim.api.nvim_list_uis()[1] or { width = 120, height = 40 }
+  local cursor_row = vim.api.nvim_win_get_cursor(0)[1]
+  local anchor_row = cursor_row + 1
+  local anchor_col = 2
+  -- Flip above if not enough room below
+  if anchor_row + height + 2 > ui.height then
+    anchor_row = cursor_row - height - 2
+    if anchor_row < 0 then anchor_row = 0 end
+  end
+
+  st._preview_win = vim.api.nvim_open_win(preview_buf, false, {
+    relative = "win",
+    win = vim.api.nvim_get_current_win(),
+    width = width,
+    height = height,
+    row = anchor_row - cursor_row,
+    col = anchor_col,
+    style = "minimal",
+    border = "rounded",
+    title = " " .. slug .. " ",
+    title_pos = "center",
+    focusable = false,
+    noautocmd = true,
+  })
+  st._preview_slug = slug
+end
+
+--- Toggle preview mode on/off for a grid buffer.
+---@param bufnr integer
+function M.toggle_preview(bufnr)
+  local st = buf_states[bufnr]
+  if not st then return end
+  if st._preview_enabled then
+    st._preview_enabled = false
+    close_preview(st)
+    if st._preview_augroup then
+      pcall(vim.api.nvim_del_augroup_by_id, st._preview_augroup)
+      st._preview_augroup = nil
+    end
+    log.info("Preview off")
+  else
+    st._preview_enabled = true
+    local group = vim.api.nvim_create_augroup("vault_grid_preview_" .. bufnr, { clear = true })
+    st._preview_augroup = group
+    vim.api.nvim_create_autocmd("CursorHold", {
+      group = group,
+      buffer = bufnr,
+      callback = function() show_preview(bufnr, st) end,
+    })
+    vim.api.nvim_create_autocmd({ "CursorMoved", "InsertEnter", "BufLeave" }, {
+      group = group,
+      buffer = bufnr,
+      callback = function() close_preview(st) end,
+    })
+    log.info("Preview on (CursorHold)")
+    -- Show immediately for current position
+    show_preview(bufnr, st)
+  end
+end
+
+-- ─── Batch operations (visual selection) ──────────────────────────────────────
+
+--- Collect note slugs and paths for a visual row range.
+---@param bufnr integer
+---@param start_row integer  0-indexed inclusive
+---@param end_row integer    0-indexed inclusive
+---@return { slug: string, path: string }[]
+local function collect_row_identities(bufnr, start_row, end_row)
+  local st = buf_states[bufnr]
+  if not st or not st.grid then return {} end
+  local grid = st.grid
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local render = require("vimtable.views.grid.render")
+  local vt_id = require("vimtable.identity")
+  local id_opts = { separator = render.SEP_CHAR }
+  local header_lines = grid:state().header_lines
+  local results = {}
+  for row = start_row, end_row do
+    if row >= header_lines then
+      local line = lines[row + 1]
+      if line then
+        local slug = vt_id.parse(line, id_opts)
+        if slug and st.note_paths[slug] then
+          table.insert(results, { slug = slug, path = st.note_paths[slug] })
+        end
+      end
+    end
+  end
+  return results
+end
+
+--- Batch-set a frontmatter field on all notes in a visual selection.
+---@param bufnr integer
+---@param field string   field name (e.g. "status")
+---@param value string   value to set
+---@param start_row integer  0-indexed inclusive
+---@param end_row integer    0-indexed inclusive
+function M.batch_set_field(bufnr, field, value, start_row, end_row)
+  local targets = collect_row_identities(bufnr, start_row, end_row)
+  if #targets == 0 then log.info("No notes in selection"); return end
+  for _, t in ipairs(targets) do
+    shared.set_frontmatter_fields(t.path, { [field] = value })
+  end
+  log.info("Set %s=%s on %d notes", field, value, #targets)
+  M.reload(bufnr)
+end
+
+--- Batch-append a tag to all notes in a visual selection (deduplicates).
+---@param bufnr integer
+---@param tag string     tag to add (with or without # prefix)
+---@param start_row integer  0-indexed inclusive
+---@param end_row integer    0-indexed inclusive
+function M.batch_append_tag(bufnr, tag, start_row, end_row)
+  -- Normalize: strip leading # for storage
+  tag = tag:gsub("^#", "")
+  if tag == "" then log.warn("Empty tag"); return end
+  local targets = collect_row_identities(bufnr, start_row, end_row)
+  if #targets == 0 then log.info("No notes in selection"); return end
+  for _, t in ipairs(targets) do
+    local existing = shared.read_frontmatter_fields(t.path, { "tags" })
+    local tags = existing.tags
+    if type(tags) == "string" then
+      tags = vim.split(tags, ",")
+      for i, v in ipairs(tags) do tags[i] = vim.trim(v) end
+    elseif type(tags) ~= "table" then
+      tags = {}
+    end
+    -- Dedup: check if tag already present (normalize # prefix)
+    local found = false
+    for _, existing_tag in ipairs(tags) do
+      if existing_tag:gsub("^#", "") == tag then found = true; break end
+    end
+    if not found then
+      table.insert(tags, tag)
+    end
+    shared.set_frontmatter_fields(t.path, { tags = tags })
+  end
+  log.info("Added tag #%s to %d notes", tag, #targets)
+  M.reload(bufnr)
 end
 
 -- ─── Debug / test exports ─────────────────────────────────────────────────────

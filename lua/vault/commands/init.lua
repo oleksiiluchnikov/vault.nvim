@@ -599,6 +599,32 @@ local function build_subcommands()
                         end
                     end
                     return
+                elseif filter == "candidates-delete" then
+                    -- Smart delete candidates: empty body, stubs (<20 chars body),
+                    -- and truly orphaned+untagged notes.
+                    local Notes = require("vault.notes")
+                    local all = Notes()
+                    local candidates = {}
+                    for slug, note in pairs(all.map) do
+                        local body = note.data.content or ""
+                        -- Strip frontmatter for body length check
+                        local stripped = body:gsub("^%-%-%-.-%-%-%-\n?", "")
+                        stripped = vim.trim(stripped)
+                        if #stripped == 0 or #stripped < 20 then
+                            candidates[slug] = note
+                        end
+                    end
+                    -- Also add orphans with no tags
+                    local orphans = Notes():orphans()
+                    local tags_sources = require("vault.tags")():sources()
+                    for slug, note in pairs(orphans.map) do
+                        if not tags_sources[slug] then
+                            candidates[slug] = note
+                        end
+                    end
+                    notes = Notes()
+                    notes.map = candidates
+                    desc = "delete candidates"
                 elseif filter == "empty-property" then
                     require("vault.api").open_picker_notes_with_empty_property_value(args[2], args[3])
                     return
@@ -655,7 +681,7 @@ local function build_subcommands()
                     local base_part = last_comma and col_arg:sub(1, last_comma - 1) or ""
                     return vim.tbl_map(function(s) return base_part .. s end, matches)
                 end
-                local subs = { "base", "undo", "orphans", "leaves", "empty", "no-frontmatter", "dir", "tag", "empty-property" }
+                local subs = { "base", "undo", "orphans", "leaves", "empty", "no-frontmatter", "dir", "tag", "empty-property", "candidates-delete" }
                 return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
             end,
         },
@@ -754,6 +780,43 @@ local function build_subcommands()
                 end
                 local subs = { "base", "tag", "dir", "group=", "fields=", "mode=" }
                 return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+            end,
+        },
+
+        -- :Vault triage — open process buffer pre-filtered to highest-value items
+        -- Shows untagged notes merged with orphans, sorted by mtime descending.
+        -- One command that says "start here."
+        triage = {
+            run = function()
+                local Notes = require("vault.notes")
+                -- Collect untagged notes
+                local untagged = Notes():without_tags()
+                -- Collect orphans separately (without_tags mutates self.map)
+                local orphan_set = Notes():orphans()
+                -- Merge: untagged ∪ orphans (dedup by slug)
+                local merged = {}
+                for slug, note in pairs(untagged.map) do
+                    merged[slug] = note
+                end
+                for slug, note in pairs(orphan_set.map) do
+                    merged[slug] = note
+                end
+                -- Wrap in a fresh Notes-like object for grid.open
+                local all = Notes()
+                all.map = merged
+                local grid = require("vault.bases.views.grid")
+                grid.open({
+                    notes = all,
+                    filter_desc = "triage",
+                    columns = { "slug", "title", "tags", "status" },
+                })
+            end,
+        },
+
+        -- :Vault stats — progress dashboard showing vault health metrics
+        stats = {
+            run = function()
+                require("vault.ui.stats").open()
             end,
         },
 
