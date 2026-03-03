@@ -6,7 +6,6 @@
 --- @return Picker
 return function(opts)
     local vault_state = require("vault.core.state")
-    local entry_display = require("telescope.pickers.entry_display")
     local finders = require("telescope.finders")
     local pickers = require("telescope.pickers")
     local sorters = require("telescope.sorters")
@@ -39,41 +38,14 @@ return function(opts)
     local hl_name = "VaultTag"
     local colors = vault_hl.setup(hl_name, steps, { "Comment", "Normal", "String" })
 
-    local make_display = function(entry)
-        local tag = entry.value
-        local sources_count = tag.data.count or 0
-
-        local col_1 = tag.data.name
-        local col_1_hl_name = "TelescopeResultsNormal"
-        if colors then
-            local i = math.min(math.floor(sources_count / 2), steps)
-            if i == 0 then i = 1 end
-            col_1_hl_name = hl_name .. tostring(i)
-        end
-
-        local col_2 = tostring(sources_count)
-
-        local displayer = entry_display.create({
-            separator = " ",
-            items = {
-                { width = 29 },
-                { remaining = true },
-            },
-        })
-
-        return displayer({
-            { col_1, col_1_hl_name },
-            { col_2, "TelescopeResultsNumber" },
-        })
-    end
-
-    local entry_maker = function(tag)
-        return {
-            value = tag,
-            ordinal = tag.data.name .. " " .. tostring(tag.data.count),
-            display = make_display,
-        }
-    end
+    local vault_em = require("telescope._extensions.vault.entry_maker")
+    local _, entry_maker = vault_em.counted({
+        hl_name = hl_name,
+        colors = colors,
+        steps = steps,
+        get_name = function(t) return t.data.name end,
+        get_count = function(t) return t.data.count or 0 end,
+    })
 
     local finder = finders.new_table({
         results = tags_list,
