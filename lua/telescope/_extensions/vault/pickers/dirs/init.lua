@@ -5,7 +5,6 @@
 return function(opts)
     local dirs = require("vault.dirs")()
     local utils = require("vault.utils")
-    local entry_display = require("telescope.pickers.entry_display")
     local finders = require("telescope.finders")
     local sorters = require("telescope.sorters")
     local vault_state = require("vault.core.state")
@@ -31,46 +30,28 @@ return function(opts)
 
     local slugs = Scanner.slugs()
 
-    local make_display = function(entry)
-        local directory = entry.value
-        local sources_count = 0
+    -- Pre-compute counts per directory for display + sorting
+    local dir_counts = {} --- @type table<string, integer>
+    for _, d in ipairs(dirs_list) do
+        local rp = d.data.relpath
+        local count = 0
         for slug, _ in pairs(slugs) do
-            if utils.match(slug, directory.data.relpath, "startswith", false) then
-                sources_count = sources_count + 1
+            if utils.match(slug, rp, "startswith", false) then
+                count = count + 1
             end
         end
-
-        local col_1 = directory.data.relpath
-        local col_1_hl_name = "TelescopeResultsNormal"
-        if colors then
-            local i = math.min(math.floor(sources_count / 2), steps)
-            if i == 0 then i = 1 end
-            col_1_hl_name = hl_name .. tostring(i)
-        end
-
-        local col_2 = tostring(sources_count)
-
-        local displayer = entry_display.create({
-            separator = " ",
-            items = {
-                { width = 29 },
-                { remaining = true },
-            },
-        })
-
-        return displayer({
-            { col_1, col_1_hl_name },
-            { col_2, "TelescopeResultsNumber" },
-        })
+        dir_counts[rp] = count
     end
 
-    local entry_maker = function(directory)
-        return {
-            value = directory,
-            ordinal = directory.data.relpath,
-            display = make_display,
-        }
-    end
+    local vault_em = require("telescope._extensions.vault.entry_maker")
+    local _, entry_maker = vault_em.counted({
+        hl_name = hl_name,
+        colors = colors,
+        steps = steps,
+        get_name = function(d) return d.data.relpath end,
+        get_count = function(d) return dir_counts[d.data.relpath] or 0 end,
+        get_ordinal = function(d) return d.data.relpath end,
+    })
 
     local finder = finders.new_table({
         results = dirs_list,
@@ -81,21 +62,7 @@ return function(opts)
 
     if opts.sort_by == "count" then
         table.sort(dirs_list, function(a, b)
-            local a_relpath = a.data.relpath
-            local b_relpath = b.data.relpath
-            local a_count = 0
-            for slug, _ in pairs(slugs) do
-                if utils.match(slug, a_relpath, "startswith", false) then
-                    a_count = a_count + 1
-                end
-            end
-            local b_count = 0
-            for slug, _ in pairs(slugs) do
-                if utils.match(slug, b_relpath, "startswith", false) then
-                    b_count = b_count + 1
-                end
-            end
-            return a_count > b_count
+            return (dir_counts[a.data.relpath] or 0) > (dir_counts[b.data.relpath] or 0)
         end)
     elseif opts.sort_by == "name" then
         table.sort(dirs_list, function(a, b)
