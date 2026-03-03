@@ -530,7 +530,7 @@ local function build_subcommands()
         --           title,status,tags (inline columns), <slug> (fuzzy filter)
         process = {
             run = function(args)
-                local grid_editor = require("vault.bases.grid_editor")
+                local grid_editor = require("vault.bases.views.grid")
                 local filter = args[1]
                 local notes, desc
 
@@ -665,7 +665,7 @@ local function build_subcommands()
         --           tag <name>, dir <path>
         kanban = {
             run = function(args)
-                local grid_kanban = require("vault.bases.grid_kanban")
+                local grid_kanban = require("vault.bases.views.kanban")
                 local filter = args[1]
                 local notes, desc
 

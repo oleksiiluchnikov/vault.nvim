@@ -370,7 +370,7 @@ function vault_actions.base.enter(bufnr)
     vault_actions.close(bufnr)
     --- @type vault.Base
     local base = selection.value
-    require("vault.bases.grid_editor").open({ base = base })
+    require("vault.bases.views.grid").open({ base = base })
 end
 
 --- Open Telescope notes picker for notes matched by a specific base

@@ -1,4 +1,4 @@
---- vault.filter_picker — Interactive multi-step filter builder for vault grids/kanbans.
+--- vault.bases.views.filter_picker — Interactive multi-step filter builder for vault grids/kanbans.
 ---
 --- Presents a structured picker flow:
 ---   1. Select field (from grid/kanban columns)
@@ -8,9 +8,9 @@
 ---
 --- Uses vim.ui.select / vim.ui.input (enhanced by dressing.nvim if installed).
 ---
---- @module vault.filter_picker
+--- @module vault.bases.views.filter_picker
 
-local log = require("vault.log").scope("filter_picker")
+local log = require("vault.log").scope("bases.views.filter_picker")
 
 local M = {}
 
