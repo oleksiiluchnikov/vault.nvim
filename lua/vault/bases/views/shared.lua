@@ -1,7 +1,7 @@
--- lua/vault/bases/shared.lua
--- Shared helpers for vault grid_editor and grid_kanban adapters.
+-- lua/vault/bases/views/shared.lua
+-- Shared helpers for vault grid and kanban view adapters.
 --
--- Extracted from grid_editor.lua to avoid duplication between the
+-- Extracted from grid.lua to avoid duplication between the
 -- tabular (Grid) and board (Kanban) vault process views.
 
 local M = {}

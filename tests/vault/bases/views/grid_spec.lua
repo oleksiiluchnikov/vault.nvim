@@ -1,7 +1,7 @@
--- tests/vault/bases/grid_editor_spec.lua
+-- tests/vault/bases/views/grid_spec.lua
 -- Unit and integration tests for the grid-backed vault process buffer.
 --
--- Run with: PlenaryBustedFile tests/vault/bases/grid_editor_spec.lua {minimal_init='tests/minimal_init.lua'}
+-- Run with: PlenaryBustedFile tests/vault/bases/views/grid_spec.lua {minimal_init='tests/minimal_init.lua'}
 --
 -- Tests are grouped into:
 -- 1. Pure-function unit tests (no buffer creation needed)
@@ -19,12 +19,12 @@ end
 -- 1. Pure-function unit tests
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-describe("grid_editor (unit)", function()
+describe("grid (unit)", function()
   local ge
 
   before_each(function()
-    package.loaded["vault.bases.grid_editor"] = nil
-    ge = require("vault.bases.grid_editor")
+    package.loaded["vault.bases.views.grid"] = nil
+    ge = require("vault.bases.views.grid")
   end)
 
   -- ── normalize_col ────────────────────────────────────────────────────────
@@ -440,7 +440,7 @@ end)
 -- 2. Integration tests (require buffer creation, vimtable loaded)
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-describe("grid_editor (integration)", function()
+describe("grid (integration)", function()
   local ge
   local config_loaded = false
 
@@ -453,8 +453,8 @@ describe("grid_editor (integration)", function()
     -- Check if vault config is loaded (requires minimal_init.lua)
     local ok, config = pcall(require, "vault.config")
     config_loaded = ok and config.options and config.options.root and config.options.root ~= ""
-    package.loaded["vault.bases.grid_editor"] = nil
-    ge = require("vault.bases.grid_editor")
+    package.loaded["vault.bases.views.grid"] = nil
+    ge = require("vault.bases.views.grid")
   end)
 
   after_each(function()

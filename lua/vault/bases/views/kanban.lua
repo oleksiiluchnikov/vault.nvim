@@ -1,4 +1,4 @@
--- lua/vault/bases/grid_kanban.lua
+-- lua/vault/bases/views/kanban.lua
 -- Kanban board adapter for vault.nvim backed by vimtable.views.kanban.Board.
 --
 -- Provides a multi-column board view where notes are grouped by:
@@ -7,13 +7,13 @@
 --   3. Directory path           (group_field = "directory")
 --
 -- Usage:
---   require("vault.bases.grid_kanban").open({ group_field = "status" })
---   require("vault.bases.grid_kanban").open({ base = base_obj })
+--   require("vault.bases.views.kanban").open({ group_field = "status" })
+--   require("vault.bases.views.kanban").open({ base = base_obj })
 
 local M = {}
 
-local log = require("vault.log").scope("grid_kanban")
-local shared = require("vault.bases.shared")
+local log = require("vault.log").scope("bases.views.kanban")
+local shared = require("vault.bases.views.shared")
 
 -- ─── Lazy imports ─────────────────────────────────────────────────────────────
 
@@ -930,7 +930,7 @@ function M.open(opts)
   for _, col in ipairs(board:columns()) do
     local kopts = { buffer = col.bufnr, silent = true, nowait = true }
     vim.keymap.set("n", "gf", function()
-      local picker = require("vault.filter_picker")
+      local picker = require("vault.bases.views.filter_picker")
       picker.open(board, st.display_fields)
     end, vim.tbl_extend("force", kopts, { desc = "Vault Kanban: open filter picker" }))
 

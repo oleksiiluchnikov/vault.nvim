@@ -1,7 +1,7 @@
--- tests/vault/bases/grid_kanban_spec.lua
+-- tests/vault/bases/views/kanban_spec.lua
 -- Unit tests for the kanban board vault adapter.
 --
--- Run with: PlenaryBustedFile tests/vault/bases/grid_kanban_spec.lua {minimal_init='tests/minimal_init.lua'}
+-- Run with: PlenaryBustedFile tests/vault/bases/views/kanban_spec.lua {minimal_init='tests/minimal_init.lua'}
 
 local fixture_root = vim.fn.getcwd() .. "/tests/fixtures/demo-vault"
 
@@ -15,13 +15,13 @@ end
 -- 1. Pure-function unit tests
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-describe("grid_kanban (unit)", function()
+describe("kanban (unit)", function()
   local gk
 
   before_each(function()
-    package.loaded["vault.bases.grid_kanban"] = nil
-    package.loaded["vault.bases.shared"] = nil
-    gk = require("vault.bases.grid_kanban")
+    package.loaded["vault.bases.views.kanban"] = nil
+    package.loaded["vault.bases.views.shared"] = nil
+    gk = require("vault.bases.views.kanban")
   end)
 
   -- ── get_value_hl ──────────────────────────────────────────────────────────
@@ -225,7 +225,7 @@ end)
 -- 2. Integration tests (with demo vault notes)
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-describe("grid_kanban (integration)", function()
+describe("kanban (integration)", function()
   if not has_vault_config() then
     pending("vault config not available")
     return
@@ -234,9 +234,9 @@ describe("grid_kanban (integration)", function()
   local gk
 
   before_each(function()
-    package.loaded["vault.bases.grid_kanban"] = nil
-    package.loaded["vault.bases.shared"] = nil
-    gk = require("vault.bases.grid_kanban")
+    package.loaded["vault.bases.views.kanban"] = nil
+    package.loaded["vault.bases.views.shared"] = nil
+    gk = require("vault.bases.views.kanban")
   end)
 
   after_each(function()

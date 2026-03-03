@@ -1,4 +1,4 @@
--- lua/vault/bases/grid_editor.lua
+-- lua/vault/bases/views/grid.lua
 -- Grid-backed vault process buffer: thin adapter over vimtable.views.grid.Grid.
 --
 -- Drop-in sibling to editor.lua. Uses the Grid view for all rendering, conceal,
@@ -10,8 +10,8 @@
 
 local M = {}
 
-local log = require("vault.log").scope("grid_editor")
-local shared = require("vault.bases.shared")
+local log = require("vault.log").scope("bases.views.grid")
+local shared = require("vault.bases.views.shared")
 
 -- ─── Lazy imports (avoid circular requires at module level) ───────────────────
 
@@ -1203,7 +1203,7 @@ function M.open(opts)
   vim.keymap.set("n", "gf", function()
     local st = buf_states[bufnr]
     if not st then return end
-    local picker = require("vault.filter_picker")
+    local picker = require("vault.bases.views.filter_picker")
     picker.open(st.grid, st.visible_columns)
   end, vim.tbl_extend("force", kopts, { desc = "Vault: open filter picker" }))
   vim.keymap.set("n", "gF", function()
