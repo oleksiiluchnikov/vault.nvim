@@ -13,6 +13,7 @@ local log = require("vault.log").scope("ui.stats")
 local M = {}
 
 --- Compute vault statistics.
+--- Uses only raw/pre-loaded fields to avoid triggering expensive lazy loading.
 ---@return table stats
 local function compute_stats()
   local Notes = require("vault.notes")
@@ -28,13 +29,15 @@ local function compute_stats()
     if tag_sources[slug] then tagged = tagged + 1 end
   end
 
-  -- With status: notes that have a "status" frontmatter field
+  -- With status: check frontmatter (already loaded on note.data)
   local with_status = 0
-  local shared = require("vault.bases.views.shared")
   for _, note in pairs(all.map) do
-    local fm = shared.read_frontmatter_fields(note.data.path, { "status" })
-    if fm.status and fm.status ~= "" then
-      with_status = with_status + 1
+    local fm = rawget(note.data, "frontmatter")
+    if fm and type(fm) == "table" then
+      local status = fm.status
+      if status and status ~= "" and status ~= vim.NIL then
+        with_status = with_status + 1
+      end
     end
   end
 
@@ -46,22 +49,12 @@ local function compute_stats()
   local leaf_set = Notes():leaves()
   local leaf_count = leaf_set:count()
 
-  -- Content stats (from existing Stats class)
-  local Stats = require("vault.notes.stats")
-  local stats_obj = Stats(all)
-  local avg_content = stats_obj:average_content_length()
-  local word_count = stats_obj:word_count()
-  local created_week = stats_obj:created_this_week()
-
   return {
     total = total,
     tagged = tagged,
     with_status = with_status,
     orphans = orphan_count,
     leaves = leaf_count,
-    avg_content = avg_content,
-    word_count = word_count,
-    created_week = created_week,
   }
 end
 
@@ -105,10 +98,6 @@ function M.open()
       string.format(" Orphans:           %8s  (%s)", fmt_num(stats.orphans), pct(stats.orphans, stats.total)),
       string.format(" Leaves:            %8s  (%s)", fmt_num(stats.leaves), pct(stats.leaves, stats.total)),
       string.rep("\u{2500}", 36),
-      string.format(" Words:             %8s", fmt_num(stats.word_count)),
-      string.format(" Avg content:       %8s chars", fmt_num(math.floor(stats.avg_content))),
-      string.format(" Created this week: %8s", fmt_num(stats.created_week)),
-      string.rep("\u{2500}", 36),
       " Press q to close",
     }
 
@@ -143,7 +132,6 @@ function M.open()
     vim.api.nvim_buf_add_highlight(buf, ns, "Title", 0, 0, -1)
     vim.api.nvim_buf_add_highlight(buf, ns, "Comment", 1, 0, -1)
     vim.api.nvim_buf_add_highlight(buf, ns, "Comment", 7, 0, -1)
-    vim.api.nvim_buf_add_highlight(buf, ns, "Comment", 11, 0, -1)
     vim.api.nvim_buf_add_highlight(buf, ns, "NonText", #lines - 1, 0, -1)
 
     -- Close keymaps
