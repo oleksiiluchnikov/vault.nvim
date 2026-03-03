@@ -154,6 +154,15 @@ local DEFAULT_OPTIONS = {
     search_tool = "rg", -- The search tool to use. Default: "rg"
     process = {
         columns = { "slug", "title", "status", "tags" }, -- Default columns for :Vault process
+        --- @type vault.RowHlRule[]|fun(record: table, row_idx: integer): string|nil
+        --- Row highlight rules applied top-to-bottom; first match wins.
+        --- Each rule: { match = { field = value|{} }, hl = "HlGroup" }
+        --- Or a function(record, row_idx) -> hl_group|nil for full control.
+        row_hl = {
+            { match = { status = "done" },     hl = "VaultRowDone" },
+            { match = { status = "archived" }, hl = "VaultRowDone" },
+            { match = { tags = {} },           hl = "VaultRowUntagged" },
+        },
     },
     kanban = {
         group_field = "status",                          -- Frontmatter field, "tags/<prefix>", or "directory"

@@ -31,6 +31,63 @@ local CREATE_HARD_CAP = 100
 
 local get_empty_cell = shared.get_empty_cell
 
+-- ─── Row highlight defaults ───────────────────────────────────────────────────
+
+--- Define default highlight groups for row coloring (linked, user can override).
+local function ensure_row_hl_groups()
+  local defaults = {
+    VaultRowDone     = { link = "Comment" },
+    VaultRowUntagged = { link = "DiagnosticVirtualTextInfo" },
+  }
+  for name, def in pairs(defaults) do
+    vim.api.nvim_set_hl(0, name, vim.tbl_extend("keep", vim.api.nvim_get_hl(0, { name = name }), def))
+  end
+end
+
+--- @class vault.RowHlRule
+--- @field match table<string, any>  Field conditions: { status = "done" } or { tags = {} }
+--- @field hl string                 Highlight group name
+
+--- Build a row_hl callback from config rules or a user function.
+--- @return fun(record: table, row_idx: integer): string|nil
+local function build_row_hl()
+  local cfg = require("vault.config").options.process or {}
+  local rules = cfg.row_hl
+  if not rules then return function() return nil end end
+
+  -- User provided a raw function — use directly
+  if type(rules) == "function" then
+    ---@diagnostic disable-next-line: return-type-mismatch
+    return rules
+  end
+
+  -- Rule-based matching: first match wins
+  --- @param record table
+  --- @return string|nil
+  return function(record, _)
+    for _, rule in ipairs(rules) do
+      local matched = true
+      for field, expected in pairs(rule.match) do
+        local val = record[field]
+        if type(expected) == "table" and next(expected) == nil then
+          -- Empty table means "field is nil or empty list"
+          if val ~= nil and val ~= "" then
+            if type(val) == "table" then
+              if #val > 0 then matched = false; break end
+            else
+              matched = false; break
+            end
+          end
+        elseif val ~= expected then
+          matched = false; break
+        end
+      end
+      if matched then return rule.hl end
+    end
+    return nil
+  end
+end
+
 -- ─── Per-buffer state ─────────────────────────────────────────────────────────
 
 ---@class vault.GridEditorState
@@ -1022,6 +1079,10 @@ function M.open(opts)
     sort_keys = { initial_sort }
   end
 
+  -- Row highlight groups + callback
+  ensure_row_hl_groups()
+  local row_hl_fn = build_row_hl()
+
   -- Create Grid
   local Grid = get_Grid()
   local grid = Grid.new({
@@ -1042,6 +1103,7 @@ function M.open(opts)
     end,
     classify = make_classify(st),
     sort_keys = sort_keys,
+    row_hl = row_hl_fn,
     hl = {
       header = "VaultProcessHeader",
       separator = "VaultProcessSep",
