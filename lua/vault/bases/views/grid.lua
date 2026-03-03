@@ -1253,6 +1253,29 @@ function M.open(opts)
     end)
   end, vim.tbl_extend("force", kopts, { desc = "Vault: batch add tag to selection" }))
 
+  -- Help legend
+  require("vimtable.help").setup_keymap(bufnr, {
+    { group = "Navigation",    lhs = "h / l",       desc = "Column left / right" },
+    { lhs = "j / k",          desc = "Row up / down" },
+    { lhs = "g> / g<",        desc = "Resize column wider / narrower" },
+    { lhs = "g} / g{",        desc = "Move column right / left" },
+    { group = "Saving",        lhs = ":w / <C-s>",  desc = "Save all changes" },
+    { lhs = "<C-s> (visual)",  desc = "Save selected rows only" },
+    { group = "Undo",          lhs = "u / gu",      desc = "Undo (vim / plugin-level)" },
+    { group = "Sort",          lhs = "gs",           desc = "Cycle sort on column" },
+    { lhs = "gS",              desc = "Add secondary sort key" },
+    { group = "Filter",        lhs = "gf",           desc = "Open filter picker" },
+    { lhs = "gF",              desc = "Clear all filters" },
+    { group = "Merge",         lhs = "J",            desc = "Merge next note into current" },
+    { lhs = "gJ",              desc = "Pick note to merge (Telescope)" },
+    { group = "Batch ops",     lhs = "g= (visual)", desc = "Set status on selection" },
+    { lhs = "gt (visual)",     desc = "Add tag to selection" },
+    { group = "Reload",        lhs = "gR",           desc = "Reload buffer" },
+    { group = "Preview",       lhs = "gp",           desc = "Toggle note preview on hover" },
+    { group = "Detail",        lhs = "gd",           desc = "Open note detail form" },
+    { group = "Help",          lhs = "g?",           desc = "Toggle this help" },
+  })
+
   local sort_desc = initial_sort
     and string.format(", sorted by %s %s", initial_sort.col, initial_sort.dir)
     or ""

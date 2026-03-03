@@ -938,6 +938,21 @@ function M.open(opts)
       board:clear_pipeline()
       log.info("Pipeline cleared")
     end, vim.tbl_extend("force", kopts, { desc = "Vault Kanban: clear all filters" }))
+
+    -- Help legend
+    require("vimtable.help").setup_keymap(col.bufnr, {
+      { group = "Navigation",  lhs = "h / l",       desc = "Previous / next column" },
+      { lhs = "j / k",        desc = "Card up / down" },
+      { group = "Move card",   lhs = "<C-h> / <C-l>", desc = "Move card left / right" },
+      { group = "Assign",      lhs = "ga",           desc = "Assign card to group" },
+      { group = "Add / Delete", lhs = "o",           desc = "New card" },
+      { lhs = "dd",           desc = "Delete card" },
+      { group = "Filter",      lhs = "gf",           desc = "Open filter picker" },
+      { lhs = "gF",           desc = "Clear all filters" },
+      { group = "Saving",      lhs = "<C-s> / :w",  desc = "Save changes" },
+      { group = "Help",        lhs = "g?",           desc = "Toggle this help" },
+      { lhs = "q / <Esc>",    desc = "Close board" },
+    })
   end
 
   log.info(
