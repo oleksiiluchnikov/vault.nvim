@@ -36,6 +36,7 @@ end
 ---@field note_mtimes table<string, integer>  slug → mtime at snapshot time
 ---@field base? vault.Base
 ---@field date_field string          Frontmatter key used for date placement
+---@field end_date_field? string     Frontmatter key for range end date
 ---@field primary_field string       Primary display field (title)
 ---@field display_fields string[]    All fields used
 ---@field filter_desc string
@@ -52,15 +53,17 @@ local cal_states = {}
 ---@param date_field string
 ---@param primary_field string
 ---@param base? vault.Base
+---@param end_date_field? string
 ---@return table[]  flat records
 ---@return table<string, string>  slug → path map
 ---@return table<string, integer>  slug → mtime map
-local function flatten_notes(notes_map, date_field, primary_field, base)
+local function flatten_notes(notes_map, date_field, primary_field, base, end_date_field)
     local records = {}
     local paths = {}
     local mtimes = {}
 
     local all_fields = { date_field, primary_field }
+    if end_date_field then table.insert(all_fields, end_date_field) end
     local skipped = 0
 
     for slug, note in pairs(notes_map) do
@@ -108,6 +111,25 @@ local function flatten_notes(notes_map, date_field, primary_field, base)
                     flat[date_field] = os.date("%Y-%m-%d", v.epoch)
                 else
                     flat[date_field] = nil
+                end
+            end
+
+            -- End date field (for ranges)
+            if end_date_field then
+                local ev = fm[end_date_field]
+                if ev == vim.NIL or type(ev) == "userdata" then ev = nil end
+                if type(ev) == "string" then
+                    local ey, em, ed = ev:match("^(%d%d%d%d)-(%d%d)-(%d%d)")
+                    if ey then
+                        flat[end_date_field] = string.format("%s-%s-%s", ey, em, ed)
+                    else
+                        ey, em, ed = ev:match("^(%d%d%d%d)(%d%d)(%d%d)")
+                        if ey then
+                            flat[end_date_field] = string.format("%s-%s-%s", ey, em, ed)
+                        end
+                    end
+                elseif type(ev) == "table" and ev._type == "date" then
+                    flat[end_date_field] = os.date("%Y-%m-%d", ev.epoch)
                 end
             end
 
@@ -254,7 +276,7 @@ function M.reload(bufnr)
     end
 
     local records, note_paths, note_mtimes = flatten_notes(
-        notes_map, st.date_field, st.primary_field, st.base)
+        notes_map, st.date_field, st.primary_field, st.base, st.end_date_field)
     st.note_paths = note_paths
     st.note_mtimes = note_mtimes
     st.notes_map = notes_map
@@ -304,9 +326,14 @@ function M.open(opts)
         or (base_view and base_view.primary_field)
         or cfg.primary_field
         or "title"
+    local end_date_field = opts.end_date_field
+        or (base_view and base_view.end_date_field)
+        or cfg.end_date_field
     local display_fields = cfg.display_fields
     local first_day = cfg.first_day or 1
     local max_cards = cfg.max_cards_per_cell or 3
+    local hour_start = cfg.hour_start or 8
+    local hour_end = cfg.hour_end or 18
     local empty_cell_override = cfg.empty_cell
     local keymap_overrides = cfg.keymaps or {}
 
@@ -344,7 +371,7 @@ function M.open(opts)
 
     -- Flatten notes to records
     local records, note_paths, note_mtimes = flatten_notes(
-        notes_map, date_field, primary_field, base)
+        notes_map, date_field, primary_field, base, end_date_field)
 
     if #records == 0 then
         log.info("No records after flattening")
@@ -362,6 +389,7 @@ function M.open(opts)
         note_mtimes = note_mtimes,
         base = base,
         date_field = date_field,
+        end_date_field = end_date_field,
         primary_field = primary_field,
         display_fields = { primary_field },
         filter_desc = filter_desc,
@@ -384,11 +412,14 @@ function M.open(opts)
         records = records,
         id_field = "slug",
         date_field = date_field,
+        end_date_field = end_date_field,
         primary_field = primary_field,
         display_fields = display_fields,
         empty_cell = empty_cell_override or shared.get_empty_cell(),
         first_day = first_day,
         max_cards_per_cell = max_cards,
+        hour_start = hour_start,
+        hour_end = hour_end,
         keymaps = keymap_overrides,
         buf_name = buf_name,
         filetype = "vault_calendar",
