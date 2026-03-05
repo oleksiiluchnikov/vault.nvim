@@ -176,6 +176,14 @@ local DEFAULT_OPTIONS = {
             min_column_width = 25,
         },
     },
+    calendar = {
+        date_field = "due",                              -- Frontmatter key for date placement (or "file.ctime"/"file.mtime")
+        primary_field = "title",                         -- Field displayed on calendar cards
+        first_day = 1,                                   -- First day of week: 0=Sun, 1=Mon
+        max_cards_per_cell = 3,                          -- Max records shown per day cell before "+N more"
+        empty_cell = nil,                                --- @type string|nil Override empty cell symbol (nil = use bases.empty_cell)
+        keymaps = {},                                    --- @type table<string, string|false> Keymap overrides (set key to false to disable)
+    },
     notify = {
         on_write = true,
     },
