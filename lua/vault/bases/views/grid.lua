@@ -1113,6 +1113,18 @@ function M.open(opts)
       M._apply_undo(st.grid:bufnr(), payload)
       done(nil)
     end,
+    on_refresh = function(g)
+      M.reload(g:bufnr())
+    end,
+    on_filter_request = function(g)
+      local s = buf_states[g:bufnr()]
+      if not s then return end
+      local picker = require("vault.bases.views.filter_picker")
+      picker.open(g, s.visible_columns)
+    end,
+    keymaps = {
+      refresh = "gR",  -- vault uses gR instead of default <C-r>
+    },
     classify = make_classify(st),
     sort_keys = sort_keys,
     row_hl = row_hl_fn,
@@ -1161,16 +1173,8 @@ function M.open(opts)
     end,
   })
 
-  -- Buffer-local keymaps
+  -- Buffer-local keymaps (vault-specific only; gs, gS, gR, gf, gF, g>, g<, o, <C-s> handled by Grid)
   local kopts = { buffer = bufnr, silent = true }
-  vim.keymap.set("n", "gs", function() M.sort_by_cursor(bufnr) end,
-    vim.tbl_extend("force", kopts, { desc = "Vault: cycle sort on column" }))
-  vim.keymap.set("n", "gS", function()
-    local col = grid:col_under_cursor()
-    if col then M.cycle_sort(bufnr, col.name, true) end
-  end, vim.tbl_extend("force", kopts, { desc = "Vault: add secondary sort" }))
-  vim.keymap.set("n", "gR", function() M.reload(bufnr) end,
-    vim.tbl_extend("force", kopts, { desc = "Vault: reload buffer" }))
   -- Note: `gu` keymap is handled by vimtable Grid via on_undo callback
   vim.keymap.set("n", "u", function()
     local tree = vim.fn.undotree()
@@ -1275,22 +1279,7 @@ function M.open(opts)
     end)
     if not ok_tele then log.warn("gJ requires telescope.nvim") end
   end, vim.tbl_extend("force", kopts, { desc = "Vault: pick note to merge" }))
-  vim.keymap.set("n", "gf", function()
-    local st = buf_states[bufnr]
-    if not st then return end
-    local picker = require("vault.bases.views.filter_picker")
-    picker.open(st.grid, st.visible_columns)
-  end, vim.tbl_extend("force", kopts, { desc = "Vault: open filter picker" }))
-  vim.keymap.set("n", "gF", function()
-    local st = buf_states[bufnr]
-    if not st or not st.grid then return end
-    st.grid:clear_pipeline()
-    log.info("Pipeline cleared")
-  end, vim.tbl_extend("force", kopts, { desc = "Vault: clear all filters" }))
-  vim.keymap.set("n", "g>", function() M.resize_cursor_column(bufnr, 5) end,
-    vim.tbl_extend("force", kopts, { desc = "Vault: widen column" }))
-  vim.keymap.set("n", "g<", function() M.resize_cursor_column(bufnr, -5) end,
-    vim.tbl_extend("force", kopts, { desc = "Vault: narrow column" }))
+  -- gf, gF, g>, g< handled by Grid._setup_shared_keymaps
   vim.keymap.set("n", "g}", function() M.move_cursor_column(bufnr, 1) end,
     vim.tbl_extend("force", kopts, { desc = "Vault: move column right" }))
   vim.keymap.set("n", "g{", function() M.move_cursor_column(bufnr, -1) end,
