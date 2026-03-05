@@ -178,10 +178,13 @@ local DEFAULT_OPTIONS = {
     },
     calendar = {
         date_field = "due",                              -- Frontmatter key for date placement (or "file.ctime"/"file.mtime")
+        end_date_field = nil,                            --- @type string|nil  Frontmatter key for range end date (enables date ranges)
         primary_field = "title",                         -- Field displayed on calendar cards
         display_fields = nil,                            --- @type string[]|nil Multi-line card fields (nil = primary_field only)
         first_day = 1,                                   -- First day of week: 0=Sun, 1=Mon
         max_cards_per_cell = 3,                          -- Max records shown per day cell before "+N more"
+        hour_start = 8,                                  -- First hour in timetable view (week mode)
+        hour_end = 18,                                   -- Last hour in timetable view (week mode)
         empty_cell = nil,                                --- @type string|nil Override empty cell symbol (nil = use bases.empty_cell)
         keymaps = {},                                    --- @type table<string, string|false> Keymap overrides (set key to false to disable)
     },
