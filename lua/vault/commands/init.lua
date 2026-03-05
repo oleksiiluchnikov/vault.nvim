@@ -881,6 +881,97 @@ local function build_subcommands()
             end,
         },
 
+        -- :Vault calendar [filter] — Calendar view placing notes by date field
+        -- Supports: base <name>, date=<field>, primary=<field>,
+        --           tag <name>, dir <path>
+        calendar = {
+            run = function(args)
+                local cal_view = require("vault.bases.views.calendar")
+                local filter = args[1]
+                local notes, desc
+
+                -- Parse key=value args
+                local date_field, primary_field
+                local remaining = {}
+                for _, arg in ipairs(args) do
+                    local k, v = arg:match("^(%w+)=(.+)$")
+                    if k == "date" then
+                        date_field = v
+                    elseif k == "primary" then
+                        primary_field = v
+                    else
+                        table.insert(remaining, arg)
+                    end
+                end
+                filter = remaining[1]
+
+                if not filter or filter == "" then
+                    notes = require("vault.notes")()
+                    desc = "all notes"
+                elseif filter == "base" then
+                    if remaining[2] then
+                        local base_name = table.concat(vim.list_slice(remaining, 2), " ")
+                        local Bases = require("vault.bases")
+                        local bases = Bases()
+                        local base = bases:get(base_name)
+                        if not base then
+                            log.error("Base not found: %s", base_name)
+                            return
+                        end
+                        cal_view.open({
+                            base = base,
+                            date_field = date_field,
+                            primary_field = primary_field,
+                        })
+                    else
+                        local ok, picker = pcall(require, "telescope._extensions.vault.pickers.bases")
+                        if ok then
+                            picker():find()
+                        else
+                            log.error("Telescope bases picker not available: %s", tostring(picker))
+                        end
+                    end
+                    return
+                elseif filter == "tag" and remaining[2] then
+                    notes = require("vault.notes")():filter({
+                        search_term = "tags",
+                        include = { remaining[2] },
+                        exclude = {},
+                        match_opt = "exact",
+                        mode = "all",
+                    })
+                    desc = "tag:" .. remaining[2]
+                elseif filter == "dir" and remaining[2] then
+                    notes = require("vault.notes")():filter("relpath", remaining[2], "startswith", false)
+                    desc = "dir:" .. remaining[2]
+                else
+                    notes = require("vault.notes")():filter("slug", filter, "fuzzy")
+                    desc = "filter:" .. filter
+                end
+
+                cal_view.open({
+                    notes = notes,
+                    filter_desc = desc,
+                    date_field = date_field,
+                    primary_field = primary_field,
+                })
+            end,
+            complete = function(prefix, line)
+                if line and line:match("calendar%s+base%s+") then
+                    local ok, Bases = pcall(require, "vault.bases")
+                    if ok then
+                        local bases = Bases()
+                        local names = bases:names()
+                        local sub = line:match("calendar%s+base%s+(.*)") or ""
+                        return vim.tbl_filter(function(s) return s:find(sub, 1, true) == 1 end, names)
+                    end
+                    return {}
+                end
+                local subs = { "base", "tag", "dir", "date=", "primary=" }
+                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+            end,
+        },
+
         -- :Vault triage — open process buffer pre-filtered to highest-value items
         -- Shows untagged notes merged with orphans, sorted by mtime descending.
         -- One command that says "start here."
