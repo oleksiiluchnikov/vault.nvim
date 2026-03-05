@@ -304,6 +304,7 @@ function M.open(opts)
         or (base_view and base_view.primary_field)
         or cfg.primary_field
         or "title"
+    local display_fields = cfg.display_fields
     local first_day = cfg.first_day or 1
     local max_cards = cfg.max_cards_per_cell or 3
     local empty_cell_override = cfg.empty_cell
@@ -384,6 +385,7 @@ function M.open(opts)
         id_field = "slug",
         date_field = date_field,
         primary_field = primary_field,
+        display_fields = display_fields,
         empty_cell = empty_cell_override or shared.get_empty_cell(),
         first_day = first_day,
         max_cards_per_cell = max_cards,
