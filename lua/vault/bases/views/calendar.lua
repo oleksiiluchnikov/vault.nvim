@@ -20,10 +20,13 @@ local function get_Calendar()
     return require("vimtable.views.calendar")
 end
 
--- ─── Constants ────────────────────────────────────────────────────────────────
+-- ─── Config ───────────────────────────────────────────────────────────────────
 
-local DEFAULT_DATE_FIELD = "due"
-local DEFAULT_PRIMARY_FIELD = "title"
+---@return table
+local function cal_cfg()
+    local ok, cfg = pcall(require, "vault.config")
+    return ok and cfg.options and cfg.options.calendar or {}
+end
 
 -- ─── Per-calendar state ───────────────────────────────────────────────────────
 
@@ -290,14 +293,21 @@ function M.open(opts)
     local base = opts.base
     local filter_desc = opts.filter_desc or "all notes"
 
-    -- Derive settings from base calendar view if available
+    -- Merge: command opts > base view > user config > defaults
+    local cfg = cal_cfg()
     local base_view = base and find_calendar_view(base) or nil
     local date_field = opts.date_field
         or (base_view and base_view.date_field)
-        or DEFAULT_DATE_FIELD
+        or cfg.date_field
+        or "due"
     local primary_field = opts.primary_field
         or (base_view and base_view.primary_field)
-        or DEFAULT_PRIMARY_FIELD
+        or cfg.primary_field
+        or "title"
+    local first_day = cfg.first_day or 1
+    local max_cards = cfg.max_cards_per_cell or 3
+    local empty_cell_override = cfg.empty_cell
+    local keymap_overrides = cfg.keymaps or {}
 
     if base then
         filter_desc = opts.filter_desc or ("base:" .. (base.data.name or "unnamed"))
@@ -374,7 +384,10 @@ function M.open(opts)
         id_field = "slug",
         date_field = date_field,
         primary_field = primary_field,
-        empty_cell = shared.get_empty_cell(),
+        empty_cell = empty_cell_override or shared.get_empty_cell(),
+        first_day = first_day,
+        max_cards_per_cell = max_cards,
+        keymaps = keymap_overrides,
         buf_name = buf_name,
         filetype = "vault_calendar",
         on_save = make_on_save(st),
