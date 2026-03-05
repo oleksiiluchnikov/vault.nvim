@@ -358,6 +358,14 @@ function M.open(opts)
         saving = false,
     }
 
+    -- Wipe orphan buffer with same name (from previous crash or stale state)
+    local buf_name = "vault://calendar/" .. filter_desc:gsub("%s+", "-")
+    local existing_bufnr = vim.fn.bufnr(buf_name)
+    if existing_bufnr ~= -1 and vim.api.nvim_buf_is_valid(existing_bufnr) then
+        pcall(vim.api.nvim_buf_delete, existing_bufnr, { force = true })
+        cal_states[existing_bufnr] = nil
+    end
+
     -- Create Calendar
     local Calendar = get_Calendar()
     local cal = Calendar.new({
@@ -367,7 +375,7 @@ function M.open(opts)
         date_field = date_field,
         primary_field = primary_field,
         empty_cell = shared.get_empty_cell(),
-        buf_name = "vault://calendar/" .. filter_desc:gsub("%s+", "-"),
+        buf_name = buf_name,
         filetype = "vault_calendar",
         on_save = make_on_save(st),
         on_date_move = make_on_date_move(st),
