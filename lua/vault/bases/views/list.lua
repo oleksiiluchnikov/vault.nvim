@@ -200,6 +200,14 @@ function M.open(opts)
         on_toggle = function(rec, new_status, done)
             on_toggle(st, rec, new_status, done)
         end,
+        on_refresh = function(l)
+            M.reload(l:bufnr())
+        end,
+        on_filter_request = function(l)
+            local s = buf_states[l:bufnr()]
+            if not s then return end
+            require("vault.bases.views.filter_picker").open(l, s.visible_columns)
+        end,
         hl = {
             group_header = "VaultProcessHeader",
             status_done = "Comment",
@@ -214,20 +222,7 @@ function M.open(opts)
     vim.b[bufnr].formatter_skip_buf = true
     vim.b[bufnr].autoformat = false
 
-    local kopts = { buffer = bufnr, silent = true }
-    vim.keymap.set("n", "x", function() list:toggle_status() end,
-        vim.tbl_extend("force", kopts, { desc = "Vault list: toggle status" }))
-    vim.keymap.set("n", "<C-s>", function() vim.cmd("write") end,
-        vim.tbl_extend("force", kopts, { desc = "Vault list: save" }))
-    vim.keymap.set("n", "<C-r>", function() M.reload(bufnr) end,
-        vim.tbl_extend("force", kopts, { desc = "Vault list: reload" }))
-    vim.keymap.set("n", "gf", function()
-        require("vault.bases.views.filter_picker").open(list, st.visible_columns)
-    end, vim.tbl_extend("force", kopts, { desc = "Vault list: open filter picker" }))
-    vim.keymap.set("n", "gF", function()
-        list:clear_pipeline()
-        log.info("Pipeline cleared")
-    end, vim.tbl_extend("force", kopts, { desc = "Vault list: clear filters" }))
+    -- x, <C-s>, <C-r>, gs, gf, gF handled by List._setup_shared_keymaps
 
     -- Help legend
     require("vimtable.help").setup_keymap(bufnr, {

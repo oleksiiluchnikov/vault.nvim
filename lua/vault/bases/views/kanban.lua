@@ -839,6 +839,12 @@ function M.open(opts)
     on_save = make_on_save(st),
     on_move = make_on_move(st),
     on_refresh = make_on_refresh(st),
+    on_filter_request = function(b)
+      local s = board_states[board_id]
+      if not s then return end
+      local picker = require("vault.bases.views.filter_picker")
+      picker.open(b, s.display_fields)
+    end,
     on_close = function()
       board_states[board_id] = nil
       log.info("Kanban board closed (%s)", filter_desc)
@@ -926,19 +932,8 @@ function M.open(opts)
   -- Attach (opens floating windows)
   board:attach()
 
-  -- Add filter keymaps to each column buffer
+  -- gf/gF handled by Board._setup_column_keymaps via on_filter_request
   for _, col in ipairs(board:columns()) do
-    local kopts = { buffer = col.bufnr, silent = true, nowait = true }
-    vim.keymap.set("n", "gf", function()
-      local picker = require("vault.bases.views.filter_picker")
-      picker.open(board, st.display_fields)
-    end, vim.tbl_extend("force", kopts, { desc = "Vault Kanban: open filter picker" }))
-
-    vim.keymap.set("n", "gF", function()
-      board:clear_pipeline()
-      log.info("Pipeline cleared")
-    end, vim.tbl_extend("force", kopts, { desc = "Vault Kanban: clear all filters" }))
-
     -- Help legend
     require("vimtable.help").setup_keymap(col.bufnr, {
       { group = "Navigation",  lhs = "h / l",       desc = "Previous / next column" },
