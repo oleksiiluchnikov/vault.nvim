@@ -126,6 +126,7 @@ local function resolve_group_field(notes_map, group_field, explicit_values)
       if type(value) == "table" then value = value[1] end
       if value == nil or value == "" then value = "" end
       value = tostring(value)
+      value = value:gsub("^%[%[(.-)%]%]$", "%1")
 
     elseif info.mode == "tag_prefix" then
       local tags = note.data and note.data.tags or {}
@@ -350,7 +351,38 @@ local function apply_group_change(st, slug, field_key, new_value)
   end
 
   if st.group_mode == "frontmatter" then
-    shared.set_frontmatter_field(path, field_key, new_value)
+    local value_to_store = new_value
+    if type(new_value) == "string" and new_value ~= "" then
+      local is_link = new_value:match("^%[%[.-%]%]$") ~= nil
+      local should_link = false
+
+      -- Keep wikilink style when current field is stored as wikilink.
+      local ok, lines = pcall(vim.fn.readfile, path, "", 80)
+      if ok and lines and lines[1] and lines[1]:match("^%-%-%-") then
+        for i = 2, #lines do
+          local line = lines[i]
+          if line:match("^%-%-%-") then break end
+          local key, raw = line:match("^([%w_%-]+):%s*(.*)")
+          if key == field_key and type(raw) == "string" then
+            if raw:match("^%[%[.-%]%]$") or raw:match('^"%[%[.-%]%]"$') then
+              should_link = true
+            end
+            break
+          end
+        end
+      end
+
+      -- Heuristic: grouped Status values are reference notes in this vault.
+      if new_value:match("^Status%s*%-%s*") then
+        should_link = true
+      end
+
+      if should_link and not is_link then
+        value_to_store = string.format("[[%s]]", new_value)
+      end
+    end
+
+    shared.set_frontmatter_field(path, field_key, value_to_store)
 
   elseif st.group_mode == "tag_prefix" then
     -- Remove old tag with prefix, add new tag with prefix
@@ -438,6 +470,39 @@ local function make_on_save(st)
     local function finish_save()
       local results = {}
 
+      local function is_tasks_board()
+        if st.group_mode ~= "frontmatter" or st.group_field ~= "status" then
+          return false
+        end
+        for _, p in pairs(st.note_paths or {}) do
+          if type(p) == "string" and p:match("/Tasks/") then
+            return true
+          end
+        end
+        return false
+      end
+
+      local function derive_create_title(cr)
+        local candidates = {}
+        candidates[#candidates + 1] = cr.fields and cr.fields.title or nil
+        if st.display_fields then
+          for _, f in ipairs(st.display_fields) do
+            candidates[#candidates + 1] = cr.fields and cr.fields[f] or nil
+          end
+        end
+        for _, v in ipairs(candidates) do
+          if type(v) == "string" then
+            local t = vim.trim(v)
+            if t ~= "" and not t:match("^%w+:%s*$") then
+              return t
+            end
+          end
+        end
+        return "untitled"
+      end
+
+      local tasks_board = is_tasks_board()
+
       -- Process moves (group field changes)
       for _, mv in ipairs(mutations.moves) do
         apply_group_change(st, mv.id, st.group_field, mv.to)
@@ -478,7 +543,26 @@ local function make_on_save(st)
       local n_cr = 0
       for _, cr in ipairs(mutations.creates) do
         local config = require("vault.config")
-        local title = cr.fields.title or cr.fields[st.display_fields[1]] or "untitled"
+        local title = derive_create_title(cr)
+
+        if tasks_board then
+          local task_notes = require("vault.tasks.notes")
+          local gv = cr.fields and cr.fields[st.group_field] or nil
+          local status = "[[Status - Backlog]]"
+          if type(gv) == "string" and gv ~= "" then
+            gv = gv:gsub("^%[%[(.-)%]%]$", "%1")
+            status = string.format("[[%s]]", gv)
+          end
+
+          local path = task_notes.create(title, { status = status })
+          if path and vim.fn.filereadable(path) == 1 then
+            local slug = require("vault.utils").path_to_slug(path)
+            st.note_paths[slug] = path
+            n_cr = n_cr + 1
+          end
+          goto cr_continue
+        end
+
         local slug_source = title:lower():gsub("%s+", "-"):gsub("[%c%[%]#|^]", "")
         if slug_source == "" then slug_source = "untitled" end
 

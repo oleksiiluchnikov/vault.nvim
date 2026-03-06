@@ -28,6 +28,68 @@ local function cal_cfg()
     return ok and cfg.options and cfg.options.calendar or {}
 end
 
+---@param value any
+---@return string|nil
+local function extract_iso_date(value)
+    if value == nil or value == vim.NIL then return nil end
+    if type(value) == "table" and value._type == "date" and value.epoch then
+        return os.date("%Y-%m-%d", value.epoch)
+    end
+    if type(value) == "number" then
+        return os.date("%Y-%m-%d", value)
+    end
+    if type(value) ~= "string" then return nil end
+
+    local v = vim.trim(value)
+    if v == "" then return nil end
+    v = v:gsub("^%[%[(.-)%]%]$", "%1")
+
+    local y, m, d = v:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)")
+    if y then
+        return string.format("%s-%s-%s", y, m, d)
+    end
+
+    y, m, d = v:match("^(%d%d%d%d)(%d%d)(%d%d)")
+    if y then
+        return string.format("%s-%s-%s", y, m, d)
+    end
+
+    return nil
+end
+
+---@param date_field string
+---@return boolean
+local function should_link_date_field(date_field)
+    local cfg = cal_cfg()
+    local fields = cfg.link_date_fields or { "due" }
+    for _, field in ipairs(fields) do
+        if field == date_field then return true end
+    end
+    return false
+end
+
+---@param iso_date string
+---@return string
+local function daily_wikilink(iso_date)
+    local y, m, d = iso_date:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    if not y then return iso_date end
+    local ts = os.time({ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 })
+    local weekday = os.date("%A", ts)
+    return string.format("[[%s %s]]", iso_date, weekday)
+end
+
+---@param date_field string
+---@param value string|nil
+---@return string|nil
+local function format_calendar_date_for_field(date_field, value)
+    if value == nil then return nil end
+    if date_field:match("^file%.") then return value end
+    if should_link_date_field(date_field) then
+        return daily_wikilink(value)
+    end
+    return value
+end
+
 -- ─── Per-calendar state ───────────────────────────────────────────────────────
 
 ---@class vault.CalendarState
@@ -90,47 +152,21 @@ local function flatten_notes(notes_map, date_field, primary_field, base, end_dat
             elseif date_field == "file.mtime" then
                 local t = note.data and note.data.mtime
                 flat[date_field] = t and t > 0 and os.date("%Y-%m-%d", t) or nil
+            elseif date_field == "file.name" then
+                local basename = (note.data and (note.data.basename or note.data.stem))
+                    or vim.fn.fnamemodify(path, ":t:r")
+                flat[date_field] = extract_iso_date(basename)
             else
                 local v = fm[date_field]
-                if v == vim.NIL or type(v) == "userdata" then v = nil end
-                -- Normalize date format: extract YYYY-MM-DD from various formats
-                if type(v) == "string" then
-                    local y, m, d = v:match("^(%d%d%d%d)-(%d%d)-(%d%d)")
-                    if y then
-                        flat[date_field] = string.format("%s-%s-%s", y, m, d)
-                    else
-                        -- Try YYYYMMDD format
-                        y, m, d = v:match("^(%d%d%d%d)(%d%d)(%d%d)")
-                        if y then
-                            flat[date_field] = string.format("%s-%s-%s", y, m, d)
-                        else
-                            flat[date_field] = nil
-                        end
-                    end
-                elseif type(v) == "table" and v._type == "date" then
-                    flat[date_field] = os.date("%Y-%m-%d", v.epoch)
-                else
-                    flat[date_field] = nil
-                end
+                if type(v) == "userdata" then v = nil end
+                flat[date_field] = extract_iso_date(v)
             end
 
             -- End date field (for ranges)
             if end_date_field then
                 local ev = fm[end_date_field]
-                if ev == vim.NIL or type(ev) == "userdata" then ev = nil end
-                if type(ev) == "string" then
-                    local ey, em, ed = ev:match("^(%d%d%d%d)-(%d%d)-(%d%d)")
-                    if ey then
-                        flat[end_date_field] = string.format("%s-%s-%s", ey, em, ed)
-                    else
-                        ey, em, ed = ev:match("^(%d%d%d%d)(%d%d)(%d%d)")
-                        if ey then
-                            flat[end_date_field] = string.format("%s-%s-%s", ey, em, ed)
-                        end
-                    end
-                elseif type(ev) == "table" and ev._type == "date" then
-                    flat[end_date_field] = os.date("%Y-%m-%d", ev.epoch)
-                end
+                if type(ev) == "userdata" then ev = nil end
+                flat[end_date_field] = extract_iso_date(ev)
             end
 
             paths[slug] = path
@@ -223,7 +259,7 @@ local function make_on_save(st)
 end
 
 ---@param st vault.CalendarState
----@return fun(record: table, old_date: string, new_date: string, done: fun(err: string|nil))
+---@return fun(record: table, old_date: string|nil, new_date: string|nil, done: fun(err: string|nil))
 local function make_on_date_move(st)
     return function(record, old_date, new_date, done)
         local slug = record.slug
@@ -245,8 +281,18 @@ local function make_on_date_move(st)
             return
         end
 
-        shared.set_frontmatter_field(safe_path, st.date_field, new_date)
-        log.info("Calendar date move: %s %s → %s", slug, old_date, new_date)
+        -- new_date=nil means "unassign" — remove the frontmatter field
+        -- new_date=string means "assign" or "move" — set the field
+        if new_date then
+            shared.set_frontmatter_field(
+                safe_path,
+                st.date_field,
+                format_calendar_date_for_field(st.date_field, new_date)
+            )
+        else
+            shared.set_frontmatter_field(safe_path, st.date_field, nil)
+        end
+        log.info("Calendar date move: %s %s → %s", slug, tostring(old_date), tostring(new_date))
         done(nil)
     end
 end
@@ -453,7 +499,8 @@ function M.open(opts)
             local fm = { "---" }
             table.insert(fm, "title: " .. shared.yaml_quote(slug))
             if date_str and not date_field:match("^file%.") then
-                table.insert(fm, date_field .. ": " .. date_str)
+                local stored = format_calendar_date_for_field(date_field, date_str)
+                table.insert(fm, date_field .. ": " .. shared.yaml_quote(stored))
             end
             table.insert(fm, "---")
             table.insert(fm, "")
@@ -512,5 +559,8 @@ end
 
 M._cal_states = cal_states
 M._flatten_notes = flatten_notes
+M._extract_iso_date = extract_iso_date
+M._daily_wikilink = daily_wikilink
+M._format_calendar_date_for_field = format_calendar_date_for_field
 
 return M

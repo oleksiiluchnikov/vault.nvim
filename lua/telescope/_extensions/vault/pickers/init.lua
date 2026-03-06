@@ -1,6 +1,9 @@
 -- TODO: Add support for custom pickers from config
+local cfg = require("vault.config").options or {}
+local telescope_opts = (cfg.telescope and cfg.telescope.pickers) or {}
+
 return setmetatable(
-    vim.tbl_deep_extend("force", require("vault.config").options.telescope.pickers or {}, {
+    vim.tbl_deep_extend("force", telescope_opts, {
         orphans = require("telescope._extensions.vault.pickers.orphans"),
         leaves = function(opts)
             return require("telescope._extensions.vault.pickers.notes")(

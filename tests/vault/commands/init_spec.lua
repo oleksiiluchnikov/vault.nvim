@@ -711,6 +711,33 @@ describe("Vault command completions", function()
                 package.loaded["vault.api"] = nil
             end
         end)
+
+        it("includes tasks and actions at top level", function()
+            local result = completions.api(nil, "Vault ", nil)
+            assert.is_table(result)
+            assert.is_true(vim.tbl_contains(result, "tasks"))
+            assert.is_true(vim.tbl_contains(result, "actions"))
+        end)
+
+        it("completes tasks subcommands", function()
+            local result = completions.api(nil, "Vault tasks ", nil)
+            assert.is_table(result)
+            assert.is_true(vim.tbl_contains(result, "new"))
+            assert.is_true(vim.tbl_contains(result, "status"))
+            assert.is_true(vim.tbl_contains(result, "pick-next"))
+            assert.is_true(vim.tbl_contains(result, "promote"))
+            assert.is_true(vim.tbl_contains(result, "list"))
+            assert.is_true(vim.tbl_contains(result, "kanban"))
+            assert.is_true(vim.tbl_contains(result, "backlog"))
+            assert.is_true(vim.tbl_contains(result, "doctor"))
+        end)
+
+        it("completes tasks status values", function()
+            local result = completions.api(nil, "Vault tasks status ", nil)
+            assert.is_table(result)
+            assert.is_true(#result >= 1)
+            assert.is_true(vim.tbl_contains(result, "Status - Backlog"))
+        end)
     end)
 
     describe("note_slugs()", function()

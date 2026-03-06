@@ -178,6 +178,7 @@ local DEFAULT_OPTIONS = {
     },
     calendar = {
         date_field = "due",                              -- Frontmatter key for date placement (or "file.ctime"/"file.mtime")
+        link_date_fields = { "due" },                    -- Fields stored as Daily note wikilinks ([[YYYY-MM-DD Weekday]])
         end_date_field = nil,                            --- @type string|nil  Frontmatter key for range end date (enables date ranges)
         primary_field = "title",                         -- Field displayed on calendar cards
         display_fields = nil,                            --- @type string[]|nil Multi-line card fields (nil = primary_field only)
@@ -187,6 +188,26 @@ local DEFAULT_OPTIONS = {
         hour_end = 18,                                   -- Last hour in timetable view (week mode)
         empty_cell = nil,                                --- @type string|nil Override empty cell symbol (nil = use bases.empty_cell)
         keymaps = {},                                    --- @type table<string, string|false> Keymap overrides (set key to false to disable)
+    },
+    task_notes = {
+        dir = "Tasks",
+        status_field = "status",
+        priority_field = "priority",
+        blocked_by_field = "blocked_by",
+        default_status = "[[Status - Backlog]]",
+        default_executor = "[[Executor - Human]]",
+        default_category = "[[Category - Green Task]]",
+        default_priority = "[[Priority - Medium]]",
+        status_order = {
+            "Status - Backlog",
+            "Status - Todo",
+            "Status - In-Progress",
+            "Status - In-Review",
+            "Status - Done",
+            "Status - Failed",
+            "Status - Deprecated",
+            "Status - Archived",
+        },
     },
     notify = {
         on_write = true,
