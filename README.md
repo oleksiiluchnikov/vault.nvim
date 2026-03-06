@@ -71,6 +71,10 @@ All commands live under a single `:Vault` entry point. Running `:Vault` with no 
 | `:Vault tasks promote [text]` | Promote current line (or arg text) into a task note and replace line with a wikilink. |
 | `:Vault tasks kanban` | Open `Tasks Kanban` base in board view. |
 | `:Vault tasks backlog` | Open `Tasks Backlog` base in process/grid view. |
+| `:Vault tasks recur preview` | Show next due date for current recurring task. |
+| `:Vault tasks recur now` | Spawn next recurring task instance for current task immediately. |
+| `:Vault tasks recur sweep` | Scan completed recurring tasks and spawn missing next instances. |
+| `:Vault tasks doctor [--fix]` | Diagnose task frontmatter status issues; optionally auto-fix canonical forms. |
 | `:Vault actions` | Legacy inline-checkbox task picker (`- [ ]` lines). |
 
 Task Kanban column order is task-specific and configured via `task_notes.status_order`:
