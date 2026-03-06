@@ -1,6 +1,21 @@
---- Prototype B — Module 1: Type inference engine
+--- Type inference engine for vault frontmatter.
 --- Infers field types from template default values.
---- THROWAWAY — reference only, will not ship as-is.
+--- Pure Lua — no vim.* dependencies. Testable standalone.
+---
+--- ## Type inference rules
+---
+--- | Template default            | Inferred kind    | Required |
+--- |----------------------------|-----------------|----------|
+--- | `"[[Status - Backlog]]"`   | wikilink        | yes      |
+--- | `""`                       | optional         | no       |
+--- | `"task"` (plain string)    | string           | yes      |
+--- | `20260306` (number)        | number           | yes      |
+--- | `"draft | published"`      | enum             | yes      |
+--- | `[]`                       | array_wikilink   | no       |
+--- | `["[[Tasks]]"]`            | array_wikilink   | no       |
+--- | `["tag1"]`                 | array_string     | no       |
+--- | `"{{title}}"`              | title_template   | no       |
+--- | `"{{date:FORMAT}}"`        | date_template    | no       |
 
 ---@alias vault.typecheck.FieldKind
 ---| "wikilink"        # "[[Prefix - Value]]" → must be wikilink matching prefix
@@ -16,8 +31,8 @@
 
 ---@class vault.typecheck.FieldType
 ---@field kind vault.typecheck.FieldKind
----@field prefix string|nil
----@field values string[]|nil
+---@field prefix string|nil   -- for wikilink: "Status - ", etc.
+---@field values string[]|nil -- for enum: {"draft", "published"}
 ---@field required boolean
 
 ---@class vault.typecheck.Schema
@@ -26,7 +41,16 @@
 
 local M = {}
 
----@param value any
+--- Trim whitespace from both ends of a string.
+--- Local replacement for vim.trim to keep this module pure Lua.
+---@param s string
+---@return string
+local function trim(s)
+    return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+--- Infer the field type from a template default value.
+---@param value any -- raw YAML value from template frontmatter
 ---@return vault.typecheck.FieldType
 function M.infer(value)
     if value == nil then
@@ -41,6 +65,10 @@ function M.infer(value)
         return { kind = "number", required = true }
     end
 
+    if type(value) == "boolean" then
+        return { kind = "string", required = true }
+    end
+
     if type(value) ~= "string" then
         return { kind = "unknown", required = false }
     end
@@ -48,6 +76,7 @@ function M.infer(value)
     return M.infer_string(value)
 end
 
+--- Infer type from an array (table) value.
 ---@param arr any[]
 ---@return vault.typecheck.FieldType
 function M.infer_array(arr)
@@ -61,43 +90,50 @@ function M.infer_array(arr)
     return { kind = "array_string", required = false }
 end
 
+--- Infer type from a string value.
 ---@param s string
 ---@return vault.typecheck.FieldType
 function M.infer_string(s)
-    s = vim.trim(s)
+    s = trim(s)
 
+    -- Empty string → optional field
     if s == "" then
         return { kind = "optional", required = false }
     end
 
+    -- Template variables → skip validation
     if s:match("^{{title}}$") or s:match("^{{title:.*}}$") then
         return { kind = "title_template", required = false }
     end
-
     if s:match("^{{date:.*}}$") then
         return { kind = "date_template", required = false }
     end
 
+    -- Wikilink: "[[Prefix - Value]]"
     if s:match("^%[%[.-%]%]$") then
         local inner = s:match("^%[%[(.-)%]%]$")
-        local prefix = inner:match("^(.-%s+%-%s+)")
+        ---@type string|nil
+        local prefix = inner:match("^(.-%s+%-%s+)") -- e.g. "Status - "
         return { kind = "wikilink", required = true, prefix = prefix }
     end
 
+    -- Enum: "draft | published"
     if s:match("|") then
         ---@type string[]
         local values = {}
         for v in s:gmatch("[^|]+") do
-            table.insert(values, vim.trim(v))
+            table.insert(values, trim(v))
         end
         return { kind = "enum", required = true, values = values }
     end
 
+    -- Plain string → required
     return { kind = "string", required = true }
 end
 
----@param template_path string
----@param read_frontmatter fun(path: string): table<string, any>
+--- Load a schema by reading a template file and inferring types for all fields.
+---@param template_path string -- path to the template .md file
+---@param read_frontmatter fun(path: string): table<string, any> -- injected reader
 ---@return vault.typecheck.Schema
 function M.load_schema(template_path, read_frontmatter)
     local raw = read_frontmatter(template_path)

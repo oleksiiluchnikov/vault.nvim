@@ -189,6 +189,9 @@ local DEFAULT_OPTIONS = {
         empty_cell = nil,                                --- @type string|nil Override empty cell symbol (nil = use bases.empty_cell)
         keymaps = {},                                    --- @type table<string, string|false> Keymap overrides (set key to false to disable)
     },
+    typecheck = {
+        on_save = false, -- BufWritePost diagnostics (off by default, ADHD-friendly)
+    },
     task_notes = {
         dir = "Tasks",
         status_field = "status",
