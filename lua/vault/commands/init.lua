@@ -1097,6 +1097,14 @@ local function build_subcommands()
             end,
         },
 
+        -- :Vault doctor          — vault-wide frontmatter type check
+        -- :Vault doctor --fix    — auto-fix known patterns
+        doctor = {
+            run = function(args)
+                callbacks.vault_doctor(args)
+            end,
+        },
+
         -- :Vault today           — open today's journal
         -- :Vault today append    — append a line
         -- :Vault today dictate   — dictate a line via ask --dictate
@@ -2251,6 +2259,56 @@ function callbacks.tasks_doctor(args)
     if total > preview then
         log.warn("  ... and %d more", total - preview)
     end
+end
+
+function callbacks.vault_doctor(args)
+    local fix = false
+    for _, arg in ipairs(args or {}) do
+        if arg == "fix" or arg == "--fix" then
+            fix = true
+        end
+    end
+
+    local typecheck = require("vault.typecheck")
+    local dr
+    if fix then
+        dr = typecheck.doctor_fix()
+    else
+        dr = typecheck.doctor()
+    end
+
+    local total_errors = #dr.errors
+    local error_file_count = 0
+    for _ in pairs(dr.error_files) do
+        error_file_count = error_file_count + 1
+    end
+
+    if total_errors == 0 then
+        log.info("Vault doctor: %d scanned, no type errors. %d untyped notes.", dr.scanned, #dr.untyped)
+        return
+    end
+
+    -- Summary
+    log.warn(
+        "Vault doctor: %d scanned. %d errors in %d files. %d untyped notes.",
+        dr.scanned, total_errors, error_file_count, #dr.untyped
+    )
+
+    -- Quickfix list
+    ---@type table[]
+    local qf_items = {}
+    for _, err in ipairs(dr.errors) do
+        table.insert(qf_items, {
+            filename = err.path,
+            lnum = (err.lnum or 0) + 1, -- quickfix uses 1-indexed
+            col = 1,
+            text = err.field .. ": " .. err.message,
+            type = "E",
+        })
+    end
+    vim.fn.setqflist(qf_items, "r")
+    vim.fn.setqflist({}, "a", { title = "Vault Doctor" })
+    log.info("Results in quickfix (:copen)")
 end
 
 function callbacks.tasks_recur_preview()
