@@ -207,4 +207,70 @@ describe("vault.tasks.notes", function()
         assert.is_true(lines_missing:find('status: "[[Status - Backlog]]"', 1, true) ~= nil)
         assert.is_true(lines_plain:find('status: "[[Status - Todo]]"', 1, true) ~= nil)
     end)
+
+    it("recur preview computes next due for every week from current due weekday", function()
+        local path = tmp_root .. "/Tasks/T-20260306123000 Weekly recurring.md"
+        write_file(path, {
+            "---",
+            'title: "Weekly recurring"',
+            'status: "[[Status - Todo]]"',
+            'repeat: "every week"',
+            'due: "[[2026-03-06 Friday]]"',
+            "---",
+            "",
+            "# Weekly recurring",
+        })
+
+        local due, err = task_notes.recur_preview(path)
+        assert.is_nil(err)
+        assert.are.equal("[[2026-03-13 Friday]]", due)
+    end)
+
+    it("set_status done spawns recurring next task and links series", function()
+        local orig_date = os.date
+        os.date = function(fmt, t)
+            if fmt == "%Y%m%d%H%M%S" then
+                return "20260306130000"
+            end
+            if fmt == "%Y-%m-%d" and t == nil then
+                return "2026-03-06"
+            end
+            if fmt == "%A" and t ~= nil then
+                return orig_date(fmt, t)
+            end
+            return orig_date(fmt, t)
+        end
+
+        local src = tmp_root .. "/Tasks/T-20260306124000 Daily recurring.md"
+        write_file(src, {
+            "---",
+            'title: "Daily recurring"',
+            'status: "[[Status - In-Review]]"',
+            'executor: "[[Executor - Human]]"',
+            'category: "[[Category - Green Task]]"',
+            'priority: "[[Priority - Medium]]"',
+            'repeat: "every day when done"',
+            'due: "[[2026-03-06 Friday]]"',
+            "---",
+            "",
+            "# Daily recurring",
+        })
+
+        local ok, err = task_notes.set_status(src, "Status - Done")
+        os.date = orig_date
+
+        assert.is_true(ok)
+        assert.is_nil(err)
+
+        local generated = tmp_root .. "/Tasks/T-20260306130000 Daily recurring.md"
+        assert.are.equal(1, vim.fn.filereadable(generated))
+
+        local new_text = table.concat(vim.fn.readfile(generated), "\n")
+        assert.is_true(new_text:find('status: "[[Status - Backlog]]"', 1, true) ~= nil)
+        assert.is_true(new_text:find('due: "[[2026-03-07 Saturday]]"', 1, true) ~= nil)
+        assert.is_true(new_text:find('recurs_from: "[[T-20260306124000 Daily recurring]]"', 1, true) ~= nil)
+
+        local src_text = table.concat(vim.fn.readfile(src), "\n")
+        assert.is_true(src_text:find('last_recur_spawned: "[[T-20260306130000 Daily recurring]]"', 1, true) ~= nil)
+    end)
 end)

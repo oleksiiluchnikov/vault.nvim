@@ -508,7 +508,7 @@ local function build_subcommands()
                 callbacks.tasks_list()
             end,
             complete = function(prefix)
-                local subs = { "new", "status", "pick-next", "promote", "list", "kanban", "backlog", "doctor" }
+                local subs = { "new", "status", "pick-next", "promote", "list", "kanban", "backlog", "doctor", "recur" }
                 return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
             end,
             new = {
@@ -564,6 +564,30 @@ local function build_subcommands()
                 run = function(args)
                     callbacks.tasks_doctor(args)
                 end,
+            },
+            recur = {
+                run = function()
+                    callbacks.tasks_recur_preview()
+                end,
+                complete = function(prefix)
+                    local subs = { "preview", "now", "sweep" }
+                    return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+                end,
+                preview = {
+                    run = function()
+                        callbacks.tasks_recur_preview()
+                    end,
+                },
+                now = {
+                    run = function()
+                        callbacks.tasks_recur_now()
+                    end,
+                },
+                sweep = {
+                    run = function()
+                        callbacks.tasks_recur_sweep()
+                    end,
+                },
             },
         },
 
@@ -2227,6 +2251,43 @@ function callbacks.tasks_doctor(args)
     if total > preview then
         log.warn("  ... and %d more", total - preview)
     end
+end
+
+function callbacks.tasks_recur_preview()
+    local task_notes = require("vault.tasks.notes")
+    local path = task_notes.current_task_path()
+    if not path then
+        log.warn("Current buffer is not a task note in Tasks/")
+        return
+    end
+    local due, err = task_notes.recur_preview(path)
+    if not due then
+        log.warn("%s", err or "Recurring preview failed")
+        return
+    end
+    log.info("Recurring preview: next due %s", due)
+end
+
+function callbacks.tasks_recur_now()
+    local task_notes = require("vault.tasks.notes")
+    local path = task_notes.current_task_path()
+    if not path then
+        log.warn("Current buffer is not a task note in Tasks/")
+        return
+    end
+    local created, err = task_notes.recur_spawn(path, true)
+    if not created then
+        log.warn("%s", err or "Recurring spawn failed")
+        return
+    end
+    local stem = vim.fn.fnamemodify(created, ":t:r")
+    log.info("Recurring spawned: %s", stem)
+end
+
+function callbacks.tasks_recur_sweep()
+    local task_notes = require("vault.tasks.notes")
+    local scanned, spawned = task_notes.recur_sweep()
+    log.info("Recurring sweep: %d scanned, %d spawned", scanned, spawned)
 end
 
 -- Commands for the plugin

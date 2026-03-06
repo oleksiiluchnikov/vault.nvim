@@ -97,6 +97,30 @@ Opens the highest-priority unblocked active task.
 Without arguments it shows current status and allowed next statuses.
 With a status argument it validates and applies the transition.
 
+### Recurring tasks
+
+```vim
+:Vault tasks recur preview
+:Vault tasks recur now
+:Vault tasks recur sweep
+```
+
+- `preview` shows the next due date for the current task based on `repeat` rule.
+- `now` creates the next recurring instance immediately.
+- `sweep` scans completed recurring tasks and creates missing next instances.
+
+Supported `repeat` values include:
+
+- `every day when done`
+- `every week when done`
+- `every 2 weeks when done`
+- `every month when done`
+- `every day`
+- `every weekday`
+- `every week`
+- `every other week`
+- `every month`
+
 ### Open task boards
 
 ```vim

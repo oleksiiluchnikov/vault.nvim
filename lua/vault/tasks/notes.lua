@@ -55,6 +55,16 @@ local VALID_TRANSITIONS = {
     ["Status - Archived"] = {},
 }
 
+local WEEKDAY_TO_NUM = {
+    sunday = 1,
+    monday = 2,
+    tuesday = 3,
+    wednesday = 4,
+    thursday = 5,
+    friday = 6,
+    saturday = 7,
+}
+
 ---@return table
 local function cfg()
     local options = require("vault.config").options
@@ -106,6 +116,165 @@ local function normalize_priority(value)
         return candidate
     end
     return "Priority - Medium"
+end
+
+---@return string
+local function today_iso()
+    return os.date("%Y-%m-%d")
+end
+
+---@param value any
+---@return string|nil
+local function parse_iso_date(value)
+    if type(value) ~= "string" then return nil end
+    local v = unwrap_link(value)
+    local y, m, d = v:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)")
+    if y then return string.format("%s-%s-%s", y, m, d) end
+    y, m, d = v:match("^(%d%d%d%d)(%d%d)(%d%d)")
+    if y then return string.format("%s-%s-%s", y, m, d) end
+    return nil
+end
+
+---@param iso string
+---@return string
+local function iso_to_wikilink(iso)
+    local y, m, d = iso:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    if not y then return string.format("[[%s]]", iso) end
+    local ts = os.time({ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 })
+    return string.format("[[%s %s]]", iso, os.date("%A", ts))
+end
+
+---@param iso string
+---@param days integer
+---@return string
+local function add_days_iso(iso, days)
+    local y, m, d = iso:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    if not y then return iso end
+    local t = os.time({ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 }) + (days * 86400)
+    return os.date("%Y-%m-%d", t)
+end
+
+---@param iso string
+---@return integer|nil
+local function weekday_num_from_iso(iso)
+    local y, m, d = iso:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    if not y then return nil end
+    local t = os.time({ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 })
+    return tonumber(os.date("%w", t)) + 1
+end
+
+---@param from_iso string
+---@param target_wday integer 1=Sun..7=Sat
+---@return string
+local function next_weekday_iso(from_iso, target_wday)
+    local from_wday = weekday_num_from_iso(from_iso) or target_wday
+    local delta = (target_wday - from_wday) % 7
+    if delta == 0 then delta = 7 end
+    return add_days_iso(from_iso, delta)
+end
+
+---@param iso string
+---@param months integer
+---@param day_override integer|nil
+---@return string
+local function add_months_iso(iso, months, day_override)
+    local y, m, d = iso:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    if not y then return iso end
+    local yi, mi, di = tonumber(y), tonumber(m), tonumber(d)
+    local total = (yi * 12 + (mi - 1)) + months
+    local ny = math.floor(total / 12)
+    local nm = (total % 12) + 1
+    local wanted_day = day_override or di
+    local last_day = tonumber(os.date("%d", os.time({ year = ny, month = nm + 1, day = 0, hour = 12 })))
+    local nd = math.min(wanted_day, last_day)
+    return string.format("%04d-%02d-%02d", ny, nm, nd)
+end
+
+---@param value any
+---@return string|nil
+local function normalize_repeat(value)
+    if type(value) ~= "string" then return nil end
+    local v = trim(value):lower():gsub("%s+", " ")
+    if v == "" then return nil end
+    return v
+end
+
+---@param task_values table
+---@param completed_iso string
+---@return string|nil
+local function next_due_iso(task_values, completed_iso)
+    local rule = normalize_repeat(task_values["repeat"])
+    if not rule then return nil end
+
+    local due_iso = parse_iso_date(task_values.due)
+    local start_iso = parse_iso_date(task_values.repeat_start) or due_iso or completed_iso
+    local base_done = completed_iso
+
+    if rule == "every day when done" then
+        return add_days_iso(base_done, 1)
+    end
+    local n_days = rule:match("^every (%d+) days when done$")
+    if n_days then
+        return add_days_iso(base_done, tonumber(n_days))
+    end
+    if rule == "every week when done" then
+        return add_days_iso(base_done, 7)
+    end
+    if rule == "every 2 weeks when done" then
+        return add_days_iso(base_done, 14)
+    end
+    if rule == "every month when done" then
+        return add_months_iso(base_done, 1)
+    end
+
+    if rule == "every day" then
+        return add_days_iso(base_done, 1)
+    end
+    if rule == "every weekday" then
+        local probe = base_done
+        for _ = 1, 7 do
+            probe = add_days_iso(probe, 1)
+            local wd = weekday_num_from_iso(probe)
+            if wd and wd >= 2 and wd <= 6 then
+                return probe
+            end
+        end
+        return add_days_iso(base_done, 1)
+    end
+    if rule == "every week" then
+        local explicit = trim(task_values.repeat_weekday or ""):lower()
+        local target = WEEKDAY_TO_NUM[explicit]
+        if not target then
+            target = weekday_num_from_iso(due_iso or base_done)
+        end
+        target = target or weekday_num_from_iso(base_done) or 2
+        return next_weekday_iso(base_done, target)
+    end
+    if rule == "every other week" then
+        local target = weekday_num_from_iso(start_iso) or weekday_num_from_iso(base_done) or 2
+        local next_candidate = next_weekday_iso(base_done, target)
+        local anchor = start_iso
+        while next_candidate <= base_done do
+            next_candidate = add_days_iso(next_candidate, 14)
+        end
+        if anchor then
+            local guard = 0
+            while next_candidate < add_days_iso(base_done, 1) and guard < 20 do
+                next_candidate = add_days_iso(next_candidate, 14)
+                guard = guard + 1
+            end
+        end
+        return next_candidate
+    end
+    if rule == "every month" then
+        local day = tonumber(task_values.repeat_day_of_month or "")
+        if not day and due_iso then
+            day = tonumber(due_iso:match("%-(%d%d)$"))
+        end
+        return add_months_iso(base_done, 1, day)
+    end
+
+    return nil
 end
 
 ---@return string
@@ -321,6 +490,71 @@ function M.set_status(path, new_status)
         status = status_link(to_status),
         modified = M.timestamp(),
     })
+
+    if to_status == "Status - Done" then
+        local values = shared.read_frontmatter_fields(path, {
+            "title",
+            "status",
+            "executor",
+            "category",
+            "priority",
+            "feature",
+            "project",
+            "initiative",
+            "estimation",
+            "due",
+            "repeat",
+            "repeat_start",
+            "repeat_weekday",
+            "repeat_day_of_month",
+            "series_id",
+            "last_recur_spawned",
+        })
+
+        local repeat_rule = normalize_repeat(values["repeat"])
+        if repeat_rule and trim(values.last_recur_spawned or "") == "" then
+            local done_iso = today_iso()
+            local next_iso = next_due_iso(values, done_iso)
+            if next_iso then
+                local created = M.create(values.title or task.title, {
+                    status = "[[Status - Backlog]]",
+                    executor = values.executor,
+                    category = values.category,
+                    priority = values.priority,
+                    title = values.title or task.title,
+                })
+                if created then
+                    local new_stem = stem_from_path(created)
+                    local old_stem = stem_from_path(path)
+                    local series_id = trim(values.series_id or "")
+                    if series_id == "" then
+                        series_id = old_stem
+                    end
+
+                    shared.set_frontmatter_fields(created, {
+                        feature = values.feature,
+                        project = values.project,
+                        initiative = values.initiative,
+                        estimation = values.estimation,
+                        due = iso_to_wikilink(next_iso),
+                        ["repeat"] = values["repeat"],
+                        repeat_start = values.repeat_start,
+                        repeat_weekday = values.repeat_weekday,
+                        repeat_day_of_month = values.repeat_day_of_month,
+                        series_id = series_id,
+                        recurs_from = string.format("[[%s]]", old_stem),
+                    })
+
+                    shared.set_frontmatter_fields(path, {
+                        series_id = series_id,
+                        last_recur_spawned = string.format("[[%s]]", new_stem),
+                    })
+                    log.info("Spawned recurring task: %s", new_stem)
+                end
+            end
+        end
+    end
+
     return true, nil
 end
 
@@ -501,6 +735,118 @@ function M.doctor(args)
     end
 
     return report
+end
+
+---@param path string
+---@param force boolean|nil
+---@return string|nil, string|nil
+function M.recur_spawn(path, force)
+    local values = shared.read_frontmatter_fields(path, {
+        "title",
+        "status",
+        "executor",
+        "category",
+        "priority",
+        "feature",
+        "project",
+        "initiative",
+        "estimation",
+        "due",
+        "repeat",
+        "repeat_start",
+        "repeat_weekday",
+        "repeat_day_of_month",
+        "series_id",
+        "last_recur_spawned",
+    })
+
+    local repeat_rule = normalize_repeat(values["repeat"])
+    if not repeat_rule then
+        return nil, "Task has no repeat rule"
+    end
+    if not force and trim(values.last_recur_spawned or "") ~= "" then
+        return nil, "Recurring instance already spawned"
+    end
+
+    local next_iso = next_due_iso(values, today_iso())
+    if not next_iso then
+        return nil, "Cannot compute next due date for repeat rule"
+    end
+
+    local created = M.create(values.title or stem_from_path(path), {
+        status = "[[Status - Backlog]]",
+        executor = values.executor,
+        category = values.category,
+        priority = values.priority,
+        title = values.title or stem_from_path(path),
+    })
+    if not created then
+        return nil, "Failed to create recurring task"
+    end
+
+    local new_stem = stem_from_path(created)
+    local old_stem = stem_from_path(path)
+    local series_id = trim(values.series_id or "")
+    if series_id == "" then series_id = old_stem end
+
+    shared.set_frontmatter_fields(created, {
+        feature = values.feature,
+        project = values.project,
+        initiative = values.initiative,
+        estimation = values.estimation,
+        due = iso_to_wikilink(next_iso),
+        ["repeat"] = values["repeat"],
+        repeat_start = values.repeat_start,
+        repeat_weekday = values.repeat_weekday,
+        repeat_day_of_month = values.repeat_day_of_month,
+        series_id = series_id,
+        recurs_from = string.format("[[%s]]", old_stem),
+    })
+
+    shared.set_frontmatter_fields(path, {
+        series_id = series_id,
+        last_recur_spawned = string.format("[[%s]]", new_stem),
+    })
+
+    return created, nil
+end
+
+---@param path string
+---@return string|nil, string|nil
+function M.recur_preview(path)
+    local values = shared.read_frontmatter_fields(path, {
+        "repeat",
+        "due",
+        "repeat_start",
+        "repeat_weekday",
+        "repeat_day_of_month",
+    })
+    local repeat_rule = normalize_repeat(values["repeat"])
+    if not repeat_rule then
+        return nil, "Task has no repeat rule"
+    end
+    local next_iso = next_due_iso(values, today_iso())
+    if not next_iso then
+        return nil, "Cannot compute next due date for repeat rule"
+    end
+    return iso_to_wikilink(next_iso), nil
+end
+
+---@return integer, integer
+function M.recur_sweep()
+    local scanned = 0
+    local spawned = 0
+    for _, path in ipairs(collect_task_paths()) do
+        scanned = scanned + 1
+        local task = M.read_task(path)
+        if task and M.is_completed(task) then
+            local created = M.recur_spawn(path, false)
+            if created then
+                spawned = spawned + 1
+            end
+        end
+    end
+    return scanned, spawned
 end
 
 return M

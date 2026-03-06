@@ -730,6 +730,7 @@ describe("Vault command completions", function()
             assert.is_true(vim.tbl_contains(result, "kanban"))
             assert.is_true(vim.tbl_contains(result, "backlog"))
             assert.is_true(vim.tbl_contains(result, "doctor"))
+            assert.is_true(vim.tbl_contains(result, "recur"))
         end)
 
         it("completes tasks status values", function()
