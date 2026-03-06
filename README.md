@@ -64,7 +64,33 @@ All commands live under a single `:Vault` entry point. Running `:Vault` with no 
 | `:Vault wikilinks` | Telescope wikilinks picker (all). |
 | `:Vault wikilinks unresolved` | Wikilinks with no matching note. |
 | `:Vault wikilinks resolved` | Wikilinks pointing to existing notes. |
-| `:Vault tasks` | Telescope picker for task lines (`- [ ]` items). |
+| `:Vault tasks` | Task note picker from `Tasks/` (frontmatter-based task system). |
+| `:Vault tasks new <name>` | Create `Tasks/T-YYYYMMDDHHmmss <name>.md` and open it. |
+| `:Vault tasks status [status]` | Show current status and valid transitions, or apply a transition. |
+| `:Vault tasks pick-next` | Open the highest-priority unblocked active task. |
+| `:Vault tasks promote [text]` | Promote current line (or arg text) into a task note and replace line with a wikilink. |
+| `:Vault tasks kanban` | Open `Tasks Kanban` base in board view. |
+| `:Vault tasks backlog` | Open `Tasks Backlog` base in process/grid view. |
+| `:Vault actions` | Legacy inline-checkbox task picker (`- [ ]` lines). |
+
+Task Kanban column order is task-specific and configured via `task_notes.status_order`:
+
+```lua
+require("vault").setup({
+  task_notes = {
+    status_order = {
+      "Status - Backlog",
+      "Status - Todo",
+      "Status - In-Progress",
+      "Status - In-Review",
+      "Status - Done",
+      "Status - Failed",
+      "Status - Deprecated",
+      "Status - Archived",
+    },
+  },
+})
+```
 | `:Vault dates` | Telescope picker for dates found in notes. |
 | `:Vault lines` | Telescope picker for dash-prefixed lines from journal notes. |
 | `:Vault bases` | Telescope picker for `.base` files. |

@@ -57,6 +57,63 @@ Prompts for a slug, creates the note, replaces selection with a `[[wikilink]]`.
 
 ## Triage & Processing
 
+## Task Notes (`:Vault tasks`)
+
+Use `:Vault tasks` for the vault-native task system (task notes in `Tasks/`).
+
+### Create a new task
+
+```vim
+:Vault tasks new Implement status transitions
+```
+
+Creates `Tasks/T-YYYYMMDDHHmmss Implement status transitions.md` with default frontmatter.
+
+### Promote a daily line into a task
+
+Put cursor on a line like `- [ ] fix command completion`, then:
+
+```vim
+:Vault tasks promote
+```
+
+The line is replaced with a task wikilink (for example `- [[T-20260306153000 fix command completion]]`).
+
+### Pick the next task
+
+```vim
+:Vault tasks pick-next
+```
+
+Opens the highest-priority unblocked active task.
+
+### Update task status with transition rules
+
+```vim
+:Vault tasks status
+:Vault tasks status Status - Todo
+```
+
+Without arguments it shows current status and allowed next statuses.
+With a status argument it validates and applies the transition.
+
+### Open task boards
+
+```vim
+:Vault tasks kanban
+:Vault tasks backlog
+```
+
+These open `Tasks Kanban` and `Tasks Backlog` bases.
+
+### Legacy inline checkboxes
+
+```vim
+:Vault actions
+```
+
+Use this to browse legacy inline `- [ ]` task lines.
+
 ### Process all orphan notes
 
 ```vim
@@ -254,6 +311,8 @@ Now renaming files in Obsidian, Finder, or the terminal will auto-patch wikilink
 vim.keymap.set("n", "<leader>vt", "<cmd>Vault today<cr>", { desc = "Today's journal" })
 vim.keymap.set("n", "<leader>vf", "<cmd>Vault fleeting<cr>", { desc = "Fleeting note" })
 vim.keymap.set("n", "<leader>vn", "<cmd>Vault note<cr>", { desc = "Notes picker" })
+vim.keymap.set("n", "<leader>vk", "<cmd>Vault tasks<cr>", { desc = "Task notes picker" })
+vim.keymap.set("n", "<leader>vK", "<cmd>Vault tasks pick-next<cr>", { desc = "Pick next task" })
 vim.keymap.set("n", "<leader>vp", "<cmd>Vault process<cr>", { desc = "Process all notes" })
 vim.keymap.set("n", "<leader>vo", "<cmd>Vault process orphans<cr>", { desc = "Process orphans" })
 vim.keymap.set("n", "<leader>vg", "<cmd>Vault grep<cr>", { desc = "Grep vault" })

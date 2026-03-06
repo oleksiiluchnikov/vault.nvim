@@ -505,7 +505,71 @@ local function build_subcommands()
         -- :Vault tasks — tasks picker
         tasks = {
             run = function()
-                callbacks.tasks()
+                callbacks.tasks_list()
+            end,
+            complete = function(prefix)
+                local subs = { "new", "status", "pick-next", "promote", "list", "kanban", "backlog", "doctor" }
+                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+            end,
+            new = {
+                run = function(args)
+                    callbacks.tasks_new(args)
+                end,
+            },
+            status = {
+                run = function(args)
+                    callbacks.tasks_status(args)
+                end,
+                complete = function(prefix)
+                    local notes = require("vault.tasks.notes")
+                    local path = notes.current_task_path()
+                    if not path then
+                        return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, notes.statuses())
+                    end
+                    local task = notes.read_task(path)
+                    if not task then
+                        return {}
+                    end
+                    return vim.tbl_filter(function(s)
+                        return s:find(prefix, 1, true) == 1
+                    end, notes.next_statuses(task.status))
+                end,
+            },
+            ["pick-next"] = {
+                run = function()
+                    callbacks.tasks_pick_next()
+                end,
+            },
+            promote = {
+                run = function(args)
+                    callbacks.tasks_promote(args)
+                end,
+            },
+            list = {
+                run = function()
+                    callbacks.tasks_list()
+                end,
+            },
+            kanban = {
+                run = function()
+                    callbacks.tasks_kanban()
+                end,
+            },
+            backlog = {
+                run = function()
+                    callbacks.tasks_backlog()
+                end,
+            },
+            doctor = {
+                run = function(args)
+                    callbacks.tasks_doctor(args)
+                end,
+            },
+        },
+
+        actions = {
+            run = function()
+                callbacks.actions()
             end,
         },
 
@@ -2014,9 +2078,155 @@ function callbacks.notes(args)
     construct_notes_picker_args(args.fargs)
 end
 
-function callbacks.tasks()
-    -- TODO: Implement to complete by status
+function callbacks.actions()
     safe_find(pickers.tasks(), "No tasks found")
+end
+
+function callbacks.tasks_new(args)
+    local name = table.concat(args, " ")
+    local path = require("vault.tasks.notes").create(name)
+    if not path then
+        return
+    end
+    vim.cmd("edit " .. vim.fn.fnameescape(path))
+end
+
+function callbacks.tasks_status(args)
+    local task_notes = require("vault.tasks.notes")
+    local path = task_notes.current_task_path()
+    if not path then
+        log.warn("Current buffer is not a task note in Tasks/")
+        return
+    end
+    local task = task_notes.read_task(path)
+    if not task then
+        log.warn("Failed to parse task frontmatter")
+        return
+    end
+    local target = table.concat(args or {}, " ")
+    if target == "" then
+        local next_states = task_notes.next_statuses(task.status)
+        local msg = "status=" .. task.status
+        if #next_states > 0 then
+            msg = msg .. " | next=" .. table.concat(next_states, ", ")
+        end
+        log.info("%s", msg)
+        return
+    end
+    local ok, err = task_notes.set_status(path, target)
+    if not ok then
+        log.warn("%s", err or "Failed to update status")
+        return
+    end
+    log.info("Task status updated: %s", target)
+end
+
+function callbacks.tasks_pick_next()
+    local task_notes = require("vault.tasks.notes")
+    local candidates = task_notes.pick_candidates()
+    if #candidates == 0 then
+        log.info("No unblocked active tasks found")
+        return
+    end
+    local top = candidates[1]
+    vim.cmd("edit " .. vim.fn.fnameescape(top.path))
+    log.info("Picked next: %s (%s, %s)", top.title, top.priority, top.status)
+end
+
+function callbacks.tasks_promote(args)
+    local task_notes = require("vault.tasks.notes")
+    local current = vim.api.nvim_get_current_line()
+    local indent = current:match("^(%s*)") or ""
+    local source = table.concat(args or {}, " ")
+    if source == "" then
+        source = current
+    end
+    local name = source
+    name = name:gsub("^%s*[-*]%s*%[[^%]]*%]%s*", "")
+    name = name:gsub("^%s*[-*]%s*", "")
+    name = name:gsub("^%s+", ""):gsub("%s+$", "")
+    if name == "" then
+        log.warn("Nothing to promote. Provide text or place cursor on a non-empty line.")
+        return
+    end
+    local path = task_notes.create(name)
+    if not path then
+        return
+    end
+    local stem = vim.fn.fnamemodify(path, ":t:r")
+    vim.api.nvim_set_current_line(string.format("%s- [[%s]]", indent, stem))
+    log.info("Promoted to task: %s", stem)
+end
+
+function callbacks.tasks_list()
+    local notes = require("vault.notes")():filter("relpath", require("vault.tasks.notes").tasks_dir_rel() .. "/", "startswith", false)
+    safe_find(pickers.notes({ notes = notes }), "No tasks found")
+end
+
+function callbacks.tasks_kanban()
+    local Bases = require("vault.bases")
+    local base = Bases():get("Tasks Kanban")
+    if not base then
+        log.error("Base not found: Tasks Kanban")
+        return
+    end
+
+    local cfg = require("vault.config").options or {}
+    local task_cfg = cfg.task_notes or {}
+    local group_values = type(task_cfg.status_order) == "table" and task_cfg.status_order or nil
+
+    require("vault.bases.views.kanban").open({
+        base = base,
+        filter_desc = "base:Tasks Kanban",
+        group_values = group_values,
+    })
+end
+
+function callbacks.tasks_backlog()
+    callbacks.api({ fargs = { "process", "base", "Tasks Backlog" } })
+end
+
+function callbacks.tasks_doctor(args)
+    local fix = false
+    for _, arg in ipairs(args or {}) do
+        if arg == "fix" or arg == "--fix" then
+            fix = true
+        end
+    end
+
+    local report = require("vault.tasks.notes").doctor({ fix = fix })
+    local total = #report.issues
+    if total == 0 then
+        log.info("Tasks doctor: %d scanned, no issues", report.scanned)
+        return
+    end
+
+    local by_kind = {}
+    for _, issue in ipairs(report.issues) do
+        by_kind[issue.kind] = (by_kind[issue.kind] or 0) + 1
+    end
+
+    local parts = {
+        string.format("Tasks doctor: %d scanned", report.scanned),
+        string.format("%d issues", total),
+    }
+    if report.fixed > 0 then
+        table.insert(parts, string.format("%d fixed", report.fixed))
+    end
+    log.warn(table.concat(parts, ", "))
+
+    for kind, n in pairs(by_kind) do
+        log.warn("  %s: %d", kind, n)
+    end
+
+    local preview = math.min(10, total)
+    for i = 1, preview do
+        local issue = report.issues[i]
+        log.warn("  - %s [%s]", issue.stem, issue.kind)
+    end
+    if total > preview then
+        log.warn("  ... and %d more", total - preview)
+    end
 end
 
 -- Commands for the plugin
