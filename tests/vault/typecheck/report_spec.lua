@@ -154,4 +154,72 @@ describe("vault.typecheck.report", function()
             assert.truthy(#dr.untyped > 0)
         end)
     end)
+
+    describe("doctor_fix()", function()
+        it("wraps bare wikilink values in brackets without corrupting them", function()
+            -- Note has status as plain string (no brackets) — doctor_fix should add them
+            local path = write_file("Tasks/T-005 Fix brackets.md", {
+                "---",
+                "categories:",
+                '  - "' .. wl("Tasks") .. '"',
+                'type: "task"',
+                'status: "Status - Backlog"', -- bare string, should become [[Status - Backlog]]
+                'title: "Fix brackets"',
+                'due: ""',
+                "blocked_by: []",
+                "---",
+                "",
+                "# Fix brackets",
+            })
+
+            report.doctor_fix()
+
+            -- Read back the file and verify status has brackets
+            local lines = vim.fn.readfile(path)
+            local status_line
+            for _, l in ipairs(lines) do
+                if l:match("^status:") then status_line = l; break end
+            end
+            assert.truthy(status_line, "status field should still exist after fix")
+            -- The correct form is: status: "[[Status - Backlog]]"
+            assert.truthy(
+                status_line:match('%[%['),
+                "status should contain [[ after fix. Got: " .. tostring(status_line)
+            )
+        end)
+
+        it("does not corrupt already-valid wikilink values", function()
+            local path = write_file("Tasks/T-006 Already valid.md", {
+                "---",
+                "categories:",
+                '  - "' .. wl("Tasks") .. '"',
+                'type: "task"',
+                'status: "' .. wl("Status - Done") .. '"', -- already correct
+                'title: "Already valid"',
+                'due: ""',
+                "blocked_by: []",
+                "---",
+                "",
+                "# Already valid",
+            })
+
+            report.doctor_fix()
+
+            local lines = vim.fn.readfile(path)
+            local status_line
+            for _, l in ipairs(lines) do
+                if l:match("^status:") then status_line = l; break end
+            end
+            assert.truthy(status_line, "status field should still exist")
+            assert.truthy(
+                status_line:match('%[%[Status %-'),
+                "already-valid wikilink should be preserved. Got: " .. tostring(status_line)
+            )
+            -- Must not be double-bracketed: [[[[Status - Done]]]]
+            assert.is_falsy(
+                status_line:match('%[%[%[%['),
+                "wikilink must not be double-wrapped. Got: " .. tostring(status_line)
+            )
+        end)
+    end)
 end)

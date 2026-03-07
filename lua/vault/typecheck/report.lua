@@ -9,6 +9,13 @@ local fm = require("vault.typecheck.frontmatter")
 
 local M = {}
 
+--- Escape Lua magic pattern characters (pure Lua, mirrors validate.lua).
+---@param s string
+---@return string
+local function pesc(s)
+    return (s:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1"))
+end
+
 local DIAG_SOURCE = "vault-typecheck"
 local ns_id ---@type integer|nil
 
@@ -212,7 +219,7 @@ function M.doctor_fix()
                 then
                     -- Wrap in wikilink brackets
                     local prefix = field_type.prefix or ""
-                    if prefix ~= "" and not value:match("^" .. vim.pesc(prefix)) then
+                    if prefix ~= "" and not value:match("^" .. pesc(prefix)) then
                         value = prefix .. value
                     end
                     changes[field_name] = "[[" .. value .. "]]"
