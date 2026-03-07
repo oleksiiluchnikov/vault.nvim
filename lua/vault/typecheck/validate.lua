@@ -17,6 +17,14 @@ local function trim(s)
     return (s:gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
+--- Escape Lua magic pattern characters (pure Lua, no vim.pesc dependency).
+--- Equivalent to vim.pesc() but usable outside Neovim (e.g. pre-commit hooks).
+---@param s string
+---@return string
+local function pesc(s)
+    return (s:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1"))
+end
+
 ---@alias vault.typecheck.WikilinkChecker fun(wikilink: string): string|nil
 
 ---@class vault.typecheck.ValidateOpts
@@ -158,7 +166,7 @@ function M.check_wikilink(name, value, ft, check_wl)
     -- Prefix check
     if ft.prefix then
         local inner = s:match("^%[%[(.-)%]%]$") or ""
-        if not inner:match("^" .. vim.pesc(ft.prefix)) then
+        if not inner:match("^" .. pesc(ft.prefix)) then
             return {
                 field = name,
                 message = "wikilink prefix mismatch: expected '"
