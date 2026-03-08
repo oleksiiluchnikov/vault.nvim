@@ -12,6 +12,234 @@ local Filter = require("vault.filter")
 local Tags = require("vault.tags")
 local Note = require("vault.notes.note")
 local VaultNotesStats = require("vault.notes.stats")
+local config = require("vault.config")
+local log = require("vault.log").scope("notes")
+
+---@class vault.Notes.MoveSpec
+---@field from string
+---@field to string
+
+---@class vault.Notes.MoveManyOpts
+---@field update_links? boolean
+---@field force? boolean
+---@field verbose? boolean
+---@field silent? boolean
+
+---@class vault.Notes.MoveTreeOpts: vault.Notes.MoveManyOpts
+---@field from_dir string
+---@field to_dir string
+---@field preserve_subdirs? boolean
+
+---@class vault.Notes.MoveReport
+---@field moved integer
+---@field patched_files integer
+---@field skipped integer
+---@field renames vault.Watcher.RenameSpec[]
+
+---@param path string
+---@return string
+local function normalize_path(path)
+    return vim.fs.normalize(vim.fn.fnamemodify(path, ":p"))
+end
+
+---@param path string
+---@return boolean
+local function is_note_path(path)
+    return type(path) == "string" and path:sub(-#config.options.ext) == config.options.ext
+end
+
+---@param dir string
+---@return string
+local function normalize_dir(dir)
+    local normalized = normalize_path(dir)
+    return normalized:gsub("/+$", "")
+end
+
+---@param path string
+---@param dir string
+---@return boolean
+local function path_is_within_dir(path, dir)
+    return path == dir or path:sub(1, #dir + 1) == (dir .. "/")
+end
+
+---@param path string
+---@param dir string
+---@return string
+local function relative_to_dir(path, dir)
+    if path == dir then
+        return ""
+    end
+    return path:sub(#dir + 2)
+end
+
+---@param notes vault.Notes
+---@param renames vault.Watcher.RenameSpec[]
+local function refresh_notes_collection_maps(notes, renames)
+    if #renames == 0 then
+        return
+    end
+
+    for _, rename in ipairs(renames) do
+        local note = notes.map[rename.old_slug] or notes._map[rename.old_slug]
+        if note then
+            notes.map[rename.old_slug] = nil
+            notes._map[rename.old_slug] = nil
+            note.data.path = rename.new_path
+            note.data.slug = rename.new_slug
+            note.data.relpath = utils.path_to_relpath(rename.new_path)
+            notes.map[rename.new_slug] = note
+            notes._map[rename.new_slug] = note
+        end
+    end
+
+    local notes_global = state.get_global_key("notes")
+    if notes_global and notes_global ~= notes then
+        for _, rename in ipairs(renames) do
+            local note = notes_global.map[rename.old_slug] or notes_global._map[rename.old_slug]
+            if note then
+                notes_global.map[rename.old_slug] = nil
+                notes_global._map[rename.old_slug] = nil
+                note.data.path = rename.new_path
+                note.data.slug = rename.new_slug
+                note.data.relpath = utils.path_to_relpath(rename.new_path)
+                notes_global.map[rename.new_slug] = note
+                notes_global._map[rename.new_slug] = note
+            end
+        end
+    end
+end
+
+---@param renames vault.Watcher.RenameSpec[]
+---@param update_links boolean
+---@param silent boolean
+---@return integer
+local function patch_wikilinks_after_moves(renames, update_links, silent)
+    if not update_links or #renames == 0 then
+        return 0
+    end
+
+    local Watcher = require("vault.watcher")
+    local watcher = Watcher()
+    watcher:disable_oil_guard()
+
+    local rename_specs = {}
+    for _, rename in ipairs(renames) do
+        table.insert(rename_specs, {
+            old_path = rename.old_path,
+            new_path = rename.new_path,
+        })
+    end
+
+    return watcher:handle_renames(rename_specs, silent) or 0
+end
+
+---@param notes vault.Notes
+---@param note_map table<string, vault.Note>
+---@param opts vault.Notes.MoveManyOpts
+---@return vault.Notes.MoveReport
+local function move_notes(notes, note_map, opts)
+    opts = opts or {}
+    local update_links = opts.update_links
+    if update_links == nil then
+        local watcher_conf = (config.options and config.options.watcher) or {}
+        update_links = watcher_conf.auto_update_links
+        if update_links == nil then
+            update_links = true
+        end
+    end
+
+    local force = opts.force == true
+    local verbose = opts.verbose ~= false
+    local silent = opts.silent == true
+
+    if next(note_map) == nil then
+        return {
+            moved = 0,
+            patched_files = 0,
+            skipped = 0,
+            renames = {},
+        }
+    end
+
+    --- @type string[]
+    local errors = {}
+    local target_seen = {}
+
+    for old_path, note in pairs(note_map) do
+        if vim.fn.filereadable(old_path) == 0 then
+            table.insert(errors, "source does not exist: " .. old_path)
+        end
+
+        local new_path = note.data.path
+        if old_path == new_path then
+            table.insert(errors, "source and target are identical: " .. old_path)
+        end
+
+        if target_seen[new_path] then
+            table.insert(errors, "duplicate target path: " .. new_path)
+        else
+            target_seen[new_path] = true
+        end
+
+        if not force and vim.fn.filereadable(new_path) == 1 then
+            table.insert(errors, "target already exists: " .. new_path)
+        end
+    end
+
+    if #errors > 0 then
+        error(table.concat(errors, "\n"))
+    end
+
+    --- @type vault.Watcher.RenameSpec[]
+    local renames = {}
+    local moved = 0
+    for old_path, note in pairs(note_map) do
+        local new_path = note.data.path
+        local target_dir = vim.fn.fnamemodify(new_path, ":p:h")
+        if vim.fn.isdirectory(target_dir) == 0 then
+            vim.fn.mkdir(target_dir, "p")
+        end
+
+        local ok, err = (vim.uv or vim.loop).fs_rename(old_path, new_path)
+        if not ok then
+            error(
+                "failed to move note: " .. old_path .. " -> " .. new_path .. " :: " .. tostring(err)
+            )
+        end
+
+        local old_slug = utils.path_to_slug(old_path)
+        local new_slug = utils.path_to_slug(new_path)
+        note.data.path = new_path
+        note.data.slug = new_slug
+        note.data.relpath = utils.path_to_relpath(new_path)
+
+        table.insert(renames, {
+            old_path = old_path,
+            new_path = new_path,
+            old_slug = old_slug,
+            new_slug = new_slug,
+        })
+        moved = moved + 1
+    end
+
+    local patched_files = patch_wikilinks_after_moves(renames, update_links, silent)
+    refresh_notes_collection_maps(notes, renames)
+
+    if verbose then
+        if update_links then
+            log.info("moved %d notes • %d files patched", moved, patched_files)
+        else
+            log.info("moved %d notes (wikilink update skipped)", moved)
+        end
+    end
+
+    return {
+        moved = moved,
+        patched_files = patched_files,
+        skipped = 0,
+        renames = renames,
+    }
+end
 
 --[[
 ================================================================================
@@ -313,6 +541,93 @@ function Notes:push(note)
     notes_global_key.map[slug] = note
     notes_global_key._map[slug] = note
     return true
+end
+
+--- Move multiple notes in a single batch and rewrite wikilinks once.
+--- @param moves vault.Notes.MoveSpec[]
+--- @param opts? vault.Notes.MoveManyOpts
+--- @return vault.Notes.MoveReport
+function Notes:move_many(moves, opts)
+    if type(moves) ~= "table" then
+        error(Error.INVALID_VALUE("moves", "table"))
+    end
+
+    --- @type table<string, vault.Note>
+    local note_map = {}
+    for _, move in ipairs(moves) do
+        if type(move) ~= "table" or type(move.from) ~= "string" or type(move.to) ~= "string" then
+            error("move_many expects entries like { from = '/old.md', to = '/new.md' }")
+        end
+
+        local old_path = normalize_path(move.from)
+        local new_path = normalize_path(move.to)
+        if not is_note_path(old_path) or not is_note_path(new_path) then
+            error("move_many only supports note paths ending with " .. config.options.ext)
+        end
+
+        local note = Note(old_path)
+        note.data.path = new_path
+        note.data.slug = utils.path_to_slug(new_path)
+        note.data.relpath = utils.path_to_relpath(new_path)
+        note_map[old_path] = note
+    end
+
+    return move_notes(self, note_map, opts)
+end
+
+--- Move all notes under one directory tree into another directory tree.
+--- @param opts vault.Notes.MoveTreeOpts
+--- @return vault.Notes.MoveReport
+function Notes:move_tree(opts)
+    if type(opts) ~= "table" then
+        error(Error.INVALID_VALUE("opts", "table"))
+    end
+
+    if type(opts.from_dir) ~= "string" or opts.from_dir == "" then
+        error(Error.MISSING_PARAMETER("from_dir"))
+    end
+    if type(opts.to_dir) ~= "string" or opts.to_dir == "" then
+        error(Error.MISSING_PARAMETER("to_dir"))
+    end
+
+    local from_dir = normalize_dir(opts.from_dir)
+    local to_dir = normalize_dir(opts.to_dir)
+    local preserve_subdirs = opts.preserve_subdirs ~= false
+    if from_dir == to_dir then
+        error("from_dir and to_dir must differ")
+    end
+
+    --- @type vault.Notes.MoveSpec[]
+    local moves = {}
+    for _, note in pairs(self.map) do
+        local old_path = normalize_path(note.data.path)
+        if path_is_within_dir(old_path, from_dir) then
+            local suffix
+            if preserve_subdirs then
+                suffix = relative_to_dir(old_path, from_dir)
+            else
+                suffix = vim.fn.fnamemodify(old_path, ":t")
+            end
+            table.insert(moves, {
+                from = old_path,
+                to = to_dir .. "/" .. suffix,
+            })
+        end
+    end
+
+    if #moves == 0 then
+        if opts.verbose ~= false then
+            log.info("no notes found under %s", from_dir)
+        end
+        return {
+            moved = 0,
+            patched_files = 0,
+            skipped = 0,
+            renames = {},
+        }
+    end
+
+    return self:move_many(moves, opts)
 end
 
 --- Delete note by key.

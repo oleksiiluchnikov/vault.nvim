@@ -49,6 +49,278 @@ local function normalize_event_path(root, filename)
     return root .. "/" .. filename
 end
 
+---@class vault.Watcher.RenameSpec
+---@field old_path string
+---@field new_path string
+---@field old_slug string
+---@field new_slug string
+
+---@class vault.Watcher.RenamePattern
+---@field match string
+---@field gsub_pat string
+---@field replacement string
+
+---@param renames vault.Watcher.RenameSpec[]
+---@param stem string
+---@param paths table<string, table>
+---@return integer
+local function count_old_stem_occurrences(paths, renames, stem)
+    local count = 0
+
+    for slug, _ in pairs(paths) do
+        local current_stem = slug:match("[^/]+$")
+        if current_stem == stem then
+            count = count + 1
+        end
+    end
+
+    for _, rename in ipairs(renames) do
+        local old_stem = vim.fn.fnamemodify(rename.old_path, ":t:r")
+        local new_stem = vim.fn.fnamemodify(rename.new_path, ":t:r")
+
+        if old_stem == stem and new_stem ~= stem then
+            count = count - 1
+        elseif old_stem ~= stem and new_stem == stem then
+            count = count + 1
+        end
+    end
+
+    return count
+end
+
+---@param paths table<string, table>
+---@param renames vault.Watcher.RenameSpec[]
+---@param rename vault.Watcher.RenameSpec
+---@return vault.Watcher.RenamePattern[]
+local function build_rename_patterns(paths, renames, rename)
+    local old_stem = vim.fn.fnamemodify(rename.old_path, ":t:r")
+    local new_stem = vim.fn.fnamemodify(rename.new_path, ":t:r")
+    local stem_count = count_old_stem_occurrences(paths, renames, old_stem)
+    local stem_is_unique = (stem_count <= 1)
+
+    --- @type vault.Watcher.RenamePattern[]
+    local patterns = {
+        {
+            match = "%[%[" .. vim.pesc(rename.old_slug),
+            gsub_pat = "%[%[" .. vim.pesc(rename.old_slug) .. "([^%]]*)%]%]",
+            replacement = "[[" .. rename.new_slug .. "%1]]",
+        },
+    }
+
+    if stem_is_unique and old_stem ~= rename.old_slug and old_stem ~= new_stem then
+        table.insert(patterns, {
+            match = "%[%[" .. vim.pesc(old_stem),
+            gsub_pat = "%[%[" .. vim.pesc(old_stem) .. "([^%]]*)%]%]",
+            replacement = "[[" .. new_stem .. "%1]]",
+        })
+    end
+
+    return patterns
+end
+
+---@param watcher vault.Watcher
+---@param paths table<string, table>
+---@param renames vault.Watcher.RenameSpec[]
+---@return table<string, { new_content: string, count: integer }>, integer
+local function collect_pending_updates(watcher, paths, renames)
+    --- @type table<string, vault.Watcher.RenamePattern[]>
+    local patterns_by_old_path = {}
+    for _, rename in ipairs(renames) do
+        patterns_by_old_path[rename.old_path] = build_rename_patterns(paths, renames, rename)
+    end
+
+    --- @type table<string, { new_content: string, count: integer }>
+    local pending = {}
+    local total = 0
+
+    for _, entry in pairs(paths) do
+        local note_path = entry.path
+        local f = io.open(note_path, "r")
+        if f then
+            local content = f:read("*all")
+            f:close()
+
+            local cur = content
+            local total_n = 0
+
+            for _, rename in ipairs(renames) do
+                local patterns = patterns_by_old_path[rename.old_path] or {}
+                for _, pat in ipairs(patterns) do
+                    if cur:match(pat.match) then
+                        local replaced, n = cur:gsub(pat.gsub_pat, pat.replacement)
+                        if n and n > 0 then
+                            cur = replaced
+                            total_n = total_n + n
+                        end
+                    end
+                end
+            end
+
+            if total_n > 0 then
+                pending[note_path] = { new_content = cur, count = total_n }
+                total = total + total_n
+            end
+        end
+    end
+
+    return pending, total
+end
+
+---@param new_path string
+---@param new_slug string
+---@param watcher_conf table<string, any>
+local function update_frontmatter_slug(new_path, new_slug, watcher_conf)
+    local fm_key = watcher_conf.frontmatter_key
+    if not fm_key or fm_key == "" then
+        return
+    end
+
+    local f = io.open(new_path, "r")
+    if not f then
+        return
+    end
+
+    local content = f:read("*all")
+    f:close()
+
+    local fm_start, fm_end = content:find("^%-%-%-\n.-\n%-%-%-\n")
+    if fm_start then
+        local fm_block = content:sub(fm_start, fm_end)
+        local pattern_fm = "(" .. fm_key .. "%s*:%s*)(.-)(\n)"
+        if fm_block:match(fm_key .. "%s*:") then
+            fm_block = fm_block:gsub(pattern_fm, "%1" .. new_slug .. "%3")
+        else
+            fm_block = fm_block:gsub("^(%-%-%-\n)", "%1" .. fm_key .. ": " .. new_slug .. "\n")
+        end
+        local new_content = content:sub(1, fm_start - 1) .. fm_block .. content:sub(fm_end + 1)
+        local ok_fm, fm_err = pcall(utils.safe_write, new_path, new_content)
+        if not ok_fm then
+            log.warn("frontmatter update failed for %s: %s", new_path, tostring(fm_err))
+        end
+        return
+    end
+
+    local rel = utils.path_to_relpath(new_path)
+    local fm = "---\n" .. fm_key .. ": " .. new_slug .. "\nrelpath: " .. rel .. "\n---\n\n"
+    local ok_fm2, fm_err2 = pcall(utils.safe_write, new_path, fm .. content)
+    if not ok_fm2 then
+        log.warn("frontmatter creation failed for %s: %s", new_path, tostring(fm_err2))
+    end
+end
+
+---@param renames vault.Watcher.RenameSpec[]
+local function rename_open_buffers(renames)
+    local rename_by_old_path = {}
+    for _, rename in ipairs(renames) do
+        rename_by_old_path[rename.old_path] = rename.new_path
+    end
+
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_is_loaded(bufnr) then
+            local name = vim.api.nvim_buf_get_name(bufnr)
+            local new_path = rename_by_old_path[name]
+            if new_path then
+                local modified = vim.bo[bufnr].modified
+                pcall(vim.api.nvim_buf_set_name, bufnr, new_path)
+                vim.bo[bufnr].modified = modified
+                for _, client in pairs(vim.lsp.get_clients({ bufnr = bufnr })) do
+                    pcall(vim.lsp.buf_detach_client, bufnr, client.id)
+                    pcall(vim.lsp.buf_attach_client, bufnr, client.id)
+                end
+            end
+        end
+    end
+end
+
+---@param updated_paths table<string, boolean>
+local function reload_patched_buffers(updated_paths)
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+        if
+            vim.api.nvim_buf_is_loaded(bufnr) and updated_paths[vim.api.nvim_buf_get_name(bufnr)]
+        then
+            vim.api.nvim_buf_call(bufnr, function()
+                pcall(vim.cmd, "checktime")
+            end)
+        end
+    end
+end
+
+local function invalidate_note_state()
+    pcall(function()
+        state.set_global_key("cache.notes.paths", nil)
+        state.set_global_key("cache.notes.slugs", nil)
+        state.set_global_key("cache.notes.basename_index", nil)
+    end)
+end
+
+---@param watcher vault.Watcher
+---@param pending table<string, { new_content: string, count: integer }>
+---@param renames vault.Watcher.RenameSpec[]
+---@param silent boolean
+---@return integer
+local function apply_renames(watcher, pending, renames, silent)
+    local watcher_conf = (config.options and config.options.watcher) or {}
+
+    watcher._writing = true
+    local updated = 0
+    local updated_paths = {}
+    for path, info in pairs(pending) do
+        local ok_sw, sw_err = pcall(utils.safe_write, path, info.new_content)
+        if ok_sw then
+            updated = updated + 1
+            updated_paths[path] = true
+        else
+            vim.schedule(function()
+                log.warn("safe_write failed: %s", tostring(sw_err))
+            end)
+        end
+    end
+
+    for _, rename in ipairs(renames) do
+        update_frontmatter_slug(rename.new_path, rename.new_slug, watcher_conf)
+    end
+
+    watcher._writing = false
+
+    rename_open_buffers(renames)
+    reload_patched_buffers(updated_paths)
+    invalidate_note_state()
+
+    pcall(function()
+        if #renames == 1 then
+            local rename = renames[1]
+            state.set_global_key(
+                "vault.last_rename",
+                {
+                    old = rename.old_path,
+                    new = rename.new_path,
+                    old_slug = rename.old_slug,
+                    new_slug = rename.new_slug,
+                }
+            )
+        end
+        state.set_global_key("vault.last_renames", renames)
+    end)
+
+    if not silent then
+        vim.schedule(function()
+            if #renames == 1 then
+                local rename = renames[1]
+                log.info(
+                    "renamed %s → %s • %d files patched",
+                    rename.old_slug,
+                    rename.new_slug,
+                    updated
+                )
+            else
+                log.info("renamed %d notes • %d files patched", #renames, updated)
+            end
+        end)
+    end
+
+    return updated
+end
+
 --- Start recursive watching of the configured vault root
 function Watcher:start()
     if self.is_watching then
@@ -174,9 +446,11 @@ function Watcher:on_event(filename, events)
             local stem = vim.fn.fnamemodify(path, ":t:r")
             local stem_match = (stem == new_stem)
             -- Prefer: stem match > most recent timestamp
-            if best_path == nil
+            if
+                best_path == nil
                 or (stem_match and not best_stem_match)
-                or (stem_match == best_stem_match and ts > best_ts) then
+                or (stem_match == best_stem_match and ts > best_ts)
+            then
                 best_path = path
                 best_ts = ts
                 best_stem_match = stem_match
@@ -198,84 +472,18 @@ end
 --- @param silent? boolean  suppress notifications (default: honor config.watcher.notify_on_rename)
 --- @return integer
 function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silent)
+    local renames = {
+        {
+            old_path = old_path,
+            new_path = new_path,
+            old_slug = old_slug,
+            new_slug = new_slug,
+        },
+    }
+
     local scanner = require("vault.scanner")
     local paths = scanner.paths()
-
-    -- Obsidian wikilinks typically use the stem (filename without extension
-    -- or directory), e.g. [[My Note]].  Some vaults use the full relative
-    -- path form [[Notes/My Note]].  We must handle both, but be careful:
-    -- stems can collide across directories (e.g. Notes/Foo and Clippings/Foo
-    -- both have stem "Foo").  Only match on the bare stem when it is unique
-    -- across the entire vault; otherwise restrict to the full-slug form to
-    -- avoid patching links that point to a *different* note with the same name.
-    local old_stem = vim.fn.fnamemodify(old_path, ":t:r")
-    local new_stem = vim.fn.fnamemodify(new_path, ":t:r")
-
-    -- Check stem uniqueness: count how many notes share the old stem.
-    local stem_count = 0
-    for slug, _ in pairs(paths) do
-        local s = slug:match("[^/]+$") -- last path component = stem
-        if s == old_stem then
-            stem_count = stem_count + 1
-            if stem_count > 1 then break end -- no need to keep counting
-        end
-    end
-    local stem_is_unique = (stem_count <= 1)
-
-    -- Build match patterns.  Full-slug form is always safe.
-    -- Stem-only form is only safe when the stem is unique across the vault.
-    local patterns = {}
-    local escaped_slug = vim.pesc(old_slug)
-    local escaped_stem = vim.pesc(old_stem)
-
-    -- Full-slug form: [[Notes/My Note]] or [[Notes/My Note|alias]]
-    table.insert(patterns, {
-        match = "%[%[" .. escaped_slug,
-        gsub_pat = "%[%[" .. escaped_slug .. "([^%]]*)%]%]",
-        replacement = "[[" .. new_stem .. "%1]]",
-    })
-    -- Stem-only form: [[My Note]] or [[My Note|alias]]
-    -- Only when stem is unique AND differs from slug (note is in a subdir)
-    if stem_is_unique and old_stem ~= old_slug then
-        table.insert(patterns, {
-            match = "%[%[" .. escaped_stem,
-            gsub_pat = "%[%[" .. escaped_stem .. "([^%]]*)%]%]",
-            replacement = "[[" .. new_stem .. "%1]]",
-        })
-    end
-
-    -- First pass: collect pending changes without writing files so we can prompt
-    local pending = {}
-
-    for _, entry in pairs(paths) do
-        local note_path = entry.path
-        local f = io.open(note_path, "r")
-        if f then
-            local content = f:read("*all")
-            f:close()
-
-            local total_n = 0
-            local cur = content
-            for _, pat in ipairs(patterns) do
-                if cur:match(pat.match) then
-                    local replaced, n = cur:gsub(pat.gsub_pat, pat.replacement)
-                    if n and n > 0 then
-                        cur = replaced
-                        total_n = total_n + n
-                    end
-                end
-            end
-            if total_n > 0 then
-                pending[note_path] = { new_content = cur, count = total_n }
-            end
-        end
-    end
-
-    -- Total replacements
-    local total = 0
-    for _, v in pairs(pending) do
-        total = total + (v.count or 0)
-    end
+    local pending, total = collect_pending_updates(self, paths, renames)
 
     local watcher_conf = (config.options and config.options.watcher) or {}
     local prompt = watcher_conf.prompt_on_rename
@@ -283,129 +491,23 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silen
         prompt = true
     end
 
-    --- Apply the pending wikilink patches, update frontmatter, buffers, and state.
-    --- Extracted so it can be called synchronously or from an async confirm callback.
-    --- @return integer updated  number of files patched
-    local function apply_rename()
-        -- Apply pending changes — suppress watcher during writes to avoid self-triggered events
-        self._writing = true
-        local updated = 0
-        local updated_paths = {}
-        for path, info in pairs(pending) do
-            local ok_sw, sw_err = pcall(utils.safe_write, path, info.new_content)
-            if ok_sw then
-                updated = updated + 1
-                updated_paths[path] = true
-            else
-                vim.schedule(function()
-                    log.warn("safe_write failed: %s", tostring(sw_err))
-                end)
-            end
-        end
-
-        -- Update frontmatter on the renamed file if configured
-        local fm_key = watcher_conf.frontmatter_key
-        if fm_key and fm_key ~= "" then
-            local f = io.open(new_path, "r")
-            if f then
-                local content = f:read("*all")
-                f:close()
-
-                -- find YAML frontmatter (---\n ... ---\n)
-                local fm_start, fm_end = content:find("^%-%-%-\n.-\n%-%-%-\n")
-                if fm_start then
-                    local fm_block = content:sub(fm_start, fm_end)
-                    local pattern_fm = "(" .. fm_key .. "%s*:%s*)(.-)(\n)"
-                    if fm_block:match(fm_key .. "%s*:") then
-                        fm_block = fm_block:gsub(pattern_fm, "%1" .. new_slug .. "%3")
-                    else
-                        -- insert key right after opening ---\n
-                        fm_block =
-                            fm_block:gsub("^(%-%-%-\n)", "%1" .. fm_key .. ": " .. new_slug .. "\n")
-                    end
-                    local new_content = content:sub(1, fm_start - 1)
-                        .. fm_block
-                        .. content:sub(fm_end + 1)
-                    local ok_fm, fm_err = pcall(utils.safe_write, new_path, new_content)
-                    if not ok_fm then
-                        log.warn("frontmatter update failed for %s: %s", new_path, tostring(fm_err))
-                    end
-                else
-                    -- no frontmatter: add one with key and relpath
-                    local rel = utils.path_to_relpath(new_path)
-                    local fm = "---\n"
-                        .. fm_key
-                        .. ": "
-                        .. new_slug
-                        .. "\nrelpath: "
-                        .. rel
-                        .. "\n---\n\n"
-                    local ok_fm2, fm_err2 = pcall(utils.safe_write, new_path, fm .. content)
-                    if not ok_fm2 then
-                        log.warn("frontmatter creation failed for %s: %s", new_path, tostring(fm_err2))
-                    end
-                end
-            end
-        end
-
-        self._writing = false
-
-        -- Update open buffers: rename any buffer that pointed to the old path
-        for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-            if vim.api.nvim_buf_is_loaded(bufnr) then
-                local name = vim.api.nvim_buf_get_name(bufnr)
-                if name == old_path then
-                    local modified = vim.bo[bufnr].modified
-                    pcall(vim.api.nvim_buf_set_name, bufnr, new_path)
-                    vim.bo[bufnr].modified = modified
-                    -- Re-attach LSP clients so they track the new URI
-                    for _, client in pairs(vim.lsp.get_clients({ bufnr = bufnr })) do
-                        pcall(vim.lsp.buf_detach_client, bufnr, client.id)
-                        pcall(vim.lsp.buf_attach_client, bufnr, client.id)
-                    end
-                end
-            end
-        end
-
-        -- Reload open buffers whose files were patched (wikilinks changed on disk)
-        for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-            if vim.api.nvim_buf_is_loaded(bufnr) and updated_paths[vim.api.nvim_buf_get_name(bufnr)] then
-                vim.api.nvim_buf_call(bufnr, function()
-                    pcall(vim.cmd, "checktime")
-                end)
-            end
-        end
-
-        -- Record rename in global state for other subsystems to pick up
-        pcall(function()
-            state.set_global_key(
-                "vault.last_rename",
-                { old = old_path, new = new_path, old_slug = old_slug, new_slug = new_slug }
-            )
-        end)
-
-        if not silent then
-            vim.schedule(function()
-                log.info("renamed %s → %s • %d files patched", old_slug, new_slug, updated)
-            end)
-        end
-
-        return updated
-    end
-
     -- Fast path: no prompt needed (disabled or no files to patch)
     if not prompt or total == 0 then
-        return apply_rename()
+        return apply_renames(self, pending, renames, silent)
     end
 
     -- Async path: show non-blocking confirm popup, apply on "yes"
     require("vault.ui.confirm").confirm({
         message = string.format(
             "Rename %s → %s will patch %d file(s). Apply?",
-            old_slug, new_slug, total
+            old_slug,
+            new_slug,
+            total
         ),
         title = "Vault Rename",
-        on_yes = function() apply_rename() end,
+        on_yes = function()
+            apply_renames(self, pending, renames, silent)
+        end,
         on_no = function()
             if not silent then
                 log.info("Rename patch cancelled")
@@ -429,7 +531,6 @@ function Watcher:handle_base_change(full_path)
         state.set_global_key("bases", nil)
     end)
 end
-
 
 --- Resolve all wiki-links that point to `old_path` by scanning all notes
 --- and replacing occurrences of [[old_slug...]] with [[new_slug...]].
@@ -469,6 +570,97 @@ function Watcher:handle_rename(old_path, new_path, silent)
     end
 
     return self:_do_rename_update(old_path, new_path, old_slug, new_slug, silent)
+end
+
+--- Resolve all wiki-links that point to many renamed notes in a single scan.
+--- Returns the number of files patched.
+--- @param renames { old_path: string, new_path: string }[]
+--- @param silent? boolean suppress notifications
+--- @return integer
+function Watcher:handle_renames(renames, silent)
+    if type(renames) ~= "table" then
+        error("Watcher:handle_renames() requires a table of renames")
+    end
+
+    --- @type vault.Watcher.RenameSpec[]
+    local normalized = {}
+    for _, rename in ipairs(renames) do
+        if
+            type(rename) ~= "table"
+            or type(rename.old_path) ~= "string"
+            or type(rename.new_path) ~= "string"
+        then
+            error("Watcher:handle_renames() expects { old_path, new_path } entries")
+        end
+
+        if rename.old_path ~= rename.new_path then
+            local ok_old, old_slug = pcall(utils.path_to_slug, rename.old_path)
+            local ok_new, new_slug = pcall(utils.path_to_slug, rename.new_path)
+            if ok_old and ok_new then
+                table.insert(normalized, {
+                    old_path = rename.old_path,
+                    new_path = rename.new_path,
+                    old_slug = old_slug,
+                    new_slug = new_slug,
+                })
+            end
+        end
+    end
+
+    if #normalized == 0 then
+        return 0
+    end
+
+    if silent == nil then
+        local watcher_conf = (config.options and config.options.watcher) or {}
+        if watcher_conf.notify_on_rename == false then
+            silent = true
+        else
+            silent = false
+        end
+    end
+
+    if self.oil_guard_enabled and package.loaded["oil"] then
+        vim.defer_fn(function()
+            local scanner = require("vault.scanner")
+            local paths = scanner.paths()
+            local pending = select(1, collect_pending_updates(self, paths, normalized))
+            apply_renames(self, pending, normalized, silent)
+        end, 1000)
+        return 0
+    end
+
+    local scanner = require("vault.scanner")
+    local paths = scanner.paths()
+    local pending, total = collect_pending_updates(self, paths, normalized)
+    local watcher_conf = (config.options and config.options.watcher) or {}
+    local prompt = watcher_conf.prompt_on_rename
+    if prompt == nil then
+        prompt = true
+    end
+
+    if not prompt or total == 0 then
+        return apply_renames(self, pending, normalized, silent)
+    end
+
+    require("vault.ui.confirm").confirm({
+        message = string.format(
+            "Batch rename will patch %d file(s) across %d note(s). Apply?",
+            total,
+            #normalized
+        ),
+        title = "Vault Rename",
+        on_yes = function()
+            apply_renames(self, pending, normalized, silent)
+        end,
+        on_no = function()
+            if not silent then
+                log.info("Rename patch cancelled")
+            end
+        end,
+    })
+
+    return 0
 end
 
 --- Disable the oil guard to allow renames even when oil is loaded
