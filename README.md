@@ -28,6 +28,10 @@ require("vault").setup({
   duplicates = {
     preferred_dirs = { "Inbox", "Daily", "References" },
     ignored_frontmatter_keys = { "modified", "committed" },
+    review_excluded_dirs = { "Ai" },
+    review_excluded_files = { "README.md" },
+    related_excluded_dirs = { "Daily", "Ai" },
+    related_excluded_files = { "README.md" },
     frontmatter_normalizers = {
       title = function(value)
         return value
@@ -56,6 +60,10 @@ require("vault").setup({
 
 - `duplicates.preferred_dirs` controls which folders are favored when recommending keep `A` vs `B`
 - `duplicates.ignored_frontmatter_keys` removes noisy frontmatter keys from duplicate similarity checks
+- `duplicates.review_excluded_dirs` removes whole directories such as `Ai` from same-stem `:Vault duplicates review ...` suggestions
+- `duplicates.review_excluded_files` removes noisy basenames such as `README.md` from same-stem `:Vault duplicates review ...` suggestions
+- `duplicates.related_excluded_dirs` removes whole directories such as `Daily` or `Ai` from Rust-backed `:Vault duplicates related ...` suggestions
+- `duplicates.related_excluded_files` removes noisy basenames such as `README.md` from Rust-backed `:Vault duplicates related ...` suggestions
 - `duplicates.frontmatter_normalizers[key]` can normalize a frontmatter value before duplicate comparison
 - `merge.ignored_conflict_fields` suppresses conflict prompts for fields you consider noise
 - `merge.field_normalizers[key]` can normalize metadata values before conflict detection

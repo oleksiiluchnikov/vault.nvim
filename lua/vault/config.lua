@@ -45,7 +45,7 @@
 --- @field check_duplicate_basename? boolean Enable duplicate filename detection. Example: true
 --- @field wikilinks? { confirm_rewrite?: boolean, confirm_merge?: boolean, confirm_create?: boolean } Wikilink action confirmation settings
 --- @field merge? { ignored_conflict_fields?: string[], field_normalizers?: table<string, fun(value:any, key:string): any>, conflict_biases?: table<string, "a"|"b"|"earliest"|"latest"|fun(conflict: table, key:string): ("a"|"b")?>, conflict_bias_behavior?: "preselect"|"auto_apply", learned_conflict_biases?: { enabled?: boolean, path?: string, behavior?: "preselect"|"auto_apply" } } Merge conflict heuristics
---- @field duplicates? { preferred_dirs?: string[], ignored_frontmatter_keys?: string[], frontmatter_normalizers?: table<string, fun(value:string, key:string): string> } Duplicate review heuristics
+--- @field duplicates? { preferred_dirs?: string[], ignored_frontmatter_keys?: string[], frontmatter_normalizers?: table<string, fun(value:string, key:string): string>, review_excluded_dirs?: string[], review_excluded_files?: string[], related_excluded_dirs?: string[], related_excluded_files?: string[] } Duplicate review heuristics
 ---
 --- @field telescope? table Telescope configuration. Example:
 ---   ```lua
@@ -344,6 +344,10 @@ local DEFAULT_OPTIONS = {
         preferred_dirs = { "Inbox", "Daily", "References" },
         ignored_frontmatter_keys = { "modified", "committed" },
         frontmatter_normalizers = {},
+        review_excluded_dirs = {},
+        review_excluded_files = {},
+        related_excluded_dirs = {},
+        related_excluded_files = {},
     },
 
     bases = {

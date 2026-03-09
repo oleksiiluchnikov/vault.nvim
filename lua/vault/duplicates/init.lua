@@ -400,6 +400,52 @@ local function related_tokens(path)
     return tokens
 end
 
+---@param path string
+---@param excluded string[]
+---@return boolean
+local function path_is_excluded_from_dirs(path, excluded)
+    local relpath = utils.path_to_relpath(path)
+    for _, dir in ipairs(excluded) do
+        if relpath == dir or relpath:sub(1, #dir + 1) == (dir .. "/") then
+            return true
+        end
+    end
+    return false
+end
+
+---@param path string
+---@param excluded string[]
+---@return boolean
+local function path_is_excluded_from_files(path, excluded)
+    local name = vim.fn.fnamemodify(path, ":t")
+    for _, filename in ipairs(excluded) do
+        if name == filename then
+            return true
+        end
+    end
+    return false
+end
+
+---@param path string
+---@return boolean
+local function review_path_is_excluded(path)
+    local excluded = config.options.duplicates and config.options.duplicates.review_excluded_dirs
+        or {}
+    local files = config.options.duplicates and config.options.duplicates.review_excluded_files
+        or {}
+    return path_is_excluded_from_dirs(path, excluded) or path_is_excluded_from_files(path, files)
+end
+
+---@param path string
+---@return boolean
+local function related_path_is_excluded(path)
+    local excluded = config.options.duplicates and config.options.duplicates.related_excluded_dirs
+        or {}
+    local files = config.options.duplicates and config.options.duplicates.related_excluded_files
+        or {}
+    return path_is_excluded_from_dirs(path, excluded) or path_is_excluded_from_files(path, files)
+end
+
 ---@param tokens_a string[]
 ---@param tokens_b string[]
 ---@param shared_count integer
@@ -642,9 +688,13 @@ function M.scan(root, path_index, opts)
 
     local by_stem = {}
     for _, path in ipairs(paths) do
+        if review_path_is_excluded(path) then
+            goto continue
+        end
         local stem = strip_copy_suffix(vim.fn.fnamemodify(path, ":t:r")):lower()
         by_stem[stem] = by_stem[stem] or {}
         table.insert(by_stem[stem], path)
+        ::continue::
     end
 
     local items = {}
@@ -719,6 +769,10 @@ function M.scan_related(root, path_index, opts)
     local entries = {}
     local token_index = {}
     for _, path in ipairs(paths) do
+        if related_path_is_excluded(path) then
+            goto continue
+        end
+
         local tokens = related_tokens(path)
         if #tokens > 0 then
             local entry = {
@@ -735,6 +789,7 @@ function M.scan_related(root, path_index, opts)
                 token_index[token][#token_index[token] + 1] = entry_index
             end
         end
+        ::continue::
     end
 
     local analysis_cache = {}
