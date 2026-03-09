@@ -2,6 +2,8 @@ local completions = require("vault.commands.completions")
 local log = require("vault.log").scope("cmd")
 --- @class vault.commands.callback
 local callbacks = {}
+local complete_duplicates_review
+local complete_duplicates_related
 
 local pickers = require("telescope._extensions.vault.pickers")
 
@@ -68,7 +70,7 @@ function callbacks.toggle_link()
         url_start = s + 1
     end
 
-        log.warn("No URL or Markdown link found under cursor")
+    log.warn("No URL or Markdown link found under cursor")
 end
 
 --- ============================================================================
@@ -104,7 +106,20 @@ local function build_subcommands()
                 })
             end,
             complete = function(prefix)
-                local methods = { "new", "rename", "delete", "extract", "inlinks", "outlinks", "tags", "properties", "cluster", "random", "preview", "obsidian" }
+                local methods = {
+                    "new",
+                    "rename",
+                    "delete",
+                    "extract",
+                    "inlinks",
+                    "outlinks",
+                    "tags",
+                    "properties",
+                    "cluster",
+                    "random",
+                    "preview",
+                    "obsidian",
+                }
                 -- Also include Note methods
                 local bufpath = vim.fn.expand("%:p")
                 if bufpath:match("%.md$") then
@@ -120,7 +135,9 @@ local function build_subcommands()
                         end)
                     end
                 end
-                return vim.tbl_filter(function(m) return m:find(prefix, 1, true) == 1 end, methods)
+                return vim.tbl_filter(function(m)
+                    return m:find(prefix, 1, true) == 1
+                end, methods)
             end,
             new = {
                 run = function(args)
@@ -181,7 +198,9 @@ local function build_subcommands()
                     local input = args[1] or ""
                     if input == "" then
                         local path = vim.fn.expand("%")
-                        if type(path) == "table" then path = path[1] end
+                        if type(path) == "table" then
+                            path = path[1]
+                        end
                         input = require("vault.utils").path_to_slug(path)
                     end
                     local notes = require("vault.notes")()
@@ -193,7 +212,9 @@ local function build_subcommands()
                     notes = require("vault.notes")()
                     local cluster = notes:to_cluster(note, 0)
                     local picker = pickers.notes({ notes = cluster })
-                    if picker then picker:find() end
+                    if picker then
+                        picker:find()
+                    end
                 end,
                 complete = function(prefix)
                     return completions.note_slugs(nil, "Vault note cluster " .. prefix, nil) or {}
@@ -219,9 +240,15 @@ local function build_subcommands()
                     local note = require("vault.notes.note")(path)
                     local permanent = vim.tbl_contains(args, "--permanent")
                     require("vault.ui.confirm").confirm({
-                        message = string.format("Delete note '%s'?%s", note.data.slug, permanent and " (PERMANENT)" or " (move to .trash)"),
+                        message = string.format(
+                            "Delete note '%s'?%s",
+                            note.data.slug,
+                            permanent and " (PERMANENT)" or " (move to .trash)"
+                        ),
                         title = "Vault",
-                        on_yes = function() note:delete(permanent) end,
+                        on_yes = function()
+                            note:delete(permanent)
+                        end,
                         on_no = function()
                             log.info("Delete cancelled")
                         end,
@@ -253,14 +280,76 @@ local function build_subcommands()
             },
         },
 
+        conflicts = {
+            run = function(args)
+                callbacks.conflicts_review({ fargs = args })
+            end,
+            complete = function(prefix)
+                local subs = { "review" }
+                return vim.tbl_filter(function(m)
+                    return m:find(prefix, 1, true) == 1
+                end, subs)
+            end,
+            review = {
+                run = function(args)
+                    callbacks.conflicts_review({ fargs = args })
+                end,
+                complete = function(prefix)
+                    return completions.dirs(nil, "Vault conflicts review " .. prefix, nil) or {}
+                end,
+            },
+        },
+
+        duplicates = {
+            run = function(args)
+                callbacks.duplicates_review({ fargs = args })
+            end,
+            complete = function(prefix)
+                local subs = { "review", "related" }
+                return vim.tbl_filter(function(m)
+                    return m:find(prefix, 1, true) == 1
+                end, subs)
+            end,
+            review = {
+                run = function(args)
+                    callbacks.duplicates_review({ fargs = args })
+                end,
+                complete = function(prefix, line)
+                    return complete_duplicates_review(prefix, line)
+                end,
+            },
+            related = {
+                run = function(args)
+                    callbacks.duplicates_related({ fargs = args })
+                end,
+                complete = function(prefix, line)
+                    return complete_duplicates_related(prefix, line)
+                end,
+            },
+        },
+
         -- :Vault notes [filter] — vault-wide note browsing
         notes = {
             run = function(args)
                 callbacks.notes({ fargs = args })
             end,
             complete = function(prefix)
-                local subs = { "linked", "orphans", "leaves", "internals", "dangling", "resolved", "status", "dir", "empty", "no-frontmatter", "empty-property" }
-                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+                local subs = {
+                    "linked",
+                    "orphans",
+                    "leaves",
+                    "internals",
+                    "dangling",
+                    "resolved",
+                    "status",
+                    "dir",
+                    "empty",
+                    "no-frontmatter",
+                    "empty-property",
+                }
+                return vim.tbl_filter(function(s)
+                    return s:find(prefix, 1, true) == 1
+                end, subs)
             end,
             linked = {
                 run = function()
@@ -291,7 +380,9 @@ local function build_subcommands()
             dangling = {
                 run = function()
                     safe_find(
-                        pickers.notes({ notes = require("vault.notes")():with_outlinks_unresolved() }),
+                        pickers.notes({
+                            notes = require("vault.notes")():with_outlinks_unresolved(),
+                        }),
                         "No dangling links found"
                     )
                 end,
@@ -299,7 +390,9 @@ local function build_subcommands()
             resolved = {
                 run = function()
                     safe_find(
-                        pickers.notes({ notes = require("vault.notes")():with_outlinks_resolved_only() }),
+                        pickers.notes({
+                            notes = require("vault.notes")():with_outlinks_resolved_only(),
+                        }),
                         "No notes with all outlinks resolved"
                     )
                 end,
@@ -340,8 +433,12 @@ local function build_subcommands()
                     local ok, props = pcall(function()
                         return vim.tbl_keys(require("vault.scanner").properties())
                     end)
-                    if not ok then return {} end
-                    return vim.tbl_filter(function(p) return p:find(prefix, 1, true) == 1 end, props)
+                    if not ok then
+                        return {}
+                    end
+                    return vim.tbl_filter(function(p)
+                        return p:find(prefix, 1, true) == 1
+                    end, props)
                 end,
             },
         },
@@ -366,7 +463,8 @@ local function build_subcommands()
                     if #args < 2 then
                         log.warn("Usage: :Vault tags rename <old> <new>")
                         return
-                    end                    require("vault.api").rename_tag(args[1], args[2])
+                    end
+                    require("vault.api").rename_tag(args[1], args[2])
                 end,
                 complete = function(prefix)
                     return completions.tags(nil, "Vault tags rename " .. prefix, nil) or {}
@@ -419,7 +517,9 @@ local function build_subcommands()
                 local ok, props = pcall(function()
                     return vim.tbl_keys(require("vault.scanner").properties())
                 end)
-                if not ok then return {} end
+                if not ok then
+                    return {}
+                end
                 local subs = { "rename" }
                 local results = {}
                 for _, s in ipairs(subs) do
@@ -453,8 +553,12 @@ local function build_subcommands()
                     local ok, props = pcall(function()
                         return vim.tbl_keys(require("vault.scanner").properties())
                     end)
-                    if not ok then return {} end
-                    return vim.tbl_filter(function(p) return p:find(prefix, 1, true) == 1 end, props)
+                    if not ok then
+                        return {}
+                    end
+                    return vim.tbl_filter(function(p)
+                        return p:find(prefix, 1, true) == 1
+                    end, props)
                 end,
             },
         },
@@ -483,21 +587,29 @@ local function build_subcommands()
             end,
             complete = function(prefix)
                 local subs = { "unresolved", "resolved" }
-                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+                return vim.tbl_filter(function(s)
+                    return s:find(prefix, 1, true) == 1
+                end, subs)
             end,
             unresolved = {
                 run = function()
                     -- Use the fast Rust scanner path (no args) instead of Lua notes-based parsing
                     local wikilinks = require("vault.wikilinks")()
                     local unresolved = wikilinks:unresolved()
-                    safe_find(pickers.wikilinks({ wikilinks = unresolved }), "No unresolved wikilinks found")
+                    safe_find(
+                        pickers.wikilinks({ wikilinks = unresolved }),
+                        "No unresolved wikilinks found"
+                    )
                 end,
             },
             resolved = {
                 run = function()
                     local wikilinks = require("vault.wikilinks")()
                     local resolved = wikilinks:resolved()
-                    safe_find(pickers.wikilinks({ wikilinks = resolved }), "No resolved wikilinks found")
+                    safe_find(
+                        pickers.wikilinks({ wikilinks = resolved }),
+                        "No resolved wikilinks found"
+                    )
                 end,
             },
         },
@@ -508,8 +620,20 @@ local function build_subcommands()
                 callbacks.tasks_list()
             end,
             complete = function(prefix)
-                local subs = { "new", "status", "pick-next", "promote", "list", "kanban", "backlog", "doctor", "recur" }
-                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+                local subs = {
+                    "new",
+                    "status",
+                    "pick-next",
+                    "promote",
+                    "list",
+                    "kanban",
+                    "backlog",
+                    "doctor",
+                    "recur",
+                }
+                return vim.tbl_filter(function(s)
+                    return s:find(prefix, 1, true) == 1
+                end, subs)
             end,
             new = {
                 run = function(args)
@@ -524,7 +648,9 @@ local function build_subcommands()
                     local notes = require("vault.tasks.notes")
                     local path = notes.current_task_path()
                     if not path then
-                        return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, notes.statuses())
+                        return vim.tbl_filter(function(s)
+                            return s:find(prefix, 1, true) == 1
+                        end, notes.statuses())
                     end
                     local task = notes.read_task(path)
                     if not task then
@@ -571,7 +697,9 @@ local function build_subcommands()
                 end,
                 complete = function(prefix)
                     local subs = { "preview", "now", "sweep" }
-                    return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+                    return vim.tbl_filter(function(s)
+                        return s:find(prefix, 1, true) == 1
+                    end, subs)
                 end,
                 preview = {
                     run = function()
@@ -607,7 +735,9 @@ local function build_subcommands()
                 end
             end,
             complete = function()
-                local ok, bases = pcall(function() return require("vault.bases")() end)
+                local ok, bases = pcall(function()
+                    return require("vault.bases")()
+                end)
                 return (ok and bases) and bases:names() or {}
             end,
         },
@@ -646,7 +776,9 @@ local function build_subcommands()
                     for i, c in ipairs(columns_arg) do
                         columns_arg[i] = vim.trim(c)
                     end
-                    columns_arg = vim.tbl_filter(function(c) return c ~= "" end, columns_arg)
+                    columns_arg = vim.tbl_filter(function(c)
+                        return c ~= ""
+                    end, columns_arg)
                     filter = args[2]
                     args = vim.list_slice(args, 2)
                 end
@@ -667,7 +799,12 @@ local function build_subcommands()
                     notes = require("vault.notes")():filter("content", [[^\s*$]], "regex", false)
                     desc = "empty notes"
                 elseif filter == "no-frontmatter" then
-                    notes = require("vault.notes")():filter("content", [=[^\(---\)\@!.*$]=], "regex", true)
+                    notes = require("vault.notes")():filter(
+                        "content",
+                        [=[^\(---\)\@!.*$]=],
+                        "regex",
+                        true
+                    )
                     desc = "no frontmatter"
                 elseif filter == "dir" and args[2] then
                     notes = require("vault.notes")():filter("relpath", args[2], "startswith", false)
@@ -691,10 +828,15 @@ local function build_subcommands()
                             log.error("Base not found: %s", base_name)
                             return
                         end
-                        grid_editor.open({ base = base, columns = columns_arg, group_by = kv_opts.group_by })
+                        grid_editor.open({
+                            base = base,
+                            columns = columns_arg,
+                            group_by = kv_opts.group_by,
+                        })
                     else
                         -- No base name given — open Telescope bases picker
-                        local ok, picker = pcall(require, "telescope._extensions.vault.pickers.bases")
+                        local ok, picker =
+                            pcall(require, "telescope._extensions.vault.pickers.bases")
                         if ok then
                             picker():find()
                         else
@@ -729,14 +871,22 @@ local function build_subcommands()
                     notes.map = candidates
                     desc = "delete candidates"
                 elseif filter == "empty-property" then
-                    require("vault.api").open_picker_notes_with_empty_property_value(args[2], args[3])
+                    require("vault.api").open_picker_notes_with_empty_property_value(
+                        args[2],
+                        args[3]
+                    )
                     return
                 else
                     notes = require("vault.notes")():filter("slug", filter, "fuzzy")
                     desc = "filter:" .. filter
                 end
 
-                grid_editor.open({ notes = notes, filter_desc = desc, columns = columns_arg, group_by = kv_opts.group_by })
+                grid_editor.open({
+                    notes = notes,
+                    filter_desc = desc,
+                    columns = columns_arg,
+                    group_by = kv_opts.group_by,
+                })
             end,
             complete = function(prefix, line)
                 if line and line:match("process%s+base%s+") then
@@ -745,7 +895,9 @@ local function build_subcommands()
                         local bases = Bases()
                         local names = bases:names()
                         local sub = line:match("process%s+base%s+(.*)") or ""
-                        return vim.tbl_filter(function(s) return s:find(sub, 1, true) == 1 end, names)
+                        return vim.tbl_filter(function(s)
+                            return s:find(sub, 1, true) == 1
+                        end, names)
                     end
                     return {}
                 end
@@ -754,22 +906,43 @@ local function build_subcommands()
                     local last_comma = col_arg:match(".*,()")
                     local col_prefix = last_comma and col_arg:sub(last_comma) or ""
                     local builtin = {
-                        "slug", "title", "tags", "status",
-                        "file.name", "file.folder", "file.path", "file.ext",
-                        "file.ctime", "file.mtime", "file.size",
-                        "file.body", "file.slug",
-                        "file.inlinks", "file.outlinks", "file.headings",
-                        "note.name", "note.folder", "note.path", "note.ext",
-                        "note.ctime", "note.mtime", "note.size",
-                        "note.body", "note.slug",
-                        "note.inlinks", "note.outlinks", "note.headings",
+                        "slug",
+                        "title",
+                        "tags",
+                        "status",
+                        "file.name",
+                        "file.folder",
+                        "file.path",
+                        "file.ext",
+                        "file.ctime",
+                        "file.mtime",
+                        "file.size",
+                        "file.body",
+                        "file.slug",
+                        "file.inlinks",
+                        "file.outlinks",
+                        "file.headings",
+                        "note.name",
+                        "note.folder",
+                        "note.path",
+                        "note.ext",
+                        "note.ctime",
+                        "note.mtime",
+                        "note.size",
+                        "note.body",
+                        "note.slug",
+                        "note.inlinks",
+                        "note.outlinks",
+                        "note.headings",
                     }
                     local ok_core, core = pcall(require, "vault_core")
                     if ok_core and core.fields then
                         local cfg = require("vault.config")
-                        local ok_f, fields = pcall(core.fields,
+                        local ok_f, fields = pcall(
+                            core.fields,
                             cfg.options and cfg.options.root or "",
-                            cfg.options and cfg.options.ignore or {})
+                            cfg.options and cfg.options.ignore or {}
+                        )
                         if ok_f and type(fields) == "table" then
                             for k, _ in pairs(fields) do
                                 if not vim.tbl_contains(builtin, k) then
@@ -782,17 +955,39 @@ local function build_subcommands()
                         return s:find(col_prefix, 1, true) == 1
                     end, builtin)
                     local base_part = last_comma and col_arg:sub(1, last_comma - 1) or ""
-                    return vim.tbl_map(function(s) return base_part .. s end, matches)
+                    return vim.tbl_map(function(s)
+                        return base_part .. s
+                    end, matches)
                 end
                 -- Complete group_by= with known column names
                 if prefix:match("^group_by=") then
                     local gp = prefix:match("^group_by=(.*)$") or ""
                     local cols = { "status", "tags", "title", "dir" }
-                    return vim.tbl_map(function(c) return "group_by=" .. c end,
-                        vim.tbl_filter(function(c) return c:find(gp, 1, true) == 1 end, cols))
+                    return vim.tbl_map(
+                        function(c)
+                            return "group_by=" .. c
+                        end,
+                        vim.tbl_filter(function(c)
+                            return c:find(gp, 1, true) == 1
+                        end, cols)
+                    )
                 end
-                local subs = { "base", "undo", "orphans", "leaves", "empty", "no-frontmatter", "dir", "tag", "empty-property", "candidates-delete", "group_by=" }
-                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+                local subs = {
+                    "base",
+                    "undo",
+                    "orphans",
+                    "leaves",
+                    "empty",
+                    "no-frontmatter",
+                    "dir",
+                    "tag",
+                    "empty-property",
+                    "candidates-delete",
+                    "group_by=",
+                }
+                return vim.tbl_filter(function(s)
+                    return s:find(prefix, 1, true) == 1
+                end, subs)
             end,
         },
 
@@ -809,7 +1004,9 @@ local function build_subcommands()
                     for i, c in ipairs(columns_arg) do
                         columns_arg[i] = vim.trim(c)
                     end
-                    columns_arg = vim.tbl_filter(function(c) return c ~= "" end, columns_arg)
+                    columns_arg = vim.tbl_filter(function(c)
+                        return c ~= ""
+                    end, columns_arg)
                     filter = args[2]
                     args = vim.list_slice(args, 2)
                 end
@@ -846,8 +1043,11 @@ local function build_subcommands()
                         end
                         list_editor.open({ base = base, columns = columns_arg })
                     else
-                        local ok, picker = pcall(require, "telescope._extensions.vault.pickers.bases")
-                        if ok then picker():find() end
+                        local ok, picker =
+                            pcall(require, "telescope._extensions.vault.pickers.bases")
+                        if ok then
+                            picker():find()
+                        end
                     end
                     return
                 else
@@ -863,12 +1063,16 @@ local function build_subcommands()
                     if ok then
                         local names = Bases():names()
                         local sub = line:match("list%s+base%s+(.*)") or ""
-                        return vim.tbl_filter(function(s) return s:find(sub, 1, true) == 1 end, names)
+                        return vim.tbl_filter(function(s)
+                            return s:find(sub, 1, true) == 1
+                        end, names)
                     end
                     return {}
                 end
                 local subs = { "base", "orphans", "leaves", "dir", "tag" }
-                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+                return vim.tbl_filter(function(s)
+                    return s:find(prefix, 1, true) == 1
+                end, subs)
             end,
         },
 
@@ -890,7 +1094,9 @@ local function build_subcommands()
                         group_field = v
                     elseif k == "fields" then
                         display_fields = vim.split(v, ",", { plain = true })
-                        for i, f in ipairs(display_fields) do display_fields[i] = vim.trim(f) end
+                        for i, f in ipairs(display_fields) do
+                            display_fields[i] = vim.trim(f)
+                        end
                     elseif k == "mode" then
                         render_mode = v
                     else
@@ -920,7 +1126,8 @@ local function build_subcommands()
                         })
                     else
                         -- No base name given — open Telescope bases picker
-                        local ok, picker = pcall(require, "telescope._extensions.vault.pickers.bases")
+                        local ok, picker =
+                            pcall(require, "telescope._extensions.vault.pickers.bases")
                         if ok then
                             picker():find()
                         else
@@ -938,7 +1145,12 @@ local function build_subcommands()
                     })
                     desc = "tag:" .. remaining[2]
                 elseif filter == "dir" and remaining[2] then
-                    notes = require("vault.notes")():filter("relpath", remaining[2], "startswith", false)
+                    notes = require("vault.notes")():filter(
+                        "relpath",
+                        remaining[2],
+                        "startswith",
+                        false
+                    )
                     desc = "dir:" .. remaining[2]
                 else
                     notes = require("vault.notes")():filter("slug", filter, "fuzzy")
@@ -960,12 +1172,16 @@ local function build_subcommands()
                         local bases = Bases()
                         local names = bases:names()
                         local sub = line:match("kanban%s+base%s+(.*)") or ""
-                        return vim.tbl_filter(function(s) return s:find(sub, 1, true) == 1 end, names)
+                        return vim.tbl_filter(function(s)
+                            return s:find(sub, 1, true) == 1
+                        end, names)
                     end
                     return {}
                 end
                 local subs = { "base", "tag", "dir", "group=", "fields=", "mode=" }
-                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+                return vim.tbl_filter(function(s)
+                    return s:find(prefix, 1, true) == 1
+                end, subs)
             end,
         },
 
@@ -1012,7 +1228,8 @@ local function build_subcommands()
                             primary_field = primary_field,
                         })
                     else
-                        local ok, picker = pcall(require, "telescope._extensions.vault.pickers.bases")
+                        local ok, picker =
+                            pcall(require, "telescope._extensions.vault.pickers.bases")
                         if ok then
                             picker():find()
                         else
@@ -1030,7 +1247,12 @@ local function build_subcommands()
                     })
                     desc = "tag:" .. remaining[2]
                 elseif filter == "dir" and remaining[2] then
-                    notes = require("vault.notes")():filter("relpath", remaining[2], "startswith", false)
+                    notes = require("vault.notes")():filter(
+                        "relpath",
+                        remaining[2],
+                        "startswith",
+                        false
+                    )
                     desc = "dir:" .. remaining[2]
                 else
                     notes = require("vault.notes")():filter("slug", filter, "fuzzy")
@@ -1051,12 +1273,16 @@ local function build_subcommands()
                         local bases = Bases()
                         local names = bases:names()
                         local sub = line:match("calendar%s+base%s+(.*)") or ""
-                        return vim.tbl_filter(function(s) return s:find(sub, 1, true) == 1 end, names)
+                        return vim.tbl_filter(function(s)
+                            return s:find(sub, 1, true) == 1
+                        end, names)
                     end
                     return {}
                 end
                 local subs = { "base", "tag", "dir", "date=", "primary=" }
-                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+                return vim.tbl_filter(function(s)
+                    return s:find(prefix, 1, true) == 1
+                end, subs)
             end,
         },
 
@@ -1167,7 +1393,9 @@ local function build_subcommands()
             end,
             complete = function(prefix)
                 local subs = { "start", "stop", "status" }
-                return vim.tbl_filter(function(s) return s:find(prefix, 1, true) == 1 end, subs)
+                return vim.tbl_filter(function(s)
+                    return s:find(prefix, 1, true) == 1
+                end, subs)
             end,
         },
 
@@ -1193,33 +1421,49 @@ local function build_subcommands()
                 vim.ui.select(items, {
                     prompt = "Trashed notes (" .. #items .. ") — select to restore or delete:",
                 }, function(choice)
-                    if not choice then return end
+                    if not choice then
+                        return
+                    end
                     local full_path = trash_dir .. "/" .. choice
                     require("vault.ui.confirm").select({
                         message = "Note: " .. choice,
                         title = "Vault Trash",
                         choices = {
-                            { key = "r", label = "Restore", action = function()
-                                local restore_path = config.options.root .. "/" .. choice
-                                if vim.fn.filereadable(restore_path) == 1 then
-                                    log.error("A note with that name already exists in the vault")
-                                    return
-                                end
-                                local ok, err = (vim.uv or vim.loop).fs_rename(full_path, restore_path)
-                                if ok then
-                                    log.info("Restored: %s", choice)
-                                else
-                                    log.error("Restore failed: %s", tostring(err))
-                                end
-                            end },
-                            { key = "d", label = "Permanent delete", action = function()
-                                local ok, err = os.remove(full_path)
-                                if ok then
-                                    log.info("Permanently deleted: %s", choice)
-                                else
-                                    log.error("Delete failed: %s", tostring(err))
-                                end
-                            end, danger = true },
+                            {
+                                key = "r",
+                                label = "Restore",
+                                action = function()
+                                    local restore_path = config.options.root .. "/" .. choice
+                                    if vim.fn.filereadable(restore_path) == 1 then
+                                        log.error(
+                                            "A note with that name already exists in the vault"
+                                        )
+                                        return
+                                    end
+                                    local ok, err = (vim.uv or vim.loop).fs_rename(
+                                        full_path,
+                                        restore_path
+                                    )
+                                    if ok then
+                                        log.info("Restored: %s", choice)
+                                    else
+                                        log.error("Restore failed: %s", tostring(err))
+                                    end
+                                end,
+                            },
+                            {
+                                key = "d",
+                                label = "Permanent delete",
+                                action = function()
+                                    local ok, err = os.remove(full_path)
+                                    if ok then
+                                        log.info("Permanently deleted: %s", choice)
+                                    else
+                                        log.error("Delete failed: %s", tostring(err))
+                                    end
+                                end,
+                                danger = true,
+                            },
                             { key = "c", label = "Cancel", action = function() end },
                         },
                     })
@@ -1264,7 +1508,12 @@ local function build_subcommands()
                 end
                 safe_find(
                     pickers.notes({
-                        notes = require("vault.notes")():filter("relpath", vim.fn.fnamemodify(inbox_dir, ":t"), "startswith", false),
+                        notes = require("vault.notes")():filter(
+                            "relpath",
+                            vim.fn.fnamemodify(inbox_dir, ":t"),
+                            "startswith",
+                            false
+                        ),
                     }),
                     "No notes in inbox"
                 )
@@ -1317,6 +1566,14 @@ local function build_subcommands()
             complete = function()
                 return vim.tbl_keys(require("vault.api"))
             end,
+        },
+
+        merge = {
+            biases = {
+                run = function()
+                    require("vault.merge_biases").open()
+                end,
+            },
         },
     }
 end
@@ -1528,7 +1785,9 @@ end
 function callbacks.daily_append(text)
     local config = require("vault.config")
     local today = os.date("%Y-%m-%d %A")
-    if type(today) ~= "string" then return end
+    if type(today) ~= "string" then
+        return
+    end
     local daily_dir = config.dir("journal.daily")
     if not daily_dir then
         log.error("Journal daily directory not configured (dirs.journal.daily)")
@@ -1551,16 +1810,16 @@ function callbacks.today_dictate()
     end
     local config = require("vault.config")
     local today = os.date("%Y-%m-%d %A")
-    if type(today) ~= "string" then return end
+    if type(today) ~= "string" then
+        return
+    end
     local daily_dir = config.dir("journal.daily")
     if not daily_dir then
         log.error("Journal daily directory not configured")
         return
     end
     local path = string.format("%s/%s%s", daily_dir, today, config.options.ext)
-    local ctx = vim.fn.filereadable(path) == 1
-        and table.concat(vim.fn.readfile(path), "\n")
-        or ""
+    local ctx = vim.fn.filereadable(path) == 1 and table.concat(vim.fn.readfile(path), "\n") or ""
     local Note = require("vault.notes.note")
     -- Pass context via stdin ("--context -") to avoid argument-length limits
     -- and to correctly handle multiline/special-char note content.
@@ -1568,7 +1827,9 @@ function callbacks.today_dictate()
         { "ask", "--dictate", "--json", "--context", "-", "--placeholder", "Say something…" },
         { stdin = ctx },
         function(out)
-            if out.code ~= 0 then return end
+            if out.code ~= 0 then
+                return
+            end
             vim.schedule(function()
                 local ok, json = pcall(vim.json.decode, vim.trim(out.stdout))
                 if ok and json.ok and json.value ~= "" then
@@ -1651,10 +1912,7 @@ end
 --- Opens a picker with linked notes
 --- @return nil
 function callbacks.open_linked_picker()
-    safe_find(
-        pickers.notes({ notes = require("vault.notes")():linked() }),
-        "No linked notes found"
-    )
+    safe_find(pickers.notes({ notes = require("vault.notes")():linked() }), "No linked notes found")
 end
 
 --- Opens a live grep picker with fuzzy search
@@ -1737,6 +1995,457 @@ function callbacks.rename(args)
     vim.cmd("bdelete!")
     note:edit()
 end
+
+--- vault.ConflictsReview
+--- Open a resolver queue from a markdown conflict report.
+--- ```vim
+--- :Vault conflicts review reports/references-conflicts-review.md
+--- ```
+--- @param args vim.api.keyset.create_user_command.command_args
+function callbacks.conflicts_review(args)
+    local root = args.fargs and args.fargs[1] or ""
+    if root == "" then
+        local current = vim.fn.expand("%:p")
+        if type(current) == "string" and current ~= "" and current:match("%.md$") then
+            root = vim.fn.fnamemodify(current, ":h")
+        else
+            root = require("vault.config").options.root
+        end
+    end
+    if type(root) ~= "string" or root == "" then
+        log.warn("Provide a conflict review root")
+        return
+    end
+    local abs_root = root
+    if not abs_root:match("^/") then
+        abs_root = require("vault.utils").relpath_to_path(root)
+    end
+    abs_root = vim.fn.fnamemodify(abs_root, ":p")
+    if vim.fn.isdirectory(abs_root) == 0 then
+        log.warn("Conflict review directory not found: %s", abs_root)
+        return
+    end
+    require("vault.conflicts").review(abs_root)
+end
+
+--- vault.DuplicatesReview
+--- Review duplicate note candidates through a diff-first A/B UI.
+--- ```vim
+--- :Vault duplicates review References
+--- :Vault duplicates review vault
+--- :Vault duplicates review dir References
+--- :Vault duplicates review tags test
+--- :Vault duplicates review kind metadata
+--- :Vault duplicates review dir Inbox kind body
+--- ```
+---@param args string[]
+---@param start_index integer
+---@param stop_words table<string, boolean>
+---@return string, integer
+local function collect_clause_text(args, start_index, stop_words)
+    local parts = {}
+    local index = start_index
+    while index <= #args and not stop_words[args[index]] do
+        parts[#parts + 1] = args[index]
+        index = index + 1
+    end
+    return table.concat(parts, " "), index
+end
+
+---@param args string[]
+---@return string|nil, table|nil
+local function parse_duplicates_review_args(args)
+    local stop_words = {
+        dir = true,
+        tags = true,
+        kind = true,
+        root = true,
+        vault = true,
+    }
+    local root = nil
+    local dirs = {}
+    local tags = {}
+    local kind_tokens = {}
+    local index = 1
+
+    while index <= #args do
+        local token = args[index]
+        if token == "vault" then
+            root = require("vault.config").options.root
+            index = index + 1
+        elseif token == "root" then
+            local value
+            value, index = collect_clause_text(args, index + 1, stop_words)
+            if value == "" then
+                return nil, nil
+            end
+            root = value
+        elseif token == "dir" then
+            local value
+            value, index = collect_clause_text(args, index + 1, stop_words)
+            if value == "" then
+                return nil, nil
+            end
+            dirs[#dirs + 1] = value
+        elseif token == "tags" then
+            index = index + 1
+            while index <= #args and not stop_words[args[index]] do
+                tags[#tags + 1] = args[index]
+                index = index + 1
+            end
+            if vim.tbl_isempty(tags) then
+                return nil, nil
+            end
+        elseif token == "kind" then
+            index = index + 1
+            while index <= #args and not stop_words[args[index]] do
+                kind_tokens[#kind_tokens + 1] = args[index]
+                index = index + 1
+            end
+            if vim.tbl_isempty(kind_tokens) then
+                return nil, nil
+            end
+        elseif index == 1 then
+            root = table.concat(vim.list_slice(args, index), " ")
+            index = #args + 1
+        else
+            log.warn("Unknown duplicates review filter: %s", token)
+            return nil, nil
+        end
+    end
+
+    return root,
+        {
+            dirs = dirs,
+            tags = tags,
+            kind_tokens = kind_tokens,
+        }
+end
+
+local DUPLICATES_CLAUSE_KEYWORDS = { "vault", "root", "dir", "tags", "kind" }
+
+---@param root string|nil
+---@param clauses table
+---@return string
+local function resolve_duplicates_root(root, clauses)
+    local has_filters = not vim.tbl_isempty(clauses.dirs)
+        or not vim.tbl_isempty(clauses.tags)
+        or not vim.tbl_isempty(clauses.kind_tokens)
+    if root ~= nil and root ~= "" then
+        return root
+    end
+    if has_filters then
+        return require("vault.config").options.root
+    end
+    local current = vim.fn.expand("%:p")
+    if type(current) == "string" and current ~= "" and current:match("%.md$") then
+        return vim.fn.fnamemodify(current, ":h")
+    end
+    return require("vault.config").options.root
+end
+
+---@param clauses table
+---@param path_index table<string, table>
+---@return table<string, table<string, boolean>>
+local function build_duplicates_path_filters(clauses, path_index)
+    local path_filters = {}
+    if not vim.tbl_isempty(clauses.dirs) then
+        local dir_paths = {}
+        for _, dir in ipairs(clauses.dirs) do
+            for _, entry in pairs(path_index) do
+                local path = type(entry) == "table" and entry.path or nil
+                if type(path) == "string" then
+                    local relpath = require("vault.utils").path_to_relpath(path)
+                    if relpath == dir or relpath:sub(1, #dir + 1) == (dir .. "/") then
+                        dir_paths[path] = true
+                    end
+                end
+            end
+        end
+        path_filters.dirs = dir_paths
+    end
+
+    if not vim.tbl_isempty(clauses.tags) then
+        local tag_paths = {}
+        local notes = require("vault.notes")():filter({
+            search_term = "tags",
+            include = clauses.tags,
+            exclude = {},
+            match_opt = "exact",
+            mode = "any",
+        })
+        for _, note in pairs(notes.map or {}) do
+            tag_paths[note.data.path] = true
+        end
+        path_filters.tags = tag_paths
+    end
+    return path_filters
+end
+
+---@param clauses table
+---@param kinds string[]|nil
+---@param related string[]|nil
+---@return table
+local function build_duplicates_filter_spec(clauses, kinds, related)
+    table.sort(clauses.dirs)
+    table.sort(clauses.tags)
+    table.sort(clauses.kind_tokens)
+    related = related or {}
+    table.sort(related)
+    return {
+        dirs = vim.deepcopy(clauses.dirs),
+        tags = vim.deepcopy(clauses.tags),
+        kinds = vim.deepcopy(clauses.kind_tokens),
+        related = vim.deepcopy(related),
+    }
+end
+
+---@param values string[]
+---@return string[]
+local function uniq_sorted(values)
+    local seen = {}
+    local result = {}
+    for _, value in ipairs(values or {}) do
+        if type(value) == "string" and value ~= "" and not seen[value] then
+            seen[value] = true
+            result[#result + 1] = value
+        end
+    end
+    table.sort(result)
+    return result
+end
+
+---@param prefix string
+---@param line string|nil
+---@return string[]
+complete_duplicates_review = function(prefix, line)
+    line = line or ""
+    prefix = prefix or ""
+
+    local keyword_matches = vim.tbl_filter(function(name)
+        return name:find(prefix, 1, true) == 1
+    end, DUPLICATES_CLAUSE_KEYWORDS)
+
+    local args_text = line:match("duplicates%s+review%s*(.*)$") or ""
+    local dirs = completions.dirs(nil, line, nil) or {}
+    if args_text == "" then
+        return uniq_sorted(vim.list_extend(vim.deepcopy(keyword_matches), dirs))
+    end
+
+    local ends_with_space = line:match("%s$") ~= nil
+    local args = vim.split(vim.trim(args_text), " ", { trimempty = true })
+    local clause = nil
+    local value_count = 0
+    for _, token in ipairs(args) do
+        if token == "root" or token == "dir" or token == "tags" or token == "kind" then
+            clause = token
+            value_count = 0
+        elseif token ~= "vault" then
+            value_count = value_count + 1
+        end
+    end
+
+    local tags = completions.tags(nil, line, nil) or {}
+    local kinds = vim.tbl_filter(function(name)
+        return name:find(prefix, 1, true) == 1
+    end, require("vault.duplicates").kind_filter_names())
+
+    if clause == "root" or clause == "dir" then
+        if not ends_with_space or value_count == 0 then
+            return uniq_sorted(dirs)
+        end
+        return uniq_sorted(vim.list_extend(vim.deepcopy(keyword_matches), dirs))
+    end
+
+    if clause == "tags" then
+        if not ends_with_space or value_count == 0 then
+            return uniq_sorted(tags)
+        end
+        return uniq_sorted(vim.list_extend(vim.deepcopy(keyword_matches), tags))
+    end
+
+    if clause == "kind" then
+        if not ends_with_space or value_count == 0 then
+            return uniq_sorted(kinds)
+        end
+        return uniq_sorted(vim.list_extend(vim.deepcopy(keyword_matches), kinds))
+    end
+    return uniq_sorted(vim.list_extend(vim.deepcopy(keyword_matches), dirs))
+end
+
+---@param prefix string
+---@param line string|nil
+---@return string[]
+complete_duplicates_related = function(prefix, line)
+    line = line or ""
+    prefix = prefix or ""
+
+    local duplicates = require("vault.duplicates")
+    local bucket_matches = vim.tbl_filter(function(name)
+        return name:find(prefix, 1, true) == 1
+    end, duplicates.related_filter_names())
+    local keyword_matches = vim.tbl_filter(function(name)
+        return name:find(prefix, 1, true) == 1
+    end, DUPLICATES_CLAUSE_KEYWORDS)
+
+    local args_text = line:match("duplicates%s+related%s*(.*)$") or ""
+    local dirs = completions.dirs(nil, line, nil) or {}
+    if args_text == "" then
+        return uniq_sorted(
+            vim.list_extend(vim.list_extend(vim.deepcopy(bucket_matches), keyword_matches), dirs)
+        )
+    end
+
+    local ends_with_space = line:match("%s$") ~= nil
+    local args = vim.split(vim.trim(args_text), " ", { trimempty = true })
+    local clause = nil
+    local value_count = 0
+    local first_is_bucket = duplicates.resolve_related_filter({ args[1] }) ~= nil
+    for index, token in ipairs(args) do
+        if token == "root" or token == "dir" or token == "tags" or token == "kind" then
+            clause = token
+            value_count = 0
+        elseif token ~= "vault" and not (index == 1 and first_is_bucket) then
+            value_count = value_count + 1
+        end
+    end
+
+    local tags = completions.tags(nil, line, nil) or {}
+    local kinds = vim.tbl_filter(function(name)
+        return name:find(prefix, 1, true) == 1
+    end, duplicates.kind_filter_names())
+
+    if clause == "root" or clause == "dir" then
+        if not ends_with_space or value_count == 0 then
+            return uniq_sorted(dirs)
+        end
+        return uniq_sorted(vim.list_extend(vim.deepcopy(keyword_matches), dirs))
+    end
+    if clause == "tags" then
+        if not ends_with_space or value_count == 0 then
+            return uniq_sorted(tags)
+        end
+        return uniq_sorted(vim.list_extend(vim.deepcopy(keyword_matches), tags))
+    end
+    if clause == "kind" then
+        if not ends_with_space or value_count == 0 then
+            return uniq_sorted(kinds)
+        end
+        return uniq_sorted(vim.list_extend(vim.deepcopy(keyword_matches), kinds))
+    end
+
+    if #args == 0 or (#args == 1 and not ends_with_space) then
+        return uniq_sorted(
+            vim.list_extend(vim.list_extend(vim.deepcopy(bucket_matches), keyword_matches), dirs)
+        )
+    end
+    return uniq_sorted(
+        vim.list_extend(vim.list_extend(vim.deepcopy(bucket_matches), keyword_matches), dirs)
+    )
+end
+
+---@param fargs string[]
+---@param usage string
+---@return string|nil, table|nil
+local function parse_duplicate_clauses_or_warn(fargs, usage)
+    local root, clauses = parse_duplicates_review_args(fargs)
+    if root == nil and clauses == nil and #fargs > 0 then
+        log.warn("%s", usage)
+        return nil, nil
+    end
+    return root, clauses or { dirs = {}, tags = {}, kind_tokens = {} }
+end
+
+--- @param args vim.api.keyset.create_user_command.command_args
+function callbacks.duplicates_review(args)
+    local fargs = args.fargs or {}
+    local root, clauses = parse_duplicate_clauses_or_warn(
+        fargs,
+        "Usage: :Vault duplicates review [vault|root <dir>|dir <dir>|tags <tag...>|kind <set...>]"
+    )
+    if not clauses then
+        return
+    end
+    root = resolve_duplicates_root(root, clauses)
+
+    local path_index = require("vault.scanner").paths()
+    local path_filters = build_duplicates_path_filters(clauses, path_index)
+
+    local kinds = nil
+    if not vim.tbl_isempty(clauses.kind_tokens) then
+        local kind_err
+        kinds, kind_err = require("vault.duplicates").resolve_kind_filter(clauses.kind_tokens)
+        if not kinds then
+            log.warn("%s", tostring(kind_err or "Unknown duplicate kind filter"))
+            return
+        end
+    end
+
+    require("vault.duplicates").review(root, {
+        path_filters = next(path_filters) and path_filters or nil,
+        kinds = kinds,
+        filter_spec = build_duplicates_filter_spec(clauses),
+    })
+end
+
+callbacks.complete_duplicates_review = complete_duplicates_review
+
+--- @param args vim.api.keyset.create_user_command.command_args
+function callbacks.duplicates_related(args)
+    local fargs = vim.deepcopy(args.fargs or {})
+    local related_tokens = {}
+    if #fargs > 0 then
+        local related = require("vault.duplicates")
+        local buckets, _ = related.resolve_related_filter({ fargs[1] })
+        if buckets then
+            related_tokens = { table.remove(fargs, 1) }
+        end
+    end
+
+    local root, clauses = parse_duplicate_clauses_or_warn(
+        fargs,
+        "Usage: :Vault duplicates related [likely|maybe|weak] [vault|root <dir>|dir <dir>|tags <tag...>|kind <set...>]"
+    )
+    if not clauses then
+        return
+    end
+    if root == nil or root == "" then
+        root = require("vault.config").options.root
+    end
+
+    local path_index = require("vault.scanner").paths()
+    local path_filters = build_duplicates_path_filters(clauses, path_index)
+
+    local kinds = nil
+    if not vim.tbl_isempty(clauses.kind_tokens) then
+        local kind_err
+        kinds, kind_err = require("vault.duplicates").resolve_kind_filter(clauses.kind_tokens)
+        if not kinds then
+            log.warn("%s", tostring(kind_err or "Unknown duplicate kind filter"))
+            return
+        end
+    end
+
+    local related_buckets = nil
+    if not vim.tbl_isempty(related_tokens) then
+        local related_err
+        related_buckets, related_err =
+            require("vault.duplicates").resolve_related_filter(related_tokens)
+        if not related_buckets then
+            log.warn("%s", tostring(related_err or "Unknown related duplicate filter"))
+            return
+        end
+    end
+
+    require("vault.duplicates").review_related(root, {
+        path_filters = next(path_filters) and path_filters or nil,
+        kinds = kinds,
+        related_buckets = related_buckets,
+        filter_spec = build_duplicates_filter_spec(clauses, nil, related_tokens),
+    })
+end
+
+callbacks.complete_duplicates_related = complete_duplicates_related
 
 --- vault.NoteInlinks
 --- Opens a picker with the notes where current note is mentioned
@@ -2191,7 +2900,12 @@ function callbacks.tasks_promote(args)
 end
 
 function callbacks.tasks_list()
-    local notes = require("vault.notes")():filter("relpath", require("vault.tasks.notes").tasks_dir_rel() .. "/", "startswith", false)
+    local notes = require("vault.notes")():filter(
+        "relpath",
+        require("vault.tasks.notes").tasks_dir_rel() .. "/",
+        "startswith",
+        false
+    )
     safe_find(pickers.notes({ notes = notes }), "No tasks found")
 end
 
@@ -2284,14 +2998,21 @@ function callbacks.vault_doctor(args)
     end
 
     if total_errors == 0 then
-        log.info("Vault doctor: %d scanned, no type errors. %d untyped notes.", dr.scanned, #dr.untyped)
+        log.info(
+            "Vault doctor: %d scanned, no type errors. %d untyped notes.",
+            dr.scanned,
+            #dr.untyped
+        )
         return
     end
 
     -- Summary
     log.warn(
         "Vault doctor: %d scanned. %d errors in %d files. %d untyped notes.",
-        dr.scanned, total_errors, error_file_count, #dr.untyped
+        dr.scanned,
+        total_errors,
+        error_file_count,
+        #dr.untyped
     )
 
     -- Quickfix list

@@ -19,6 +19,53 @@ Plugin to manage [Obsidian](https://obsidian.md)-compatible vaults in Neovim.
 
 See [docs/installation.md](docs/installation.md).
 
+## Configuration
+
+Duplicate review and merge heuristics are user-configurable rather than hardcoded.
+
+```lua
+require("vault").setup({
+  duplicates = {
+    preferred_dirs = { "Inbox", "Daily", "References" },
+    ignored_frontmatter_keys = { "modified", "committed" },
+    frontmatter_normalizers = {
+      title = function(value)
+        return value
+      end,
+    },
+  },
+  merge = {
+    ignored_conflict_fields = { "modified", "committed" },
+    field_normalizers = {
+      assignee = function(value)
+        return tostring(value)
+      end,
+    },
+    conflict_biases = {
+      created = "earliest",
+    },
+    conflict_bias_behavior = "auto_apply",
+    learned_conflict_biases = {
+      enabled = true,
+      path = nil,
+      behavior = "auto_apply",
+    },
+  },
+})
+```
+
+- `duplicates.preferred_dirs` controls which folders are favored when recommending keep `A` vs `B`
+- `duplicates.ignored_frontmatter_keys` removes noisy frontmatter keys from duplicate similarity checks
+- `duplicates.frontmatter_normalizers[key]` can normalize a frontmatter value before duplicate comparison
+- `merge.ignored_conflict_fields` suppresses conflict prompts for fields you consider noise
+- `merge.field_normalizers[key]` can normalize metadata values before conflict detection
+- `merge.conflict_biases[key]` preselects a side in the conflict picker; supports `"a"`, `"b"`, `"earliest"`, `"latest"`, or a custom function returning `"a"`/`"b"`
+- `merge.conflict_bias_behavior` controls how explicit config biases behave: `"preselect"` keeps them in the picker with the preferred choice selected, `"auto_apply"` resolves them without prompting
+- `merge.learned_conflict_biases` stores remembered picker choices in an editable Lua file under `stdpath("data")` by default
+- `merge.learned_conflict_biases.behavior` controls whether learned rules only preselect or auto-apply
+- In the conflict picker, `<CR>` applies the current choices only; `r` applies and remembers them for future conflicts
+- If every conflicting field is covered by explicit or learned biases, the merge skips the conflict picker entirely
+
 ## Commands
 
 All commands live under a single `:Vault` entry point. Running `:Vault` with no arguments opens a meta-picker (picker of pickers).
@@ -132,7 +179,10 @@ require("vault").setup({
 
 | Command | Description |
 |---------|-------------|
+| `:Vault duplicates review [vault\|root <dir>\|dir <dir>\|tags <tag...>\|kind <set...>]` | Review duplicate-note candidates, optionally scoped by directory, tag set, or duplicate kind (`exact`, `metadata`, `subset`, `body`, `divergent`, etc.). |
+| `:Vault duplicates related [likely\|maybe\|weak] [vault\|root <dir>\|dir <dir>\|tags <tag...>\|kind <set...>]` | Review Rust-ranked near-duplicate candidates where titles are strongly related even when filenames are not exact suffix copies. |
 | `:Vault trash` | Browse trashed notes. Restore or permanently delete. |
+| `:Vault merge biases` | Open the learned merge-bias file for editing. |
 | `:Vault watcher start\|stop\|status` | Control the file watcher. |
 | `:Vault api <function> [args...]` | Raw dispatch to any `vault.api` function. |
 

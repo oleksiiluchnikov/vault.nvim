@@ -102,16 +102,39 @@ describe("Vault commands", function()
 
         -- Legacy commands should NOT be registered
         local legacy_commands = {
-            "VaultNote", "VaultNotes", "VaultNoteNew", "VaultRandomNote",
-            "VaultTags", "VaultDates", "VaultToday", "VaultYesterday",
-            "VaultNotesStatus", "VaultFleetingNote", "VaultOrphans",
-            "VaultLinked", "VaultInternals", "VaultLeaves",
-            "VaultDanglingLinks", "VaultOutlinksUnresolved",
-            "VaultOutlinksResolvedOnly", "VaultWikilinks", "VaultTasks",
-            "VaultNotesCluster", "VaultMove", "VaultGrep", "VaultRename",
-            "VaultNoteInlinks", "VaultNoteOutlinks", "VaultNoteTags",
-            "VaultNoteExtract", "VaultProperties", "VaultNoteProperties",
-            "VaultNotesByDir", "VaultDirs", "VaultToggleLink", "VaultBases",
+            "VaultNote",
+            "VaultNotes",
+            "VaultNoteNew",
+            "VaultRandomNote",
+            "VaultTags",
+            "VaultDates",
+            "VaultToday",
+            "VaultYesterday",
+            "VaultNotesStatus",
+            "VaultFleetingNote",
+            "VaultOrphans",
+            "VaultLinked",
+            "VaultInternals",
+            "VaultLeaves",
+            "VaultDanglingLinks",
+            "VaultOutlinksUnresolved",
+            "VaultOutlinksResolvedOnly",
+            "VaultWikilinks",
+            "VaultTasks",
+            "VaultNotesCluster",
+            "VaultMove",
+            "VaultGrep",
+            "VaultRename",
+            "VaultNoteInlinks",
+            "VaultNoteOutlinks",
+            "VaultNoteTags",
+            "VaultNoteExtract",
+            "VaultProperties",
+            "VaultNoteProperties",
+            "VaultNotesByDir",
+            "VaultDirs",
+            "VaultToggleLink",
+            "VaultBases",
         }
 
         for _, name in ipairs(legacy_commands) do
@@ -351,7 +374,10 @@ describe("Vault command data paths", function()
             -- Sort for deterministic assertion
             table.sort(names)
             -- names[4] is the new 4th base (sorted order depends on its name)
-            assert.is_true(vim.tbl_contains(names, "active-notes"), "active-notes should be present")
+            assert.is_true(
+                vim.tbl_contains(names, "active-notes"),
+                "active-notes should be present"
+            )
             assert.is_true(vim.tbl_contains(names, "all-notes"), "all-notes should be present")
             assert.is_true(vim.tbl_contains(names, "projects"), "projects should be present")
         end)
@@ -440,7 +466,10 @@ describe("Vault buffer-context commands", function()
     describe(":VaultToday", function()
         it("should construct the correct path with today's date", function()
             local config = require("vault.config")
-            assert.is_not_nil(config.options.dirs, "config.options.dirs must be set after vault.setup()")
+            assert.is_not_nil(
+                config.options.dirs,
+                "config.options.dirs must be set after vault.setup()"
+            )
             local today = os.date("%Y-%m-%d %A")
             local daily_dir = config.options.dirs.journal.daily
             local expected_path = string.format("%s/%s%s", daily_dir, today, config.options.ext)
@@ -477,7 +506,10 @@ describe("Vault buffer-context commands", function()
     describe(":VaultYesterday", function()
         it("should construct the correct path with yesterday's date", function()
             local config = require("vault.config")
-            assert.is_not_nil(config.options.dirs, "config.options.dirs must be set after vault.setup()")
+            assert.is_not_nil(
+                config.options.dirs,
+                "config.options.dirs must be set after vault.setup()"
+            )
             local yesterday = os.date("%Y-%m-%d", os.time() - 60 * 60 * 24)
             local daily_dir = config.options.dirs.journal.daily
             local expected_path = string.format("%s/%s%s", daily_dir, yesterday, config.options.ext)
@@ -544,10 +576,7 @@ describe("Vault note-context commands", function()
             local outlinks = note.data.outlinks or {}
 
             -- test_note.md has 3 outgoing wikilinks
-            assert.is_true(
-                vim.tbl_count(outlinks) > 0,
-                "test_note.md should have outlinks, got 0"
-            )
+            assert.is_true(vim.tbl_count(outlinks) > 0, "test_note.md should have outlinks, got 0")
         end)
     end)
 
@@ -571,10 +600,7 @@ describe("Vault note-context commands", function()
             local note = Note(test_note_path)
             local tags = note.data.tags or {}
 
-            assert.is_true(
-                vim.tbl_count(tags) > 0,
-                "test_note.md should have tags"
-            )
+            assert.is_true(vim.tbl_count(tags) > 0, "test_note.md should have tags")
         end)
     end)
 end)
@@ -632,7 +658,10 @@ describe("Vault filesystem commands", function()
 
         before_each(function()
             -- Create the source note
-            vim.fn.writefile({ "---", "title: Rename Test", "---", "", "Some content" }, original_path)
+            vim.fn.writefile(
+                { "---", "title: Rename Test", "---", "", "Some content" },
+                original_path
+            )
         end)
 
         after_each(function()
@@ -811,6 +840,151 @@ describe("Vault command completions", function()
             local result = completions.note_data_keys()
             assert.is_table(result)
             assert.is_true(#result > 0, "note_data_keys should not be empty")
+        end)
+    end)
+
+    describe("duplicates_review()", function()
+        local commands
+        local original_duplicates
+
+        before_each(function()
+            setup_vault()
+            clear_state()
+            commands = require("vault.commands")
+            original_duplicates = package.loaded["vault.duplicates"]
+        end)
+
+        after_each(function()
+            package.loaded["vault.duplicates"] = original_duplicates
+        end)
+
+        it("passes dir and kind filters to duplicate review", function()
+            local captured = nil
+            package.loaded["vault.duplicates"] = {
+                review = function(root, opts)
+                    captured = { root = root, opts = opts }
+                end,
+                resolve_kind_filter = function(tokens)
+                    return { metadata = true }, nil
+                end,
+                kind_filter_names = function()
+                    return { "metadata" }
+                end,
+            }
+
+            commands.duplicates_review({ fargs = { "dir", "Reference", "kind", "metadata" } })
+
+            assert.is_not_nil(captured)
+            assert.are.equal(fixture_root, captured.root)
+            assert.is_true(captured.opts.kinds.metadata)
+            assert.are.same({ "Reference" }, captured.opts.filter_spec.dirs)
+            assert.are.same({ "metadata" }, captured.opts.filter_spec.kinds)
+            assert.is_true(
+                captured.opts.path_filters.dirs[fixture_root .. "/Reference/lua-patterns.md"]
+            )
+            assert.is_true(
+                captured.opts.path_filters.dirs[fixture_root .. "/Reference/git-workflows.md"]
+            )
+        end)
+
+        it("passes tag filters to duplicate review", function()
+            local captured = nil
+            package.loaded["vault.duplicates"] = {
+                review = function(root, opts)
+                    captured = { root = root, opts = opts }
+                end,
+                resolve_kind_filter = function(tokens)
+                    return { divergent = true }, nil
+                end,
+                kind_filter_names = function()
+                    return { "divergent" }
+                end,
+            }
+
+            commands.duplicates_review({ fargs = { "tags", "test", "kind", "divergent" } })
+
+            assert.is_not_nil(captured)
+            assert.are.equal(fixture_root, captured.root)
+            assert.are.same({ "test" }, captured.opts.filter_spec.tags)
+            assert.are.same({ "divergent" }, captured.opts.filter_spec.kinds)
+            assert.is_true(captured.opts.path_filters.tags[fixture_root .. "/test_note.md"])
+            assert.is_true(captured.opts.kinds.divergent)
+        end)
+
+        it("completes duplicate review clause keywords at top level", function()
+            local result = commands.complete_duplicates_review("", "Vault duplicates review ")
+
+            assert.is_true(vim.tbl_contains(result, "dir"))
+            assert.is_true(vim.tbl_contains(result, "tags"))
+            assert.is_true(vim.tbl_contains(result, "kind"))
+            assert.is_true(vim.tbl_contains(result, "vault"))
+        end)
+
+        it("completes directories inside a dir clause and keywords after it", function()
+            local dir_values =
+                commands.complete_duplicates_review("", "Vault duplicates review dir ")
+            assert.is_true(vim.tbl_contains(dir_values, "Inbox"))
+            assert.is_true(vim.tbl_contains(dir_values, "Reference"))
+
+            local next_values =
+                commands.complete_duplicates_review("", "Vault duplicates review dir Inbox ")
+            assert.is_true(vim.tbl_contains(next_values, "kind"))
+            assert.is_true(vim.tbl_contains(next_values, "tags"))
+        end)
+
+        it("completes tags and kind aliases in their respective clauses", function()
+            local tag_values =
+                commands.complete_duplicates_review("", "Vault duplicates review tags ")
+            assert.is_true(vim.tbl_contains(tag_values, "test"))
+
+            local kind_values =
+                commands.complete_duplicates_review("", "Vault duplicates review kind ")
+            assert.is_true(vim.tbl_contains(kind_values, "metadata"))
+            assert.is_true(vim.tbl_contains(kind_values, "body"))
+        end)
+
+        it("passes related buckets into related duplicate review", function()
+            local captured = nil
+            package.loaded["vault.duplicates"] = {
+                review_related = function(root, opts)
+                    captured = { root = root, opts = opts }
+                end,
+                resolve_kind_filter = function()
+                    return { divergent = true }, nil
+                end,
+                resolve_related_filter = function(tokens)
+                    if tokens[1] == "likely" then
+                        return { likely = true }, nil
+                    end
+                    return nil, "bad"
+                end,
+                kind_filter_names = function()
+                    return { "metadata", "body", "divergent" }
+                end,
+                related_filter_names = function()
+                    return { "likely", "maybe", "weak" }
+                end,
+            }
+
+            commands.duplicates_related({ fargs = { "likely", "kind", "divergent" } })
+
+            assert.is_not_nil(captured)
+            assert.are.equal(fixture_root, captured.root)
+            assert.is_true(captured.opts.related_buckets.likely)
+            assert.are.same({ "likely" }, captured.opts.filter_spec.related)
+            assert.is_true(captured.opts.kinds.divergent)
+        end)
+
+        it("completes related duplicate buckets and clauses", function()
+            local bucket_values =
+                commands.complete_duplicates_related("", "Vault duplicates related ")
+            assert.is_true(vim.tbl_contains(bucket_values, "likely"))
+            assert.is_true(vim.tbl_contains(bucket_values, "dir"))
+
+            local kind_values =
+                commands.complete_duplicates_related("", "Vault duplicates related likely kind ")
+            assert.is_true(vim.tbl_contains(kind_values, "metadata"))
+            assert.is_true(vim.tbl_contains(kind_values, "body"))
         end)
     end)
 end)

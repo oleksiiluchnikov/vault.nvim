@@ -44,6 +44,8 @@
 --- @field frontmatter? table YAML frontmatter configuration. Example: { keys = { tags = "tags" } }
 --- @field check_duplicate_basename? boolean Enable duplicate filename detection. Example: true
 --- @field wikilinks? { confirm_rewrite?: boolean, confirm_merge?: boolean, confirm_create?: boolean } Wikilink action confirmation settings
+--- @field merge? { ignored_conflict_fields?: string[], field_normalizers?: table<string, fun(value:any, key:string): any>, conflict_biases?: table<string, "a"|"b"|"earliest"|"latest"|fun(conflict: table, key:string): ("a"|"b")?>, conflict_bias_behavior?: "preselect"|"auto_apply", learned_conflict_biases?: { enabled?: boolean, path?: string, behavior?: "preselect"|"auto_apply" } } Merge conflict heuristics
+--- @field duplicates? { preferred_dirs?: string[], ignored_frontmatter_keys?: string[], frontmatter_normalizers?: table<string, fun(value:string, key:string): string> } Duplicate review heuristics
 ---
 --- @field telescope? table Telescope configuration. Example:
 ---   ```lua
@@ -159,16 +161,16 @@ local DEFAULT_OPTIONS = {
         --- Each rule: { match = { field = value|{} }, hl = "HlGroup" }
         --- Or a function(record, row_idx) -> hl_group|nil for full control.
         row_hl = {
-            { match = { status = "done" },     hl = "VaultRowDone" },
+            { match = { status = "done" }, hl = "VaultRowDone" },
             { match = { status = "archived" }, hl = "VaultRowDone" },
-            { match = { tags = {} },           hl = "VaultRowUntagged" },
+            { match = { tags = {} }, hl = "VaultRowUntagged" },
         },
     },
     kanban = {
-        group_field = "status",                          -- Frontmatter field, "tags/<prefix>", or "directory"
-        display_fields = { "title", "tags" },            -- Fields shown on each card
-        group_values = nil,                              --- @type string[]|nil Ordered column values (nil = auto-derive)
-        render_mode = "card",                            -- "card" (bordered multi-line) or "table" (single-line rows)
+        group_field = "status", -- Frontmatter field, "tags/<prefix>", or "directory"
+        display_fields = { "title", "tags" }, -- Fields shown on each card
+        group_values = nil, --- @type string[]|nil Ordered column values (nil = auto-derive)
+        render_mode = "card", -- "card" (bordered multi-line) or "table" (single-line rows)
         layout = {
             width_ratio = 0.95,
             height_ratio = 0.90,
@@ -177,17 +179,17 @@ local DEFAULT_OPTIONS = {
         },
     },
     calendar = {
-        date_field = "due",                              -- Frontmatter key for date placement (or "file.ctime"/"file.mtime")
-        link_date_fields = { "due" },                    -- Fields stored as Daily note wikilinks ([[YYYY-MM-DD Weekday]])
-        end_date_field = nil,                            --- @type string|nil  Frontmatter key for range end date (enables date ranges)
-        primary_field = "title",                         -- Field displayed on calendar cards
-        display_fields = nil,                            --- @type string[]|nil Multi-line card fields (nil = primary_field only)
-        first_day = 1,                                   -- First day of week: 0=Sun, 1=Mon
-        max_cards_per_cell = 3,                          -- Max records shown per day cell before "+N more"
-        hour_start = 8,                                  -- First hour in timetable view (week mode)
-        hour_end = 18,                                   -- Last hour in timetable view (week mode)
-        empty_cell = nil,                                --- @type string|nil Override empty cell symbol (nil = use bases.empty_cell)
-        keymaps = {},                                    --- @type table<string, string|false> Keymap overrides (set key to false to disable)
+        date_field = "due", -- Frontmatter key for date placement (or "file.ctime"/"file.mtime")
+        link_date_fields = { "due" }, -- Fields stored as Daily note wikilinks ([[YYYY-MM-DD Weekday]])
+        end_date_field = nil, --- @type string|nil  Frontmatter key for range end date (enables date ranges)
+        primary_field = "title", -- Field displayed on calendar cards
+        display_fields = nil, --- @type string[]|nil Multi-line card fields (nil = primary_field only)
+        first_day = 1, -- First day of week: 0=Sun, 1=Mon
+        max_cards_per_cell = 3, -- Max records shown per day cell before "+N more"
+        hour_start = 8, -- First hour in timetable view (week mode)
+        hour_end = 18, -- Last hour in timetable view (week mode)
+        empty_cell = nil, --- @type string|nil Override empty cell symbol (nil = use bases.empty_cell)
+        keymaps = {}, --- @type table<string, string|false> Keymap overrides (set key to false to disable)
     },
     typecheck = {
         on_save = false, -- BufWritePost diagnostics (off by default, ADHD-friendly)
@@ -216,10 +218,10 @@ local DEFAULT_OPTIONS = {
         on_write = true,
     },
     log = {
-        level = "info",    --- @type vault.LogLevel Minimum level for vim.notify display
-        file = false,      --- Write all levels to log file (stdpath("cache")/vault.log)
-        file_path = nil,   --- Override log file path
-        on_message = nil,  --- fun(level, scope, msg) callback for programmatic access
+        level = "info", --- @type vault.LogLevel Minimum level for vim.notify display
+        file = false, --- Write all levels to log file (stdpath("cache")/vault.log)
+        file_path = nil, --- Override log file path
+        on_message = nil, --- fun(level, scope, msg) callback for programmatic access
     },
     check_duplicate_basename = true,
     ui = {
@@ -322,6 +324,26 @@ local DEFAULT_OPTIONS = {
         confirm_merge = true,
         --- Confirm before creating a new note from an unresolved wikilink.
         confirm_create = false,
+    },
+
+    merge = {
+        ignored_conflict_fields = { "modified", "committed" },
+        field_normalizers = {},
+        conflict_biases = {
+            created = "earliest",
+        },
+        conflict_bias_behavior = "auto_apply",
+        learned_conflict_biases = {
+            enabled = true,
+            path = nil,
+            behavior = "auto_apply",
+        },
+    },
+
+    duplicates = {
+        preferred_dirs = { "Inbox", "Daily", "References" },
+        ignored_frontmatter_keys = { "modified", "committed" },
+        frontmatter_normalizers = {},
     },
 
     bases = {
@@ -472,7 +494,9 @@ end
 local function validate_config(options)
     -- If root is not specified, try to use demo vault
     if not options.root then
-        require("vault.log").scope("config").info("No root directory specified. Attempting to use demo vault")
+        require("vault.log")
+            .scope("config")
+            .info("No root directory specified. Attempting to use demo vault")
         local demo_vault_root = get_demo_vault_root()
         if demo_vault_root then
             options.root = demo_vault_root
@@ -504,15 +528,21 @@ function Config.setup(options)
 
     -- Ensure default ignore patterns are always present (user patterns are additive)
     if user_options.ignore then
-      local seen = {}
-      local combined = {}
-      for _, pat in ipairs(defaults.ignore) do
-        if not seen[pat] then seen[pat] = true; table.insert(combined, pat) end
-      end
-      for _, pat in ipairs(user_options.ignore) do
-        if not seen[pat] then seen[pat] = true; table.insert(combined, pat) end
-      end
-      merged.ignore = combined
+        local seen = {}
+        local combined = {}
+        for _, pat in ipairs(defaults.ignore) do
+            if not seen[pat] then
+                seen[pat] = true
+                table.insert(combined, pat)
+            end
+        end
+        for _, pat in ipairs(user_options.ignore) do
+            if not seen[pat] then
+                seen[pat] = true
+                table.insert(combined, pat)
+            end
+        end
+        merged.ignore = combined
     end
 
     local is_valid, err = validate_config(merged)
