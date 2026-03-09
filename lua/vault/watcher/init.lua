@@ -289,15 +289,12 @@ local function apply_renames(watcher, pending, renames, silent)
     pcall(function()
         if #renames == 1 then
             local rename = renames[1]
-            state.set_global_key(
-                "vault.last_rename",
-                {
-                    old = rename.old_path,
-                    new = rename.new_path,
-                    old_slug = rename.old_slug,
-                    new_slug = rename.new_slug,
-                }
-            )
+            state.set_global_key("vault.last_rename", {
+                old = rename.old_path,
+                new = rename.new_path,
+                old_slug = rename.old_slug,
+                new_slug = rename.new_slug,
+            })
         end
         state.set_global_key("vault.last_renames", renames)
     end)
@@ -470,8 +467,9 @@ end
 --- @param old_slug string
 --- @param new_slug string
 --- @param silent? boolean  suppress notifications (default: honor config.watcher.notify_on_rename)
+--- @param paths? table<string, table> precomputed scanner paths map
 --- @return integer
-function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silent)
+function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silent, paths)
     local renames = {
         {
             old_path = old_path,
@@ -481,8 +479,10 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silen
         },
     }
 
-    local scanner = require("vault.scanner")
-    local paths = scanner.paths()
+    if not paths then
+        local scanner = require("vault.scanner")
+        paths = scanner.paths()
+    end
     local pending, total = collect_pending_updates(self, paths, renames)
 
     local watcher_conf = (config.options and config.options.watcher) or {}
@@ -538,8 +538,9 @@ end
 --- @param old_path string absolute
 --- @param new_path string absolute
 --- @param silent? boolean  suppress notifications (default: honor config.watcher.notify_on_rename)
+--- @param paths? table<string, table> precomputed scanner paths map
 --- @return integer
-function Watcher:handle_rename(old_path, new_path, silent)
+function Watcher:handle_rename(old_path, new_path, silent, paths)
     if old_path == new_path or not old_path or not new_path then
         return 0
     end
@@ -564,20 +565,21 @@ function Watcher:handle_rename(old_path, new_path, silent)
     -- Defer processing if oil is active to let it complete its operations
     if self.oil_guard_enabled and package.loaded["oil"] then
         vim.defer_fn(function()
-            self:_do_rename_update(old_path, new_path, old_slug, new_slug, silent)
+            self:_do_rename_update(old_path, new_path, old_slug, new_slug, silent, paths)
         end, 1000)
         return 0
     end
 
-    return self:_do_rename_update(old_path, new_path, old_slug, new_slug, silent)
+    return self:_do_rename_update(old_path, new_path, old_slug, new_slug, silent, paths)
 end
 
 --- Resolve all wiki-links that point to many renamed notes in a single scan.
 --- Returns the number of files patched.
 --- @param renames { old_path: string, new_path: string }[]
 --- @param silent? boolean suppress notifications
+--- @param paths? table<string, table> precomputed scanner paths map
 --- @return integer
-function Watcher:handle_renames(renames, silent)
+function Watcher:handle_renames(renames, silent, paths)
     if type(renames) ~= "table" then
         error("Watcher:handle_renames() requires a table of renames")
     end
@@ -622,16 +624,21 @@ function Watcher:handle_renames(renames, silent)
 
     if self.oil_guard_enabled and package.loaded["oil"] then
         vim.defer_fn(function()
-            local scanner = require("vault.scanner")
-            local paths = scanner.paths()
-            local pending = select(1, collect_pending_updates(self, paths, normalized))
+            local deferred_paths = paths
+            if not deferred_paths then
+                local scanner = require("vault.scanner")
+                deferred_paths = scanner.paths()
+            end
+            local pending = select(1, collect_pending_updates(self, deferred_paths, normalized))
             apply_renames(self, pending, normalized, silent)
         end, 1000)
         return 0
     end
 
-    local scanner = require("vault.scanner")
-    local paths = scanner.paths()
+    if not paths then
+        local scanner = require("vault.scanner")
+        paths = scanner.paths()
+    end
     local pending, total = collect_pending_updates(self, paths, normalized)
     local watcher_conf = (config.options and config.options.watcher) or {}
     local prompt = watcher_conf.prompt_on_rename

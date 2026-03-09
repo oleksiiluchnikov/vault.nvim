@@ -114,6 +114,13 @@ function M.dirs(_, line, _)
     return completions
 end
 
+function M.files(_, line, _)
+    line = line or ""
+    local parts = vim.split(line, " ")
+    local query = parts[#parts] or ""
+    return vim.fn.getcompletion(query, "file")
+end
+
 function M.tags(_, line, _)
     line = line or ""
     local fargs = vim.split(line, " ") or {}
@@ -210,7 +217,9 @@ end
 
 --- Returns the list of available statuses (from frontmatter 'status' property)
 function M.statuses(_, _, _)
-    local ok, properties = pcall(function() return require("vault.scanner").properties() end)
+    local ok, properties = pcall(function()
+        return require("vault.scanner").properties()
+    end)
     if not ok or not properties then
         return {}
     end
