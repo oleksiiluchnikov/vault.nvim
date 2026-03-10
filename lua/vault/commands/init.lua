@@ -865,7 +865,7 @@ local function build_subcommands()
         --           title,status,tags (inline columns), taxonomy=<field>, group_by=<field>, <slug> (fuzzy filter)
         process = {
             run = function(args)
-                local grid_editor = require("vault.bases.views.grid")
+                local grid_editor = require("vault.views.grid")
 
                 -- Extract key=value options (e.g. group_by=status) before
                 -- interpreting positional args.
@@ -1170,7 +1170,7 @@ local function build_subcommands()
         -- :Vault list [filter] — List-backed metadata editing buffer
         list = {
             run = function(args)
-                local list_editor = require("vault.bases.views.list")
+                local list_editor = require("vault.views.list")
                 local filter = args[1]
                 local notes, desc
 
@@ -1257,7 +1257,7 @@ local function build_subcommands()
         --           tag <name>, dir <path>
         kanban = {
             run = function(args)
-                local grid_kanban = require("vault.bases.views.kanban")
+                local grid_kanban = require("vault.views.kanban")
                 local filter
                 local notes, desc
 
@@ -1366,7 +1366,7 @@ local function build_subcommands()
         --           tag <name>, dir <path>
         calendar = {
             run = function(args)
-                local cal_view = require("vault.bases.views.calendar")
+                local cal_view = require("vault.views.calendar")
                 local filter
                 local notes, desc
 
@@ -1483,7 +1483,7 @@ local function build_subcommands()
                 -- Wrap in a fresh Notes-like object for grid.open
                 local all = Notes()
                 all.map = merged
-                local grid = require("vault.bases.views.grid")
+                local grid = require("vault.views.grid")
                 grid.open({
                     notes = all,
                     filter_desc = "triage",
@@ -3166,7 +3166,7 @@ function callbacks.tasks_kanban()
     local task_cfg = cfg.task_notes or {}
     local group_values = type(task_cfg.status_order) == "table" and task_cfg.status_order or nil
 
-    require("vault.bases.views.kanban").open({
+    require("vault.views.kanban").open({
         base = base,
         filter_desc = "base:Tasks Kanban",
         group_values = group_values,

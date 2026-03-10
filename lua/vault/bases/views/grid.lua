@@ -25,6 +25,7 @@ end
 
 local READONLY_FILE_COLS = shared.READONLY_FILE_COLS
 local uv = vim.uv or vim.loop
+local DEFAULT_COLUMNS = { "slug", "title", "status", "tags" }
 
 local get_empty_cell = shared.get_empty_cell
 local get_mtime = shared.get_mtime
@@ -1188,7 +1189,8 @@ local function make_on_save(st)
     end
 
     local function finish_save()
-      local ok_apply, n_u, n_d, n_c = pcall(apply_mutations, diff, st, undo_payload, mutation_details)
+      local apply_fn = M._apply_mutations or apply_mutations
+      local ok_apply, n_u, n_d, n_c = pcall(apply_fn, diff, st, undo_payload, mutation_details)
       if not ok_apply then
         leave_process_save()
         st.saving = false
