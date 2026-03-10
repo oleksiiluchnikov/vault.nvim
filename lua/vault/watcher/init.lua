@@ -250,9 +250,7 @@ end
 
 local function invalidate_note_state()
     pcall(function()
-        state.set_global_key("cache.notes.paths", nil)
-        state.set_global_key("cache.notes.slugs", nil)
-        state.set_global_key("cache.notes.basename_index", nil)
+        require("vault.scanner").invalidate_notes_cache()
     end)
 end
 

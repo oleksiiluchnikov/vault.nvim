@@ -510,6 +510,20 @@ describe("grid (integration)", function()
 
       assert.are.equal(bufnr1, bufnr2, "should reuse existing buffer")
     end)
+
+    it("does not reuse buffer when config shape differs", function()
+      if not check_config() then return pending("needs vault config") end
+      local Notes = require("vault.notes")
+      local notes = Notes()
+
+      ge.open({ notes = notes, filter_desc = "grid-dedup-shape", columns = { "title", "status" } })
+      local bufnr1 = vim.api.nvim_get_current_buf()
+
+      ge.open({ notes = notes, filter_desc = "grid-dedup-shape", columns = { "title", "tags" } })
+      local bufnr2 = vim.api.nvim_get_current_buf()
+
+      assert.are_not.equal(bufnr1, bufnr2)
+    end)
   end)
 
   -- ── Base-driven open ─────────────────────────────────────────────────────
@@ -664,6 +678,158 @@ describe("grid (integration)", function()
       ge.undo(bufnr)
       local vt_undo = require("vimtable.undo")
       assert.is_false(vt_undo.has(bufnr))
+    end)
+
+    it("restores a folder move and invalidates note caches", function()
+      if not check_config() then return pending("needs vault config") end
+      local state = require("vault.core.state")
+      local bufnr = vim.api.nvim_create_buf(false, true)
+      local src = fixture_root .. "/test_note.md"
+      local moved_dir = fixture_root .. "/Moved"
+      local moved = moved_dir .. "/test_note.md"
+      vim.fn.mkdir(moved_dir, "p")
+
+      local diff = {
+        updates = {
+          { id = "test_note", fields = { ["file.folder"] = "Moved" } },
+        },
+        deletes = {},
+        creates = {},
+        custom = {},
+        errors = {},
+      }
+      local st = {
+        note_paths = { test_note = src },
+        note_mtimes = { test_note = ge._get_mtime(src) },
+      }
+
+      local snap = ge._snapshot_for_undo(diff, st, bufnr, {
+        { old_slug = "test_note", new_slug = "Moved/test_note", source_field = "file.folder" },
+      })
+
+      local ok_apply, renamed = pcall(ge._apply_structural_ops,
+        { { old_slug = "test_note", new_slug = "Moved/test_note", source_field = "file.folder" } },
+        { updates = {}, deletes = {}, creates = {}, custom = {}, errors = {} },
+        {
+          note_paths = { test_note = src },
+          note_mtimes = { test_note = ge._get_mtime(src) },
+        },
+        snap)
+      assert.is_true(ok_apply)
+      assert.are.equal(1, renamed)
+      assert.are.equal(1, vim.fn.filereadable(moved))
+
+      ge._buf_states[bufnr] = {
+        grid = { reload = function() end },
+        note_paths = { ["Moved/test_note"] = moved },
+        note_mtimes = { ["Moved/test_note"] = ge._get_mtime(moved) },
+        base = nil,
+        filter_desc = "undo-move",
+        session_key = "undo-move",
+        columns = { "slug", "title" },
+        visible_columns = { "title" },
+        display_names = {},
+        formula_cols = {},
+        readonly_columns = {},
+        slug_hidden = false,
+        saving = false,
+      }
+      state.set_global_key("cache.notes.paths", { stale = true })
+
+      ge._apply_undo(bufnr, snap)
+
+      assert.are.equal(1, vim.fn.filereadable(src))
+      assert.are.equal(0, vim.fn.filereadable(moved))
+      assert.is_nil(state.get_global_key("cache.notes.paths"))
+
+      ge._buf_states[bufnr] = nil
+      pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    end)
+  end)
+
+  describe("save safety", function()
+    it("skips stale deletes", function()
+      if not check_config() then return pending("needs vault config") end
+      local path = fixture_root .. "/test_note.md"
+      local st = {
+        note_paths = { test_note = path },
+        note_mtimes = { test_note = 1 },
+      }
+
+      local _, deletes = ge._apply_mutations({ updates = {}, deletes = { "test_note" }, creates = {} }, st)
+      assert.are.equal(0, deletes)
+      assert.are.equal(1, vim.fn.filereadable(path))
+    end)
+
+    it("uses the configured extension for structural slug renames", function()
+      if not check_config() then return pending("needs vault config") end
+      local config = require("vault.config")
+      local old_ext = config.options.ext
+      local tmp_root = vim.fn.tempname()
+      vim.fn.mkdir(tmp_root, "p")
+      config.options.root = tmp_root
+      config.options.ext = ".markdown"
+
+      local path = tmp_root .. "/demo.markdown"
+      vim.fn.writefile({ "# demo" }, path)
+      local done_err = "PENDING"
+      local st = {
+        grid = { bufnr = function() return vim.api.nvim_create_buf(false, true) end },
+        note_paths = { demo = path },
+        note_mtimes = { demo = ge._get_mtime(path) },
+        save_mode = nil,
+        saving = false,
+      }
+      local on_save = ge._make_on_save(st)
+
+      on_save({
+        updates = {},
+        deletes = {},
+        creates = {},
+        custom = { { type = "rename", extra = { old_slug = "demo", new_slug = "renamed", source_field = "slug" } } },
+        errors = {},
+      }, function(err)
+        done_err = err or false
+      end)
+
+      assert.is_false(done_err)
+      assert.are.equal(1, vim.fn.filereadable(tmp_root .. "/renamed.markdown"))
+
+      config.options.root = fixture_root
+      config.options.ext = old_ext
+      vim.fn.delete(tmp_root, "rf")
+    end)
+
+    it("drops mixed create-delete structural guesses instead of pairing them", function()
+      if not check_config() then return pending("needs vault config") end
+      local calls = 0
+      local path = fixture_root .. "/test_note.md"
+      local st = {
+        grid = { bufnr = function() return vim.api.nvim_create_buf(false, true) end },
+        note_paths = { test_note = path },
+        note_mtimes = { test_note = ge._get_mtime(path) },
+        save_mode = nil,
+        saving = false,
+      }
+      local original_apply = ge._apply_mutations
+      ge._apply_mutations = function(diff)
+        calls = calls + 1
+        assert.are.equal(0, #diff.creates)
+        assert.are.equal(0, #diff.deletes)
+        return 0, 0, 0
+      end
+
+      local on_save = ge._make_on_save(st)
+      on_save({
+        updates = {},
+        deletes = { "test_note" },
+        creates = { { fields = { slug = "new-note", title = "New note" } } },
+        custom = {},
+        errors = {},
+      }, function() end)
+
+      ge._apply_mutations = original_apply
+      assert.are.equal(1, calls)
     end)
   end)
 
