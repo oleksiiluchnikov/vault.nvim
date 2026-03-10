@@ -34,6 +34,11 @@ local get_empty_cell = shared.get_empty_cell
 local get_mtime = shared.get_mtime
 local build_records
 
+---@class vault.ProcessStructuralOp
+---@field old_slug vault.slug
+---@field new_slug vault.slug
+---@field source_field string
+
 local SAVE_DEPTH_KEY = "vault.process_save_depth"
 
 local function enter_process_save()
@@ -117,6 +122,7 @@ end
 ---@field note_mtimes table<vault.slug, integer>  slug → mtime at snapshot time
 ---@field base? vault.Base
 ---@field filter_desc string
+---@field session_key string
 ---@field columns string[]  ALL internal column names (always includes "slug")
 ---@field visible_columns string[]
 ---@field display_names table<string, string>
@@ -136,11 +142,223 @@ end
 ---@field banner_builder? fun(count: integer): string|string[]
 
 local buf_states = {} --- @type table<integer, vault.GridEditorState>
-local vt_undo = require("vimtable.undo")
+local ok_vt_undo, vt_undo = pcall(require, "vimtable.undo")
+if not ok_vt_undo then
+  local snapshots = {}
+  vt_undo = {
+    snapshot = function(bufnr, payload)
+      snapshots[bufnr] = payload
+    end,
+    restore = function(bufnr)
+      local payload = snapshots[bufnr]
+      snapshots[bufnr] = nil
+      return payload
+    end,
+    has = function(bufnr)
+      return snapshots[bufnr] ~= nil
+    end,
+    clear = function(bufnr)
+      snapshots[bufnr] = nil
+    end,
+  }
+end
 local apply_taxonomy_choice_range
 local preview_taxonomy_range
 local apply_taxonomy_range
 local banner_ns = vim.api.nvim_create_namespace("vault_grid_banner")
+
+local STRUCTURAL_FIELDS = {
+  slug = true,
+  ["file.slug"] = true,
+  ["file.name"] = true,
+  ["file.folder"] = true,
+  dir = true,
+}
+
+---@param dir string
+---@return string
+local function normalize_dir_prefix(dir)
+  local value = vim.trim(dir or "")
+  if value == "" or value == "/" or value == "." then
+    return ""
+  end
+  value = value:gsub("^/*", ""):gsub("/*$", "")
+  if value == "" then
+    return ""
+  end
+  return value .. "/"
+end
+
+---@param slug vault.slug
+---@return string, string
+local function split_slug(slug)
+  local dir_prefix = slug:match("^(.-/)[^/]*$") or ""
+  local stem = slug:match("[^/]+$") or slug
+  return dir_prefix, stem
+end
+
+---@param slug vault.slug
+---@param dir_prefix string
+---@return vault.slug
+local function with_slug_dir(slug, dir_prefix)
+  local _, stem = split_slug(slug)
+  return dir_prefix .. stem
+end
+
+---@param path vault.path
+---@return string
+local function note_extension(path)
+  local ext = vim.fn.fnamemodify(path, ":e")
+  if type(ext) == "string" and ext ~= "" then
+    return "." .. ext
+  end
+  local config = require("vault.config")
+  return config.options.ext or ".md"
+end
+
+---@param source_path vault.path
+---@param slug vault.slug
+---@return vault.path
+local function build_target_path_for_slug(source_path, slug)
+  local config = require("vault.config")
+  local root = vim.fn.expand(config.options.root or "")
+  return vim.fs.normalize(root .. "/" .. slug .. note_extension(source_path))
+end
+
+local function invalidate_note_cache()
+  local ok, scanner = pcall(require, "vault.scanner")
+  if ok and type(scanner.invalidate_notes_cache) == "function" then
+    scanner.invalidate_notes_cache()
+    return
+  end
+  pcall(function()
+    state.set_global_key("cache.notes.paths", nil)
+    state.set_global_key("cache.notes.slugs", nil)
+    state.set_global_key("cache.notes.basename_index", nil)
+  end)
+end
+
+---@param st vault.GridEditorState
+---@param slug vault.slug
+---@param path vault.path
+---@return boolean
+local function is_stale_note(st, slug, path)
+  local snap_mtime = st.note_mtimes and st.note_mtimes[slug] or 0
+  return snap_mtime > 0 and get_mtime(path) > snap_mtime
+end
+
+---@param readonly_columns table<string, boolean>
+---@return string[]
+local function sorted_true_keys(readonly_columns)
+  local keys = {}
+  for key, enabled in pairs(readonly_columns) do
+    if enabled then
+      keys[#keys + 1] = key
+    end
+  end
+  table.sort(keys)
+  return keys
+end
+
+---@param spec table
+---@return string
+local function build_session_key(spec)
+  return vim.json.encode(spec)
+end
+
+---@param diff table
+---@return table<vault.slug, vault.ProcessStructuralOp>
+local function collect_structural_ops(diff)
+  ---@type table<vault.slug, vault.ProcessStructuralOp>
+  local by_slug = {}
+
+  for _, custom in ipairs(diff.custom or {}) do
+    if custom.type == "rename" and custom.extra and custom.extra.old_slug and custom.extra.new_slug then
+      by_slug[custom.extra.old_slug] = {
+        old_slug = custom.extra.old_slug,
+        new_slug = custom.extra.new_slug,
+        source_field = custom.extra.source_field or "slug",
+      }
+    end
+  end
+
+  for _, upd in ipairs(diff.updates or {}) do
+    local folder = upd.fields.dir
+    if folder == nil then
+      folder = upd.fields["file.folder"]
+    end
+    if folder ~= nil then
+      local op = by_slug[upd.id]
+      if not op or (op.source_field ~= "slug" and op.source_field ~= "file.slug") then
+        local next_slug = with_slug_dir(op and op.new_slug or upd.id, normalize_dir_prefix(folder))
+        if next_slug ~= upd.id then
+          if op then
+            op.new_slug = next_slug
+          else
+            by_slug[upd.id] = {
+              old_slug = upd.id,
+              new_slug = next_slug,
+              source_field = "file.folder",
+            }
+          end
+        end
+      end
+    end
+  end
+
+  return by_slug
+end
+
+---@param diff table
+local function strip_structural_fields(diff)
+  ---@type table[]
+  local filtered = {}
+  for _, upd in ipairs(diff.updates or {}) do
+    ---@type table<string, any>
+    local kept = {}
+    for key, value in pairs(upd.fields or {}) do
+      if not STRUCTURAL_FIELDS[key] then
+        kept[key] = value
+      end
+    end
+    if next(kept) then
+      filtered[#filtered + 1] = { id = upd.id, fields = kept }
+    end
+  end
+  diff.updates = filtered
+end
+
+---@param files table<string, string[]>
+---@param old_path vault.path
+---@param old_slug vault.slug
+local function snapshot_structural_side_effects(files, old_path, old_slug)
+  if old_path and vim.fn.filereadable(old_path) == 1 then
+    files[old_path] = vim.fn.readfile(old_path)
+  end
+
+  local scanner = require("vault.scanner")
+  local paths = scanner.paths()
+  local old_stem = old_path and vim.fn.fnamemodify(old_path, ":t:r") or nil
+  local esc_slug = vim.pesc(old_slug)
+  local esc_stem = (old_stem and old_stem ~= "") and vim.pesc(old_stem) or nil
+  for _, entry in pairs(paths) do
+    local path = entry.path
+    if not files[path] and vim.fn.filereadable(path) == 1 then
+      local f = io.open(path, "r")
+      if f then
+        local content = f:read("*all")
+        f:close()
+        local has_link = content:match("%[%[" .. esc_slug)
+        if not has_link and esc_stem then
+          has_link = content:match("%[%[" .. esc_stem)
+        end
+        if has_link then
+          files[path] = vim.split(content, "\n", { plain = true })
+        end
+      end
+    end
+  end
+end
 
 ---@param bufnr integer
 ---@param st vault.GridEditorState
@@ -526,7 +744,7 @@ local function make_classify(_)
     if field == "slug" or field == "file.slug" then
       local new_slug = vim.trim(new)
       if new_slug ~= "" and new_slug ~= id then
-        return "rename", { old_slug = id, new_slug = new_slug }
+        return "rename", { old_slug = id, new_slug = new_slug, source_field = field }
       end
       return "skip"
     end
@@ -536,7 +754,7 @@ local function make_classify(_)
       local old_stem = (id:match("[^/]+$") or id)
       if new_stem ~= "" and new_stem ~= old_stem then
         local dir_prefix = id:match("^(.-/)[^/]*$") or ""
-        return "rename", { old_slug = id, new_slug = dir_prefix .. new_stem }
+        return "rename", { old_slug = id, new_slug = dir_prefix .. new_stem, source_field = field }
       end
       return "skip"
     end
@@ -553,7 +771,8 @@ end
 ---@param diff table  vimtable.Diff
 ---@param st vault.GridEditorState
 ---@param bufnr integer
-local function snapshot_for_undo(diff, st, bufnr)
+---@param structural_ops? vault.ProcessStructuralOp[]
+local function snapshot_for_undo(diff, st, bufnr, structural_ops)
   ---@type table<string, string[]>
   local files = {}
   for _, upd in ipairs(diff.updates) do
@@ -571,39 +790,8 @@ local function snapshot_for_undo(diff, st, bufnr)
       deleted_paths[slug] = path
     end
   end
-  -- Snapshot wikilink targets for renames
-  if diff.custom then
-    for _, c in ipairs(diff.custom) do
-      if c.type == "rename" and c.extra then
-        local old_path = st.note_paths[c.extra.old_slug]
-        if old_path and vim.fn.filereadable(old_path) == 1 then
-          files[old_path] = vim.fn.readfile(old_path)
-        end
-        local scanner = require("vault.scanner")
-        local paths = scanner.paths()
-        local old_stem = old_path and vim.fn.fnamemodify(old_path, ":t:r") or nil
-        local esc_slug = vim.pesc(c.extra.old_slug)
-        -- Only build stem pattern if stem is valid (non-nil, non-empty)
-        local esc_stem = (old_stem and old_stem ~= "") and vim.pesc(old_stem) or nil
-        for _, entry in pairs(paths) do
-          local np = entry.path
-          if not files[np] and vim.fn.filereadable(np) == 1 then
-            local f = io.open(np, "r")
-            if f then
-              local content = f:read("*all")
-              f:close()
-              local has_link = content:match("%[%[" .. esc_slug)
-              if not has_link and esc_stem then
-                has_link = content:match("%[%[" .. esc_stem)
-              end
-              if has_link then
-                files[np] = vim.split(content, "\n", { plain = true })
-              end
-            end
-          end
-        end
-      end
-    end
+  for _, op in ipairs(structural_ops or {}) do
+    snapshot_structural_side_effects(files, st.note_paths[op.old_slug], op.old_slug)
   end
   ---@type vault.ProcessUndoSnapshot
   local payload = {
@@ -640,36 +828,8 @@ local function apply_mutations(diff, st, undo_payload)
       log.error("SAFETY: Skipping update — %s", path_err); goto continue
     end
     path = safe_path
-    local snap_mtime = st.note_mtimes and st.note_mtimes[upd.id] or 0
-    if snap_mtime > 0 and get_mtime(path) > snap_mtime then
+    if is_stale_note(st, upd.id, path) then
       log.warn("SAFETY: Skipping %s — file modified externally", upd.id); goto continue
-    end
-    -- Dir move
-    if upd.fields.dir ~= nil or upd.fields["file.folder"] ~= nil then
-      local new_dir = upd.fields.dir or upd.fields["file.folder"] or ""
-      if type(new_dir) ~= "string" then new_dir = "" end
-      if new_dir == "/" then new_dir = "" end
-      if new_dir:match("%.%.") then
-        log.error("SAFETY: Refusing move with '..': %s", new_dir); goto continue
-      end
-      -- Ensure trailing / on non-empty dir
-      if new_dir ~= "" and not new_dir:match("/$") then
-        new_dir = new_dir .. "/"
-      end
-      local config = require("vault.config")
-      local basename = vim.fn.fnamemodify(path, ":t")
-      local new_path = config.options.root .. "/" .. new_dir .. basename
-      if new_path ~= path then
-        local move_ok = pcall(function()
-          local Note = require("vault.notes.note")
-          local note = Note(path)
-          note:move(new_path, false, false, { silent = true })
-        end)
-        if move_ok then
-          st.note_paths[upd.id] = new_path
-          path = new_path
-        end
-      end
     end
     -- file.body write
     if upd.fields["file.body"] ~= nil then
@@ -710,6 +870,9 @@ local function apply_mutations(diff, st, undo_payload)
       if not safe_del then
         log.error("SAFETY: Skipping delete — %s", del_err); goto del_continue
       end
+      if is_stale_note(st, slug, safe_del) then
+        log.warn("SAFETY: Skipping delete for %s — file modified externally", slug); goto del_continue
+      end
       local del_ok = pcall(function()
         local Note = require("vault.notes.note")
         local note = Note(safe_del)
@@ -717,6 +880,8 @@ local function apply_mutations(diff, st, undo_payload)
       end)
       if del_ok then
         n_deletes = n_deletes + 1
+        st.note_paths[slug] = nil
+        if st.note_mtimes then st.note_mtimes[slug] = nil end
       else
         log.error("Delete failed for: %s", slug)
       end
@@ -802,6 +967,72 @@ local function apply_mutations(diff, st, undo_payload)
   return n_updates, n_deletes, n_creates
 end
 
+---@param structural_ops vault.ProcessStructuralOp[]
+---@param diff table
+---@param st vault.GridEditorState
+---@param undo_payload? vault.ProcessUndoSnapshot
+---@return integer, integer
+local function apply_structural_ops(structural_ops, diff, st, undo_payload)
+  local n_renamed = 0
+  local n_patched = 0
+  if #structural_ops == 0 then
+    return n_renamed, n_patched
+  end
+
+  local Note = require("vault.notes.note")
+  for _, ren in ipairs(structural_ops) do
+    local old_path = st.note_paths[ren.old_slug]
+    if old_path then
+      local new_path = build_target_path_for_slug(old_path, ren.new_slug)
+      if ren.new_slug:match("%.%.") then
+        log.error("SAFETY: Refusing rename '%s' — '..'", ren.new_slug)
+      else
+        local safe_new_path, new_err = validate_path_in_vault(new_path)
+        if not safe_new_path then
+          log.error("SAFETY: Refusing rename '%s' — %s", ren.new_slug, new_err)
+        elseif is_stale_note(st, ren.old_slug, old_path) then
+          log.warn("SAFETY: Skipping structural move for %s — file modified externally", ren.old_slug)
+        else
+          new_path = safe_new_path
+          if vim.fn.filereadable(new_path) == 1 and old_path ~= new_path then
+            local old_st = uv.fs_stat(old_path)
+            local new_st = uv.fs_stat(new_path)
+            if not (old_st and new_st and old_st.ino == new_st.ino) then
+              log.error("SAFETY: Cannot rename to '%s' — exists", ren.new_slug)
+              goto continue
+            end
+          end
+          local ok, note = pcall(Note, old_path)
+          if ok and note then
+            local move_ok, result = pcall(note.move, note, new_path, false, false, { silent = true })
+            if move_ok then
+              n_patched = n_patched + (result or 0)
+              if undo_payload then
+                table.insert(undo_payload.renames, { old_path = old_path, new_path = new_path })
+              end
+              st.note_paths[ren.new_slug] = new_path
+              st.note_paths[ren.old_slug] = nil
+              if st.note_mtimes then
+                st.note_mtimes[ren.new_slug] = get_mtime(new_path)
+                st.note_mtimes[ren.old_slug] = nil
+              end
+              for _, upd in ipairs(diff.updates or {}) do
+                if upd.id == ren.old_slug then upd.id = ren.new_slug end
+              end
+              n_renamed = n_renamed + 1
+            else
+              log.error("Rename '%s' failed: %s", ren.old_slug, tostring(result))
+            end
+          end
+        end
+      end
+    end
+    ::continue::
+  end
+
+  return n_renamed, n_patched
+end
+
 -- ─── Save handler (on_save callback for Grid) ────────────────────────────────
 
 ---@param st vault.GridEditorState
@@ -817,20 +1048,24 @@ local function make_on_save(st)
         diff.errors[1].reason .. " on " .. (diff.errors[1].field or "?"))
     end
 
-    -- Extract renames from diff.custom
-    ---@type { old_slug: string, new_slug: string }[]
-    local renames = {}
+    -- Extract structural ops from diff.custom and folder updates
+    ---@type vault.ProcessStructuralOp[]
+    local structural_ops = {}
     ---@type table[]
     local other_custom = {}
+    local structural_by_slug = collect_structural_ops(diff)
+    for _, op in pairs(structural_by_slug) do
+      structural_ops[#structural_ops + 1] = op
+    end
     for _, c in ipairs(diff.custom or {}) do
-      if c.type == "rename" and c.extra then
-        table.insert(renames, c.extra)
-      else
+      if c.type ~= "rename" then
         table.insert(other_custom, c)
       end
     end
+    diff.custom = other_custom
+    strip_structural_fields(diff)
 
-    local total = #diff.updates + #diff.deletes + #diff.creates + #renames
+    local total = #diff.updates + #diff.deletes + #diff.creates + #structural_ops
     if total == 0 then
       st.saving = false
       done(nil)
@@ -839,18 +1074,18 @@ local function make_on_save(st)
 
     if st.save_mode == "metadata_only" then
       local blocked = {}
-      if #renames > 0 then table.insert(blocked, string.format("%d rename(s)", #renames)) end
+      if #structural_ops > 0 then table.insert(blocked, string.format("%d structural edit(s)", #structural_ops)) end
       if #diff.creates > 0 then table.insert(blocked, string.format("%d create(s)", #diff.creates)) end
       if #diff.deletes > 0 then table.insert(blocked, string.format("%d delete(s)", #diff.deletes)) end
       if #blocked > 0 then
         log.warn("Metadata-only save ignored structural edits: %s", table.concat(blocked, ", "))
-        renames = {}
+        structural_ops = {}
         diff.creates = {}
         diff.deletes = {}
       end
     end
 
-    total = #diff.updates + #diff.deletes + #diff.creates + #renames
+    total = #diff.updates + #diff.deletes + #diff.creates + #structural_ops
     if total == 0 then
       st.saving = false
       done(nil)
@@ -860,7 +1095,7 @@ local function make_on_save(st)
     enter_process_save()
 
     -- ── Snapshot for undo ──
-    local undo_payload = snapshot_for_undo(diff, st, bufnr)
+    local undo_payload = snapshot_for_undo(diff, st, bufnr, structural_ops)
 
     -- ── Hard cap on creates ──
     if #diff.creates > CREATE_HARD_CAP then
@@ -869,90 +1104,14 @@ local function make_on_save(st)
       diff.deletes = {}
     end
 
-    -- ── Suspicious create+delete pairing ──
-    -- When create and delete counts match (≤5 each), they are likely extmark
-    -- drift artifacts (identity lost → looks like a create + a delete). Pair
-    -- them as updates to the deleted slug's record instead.
     if #diff.creates > 0 and #diff.deletes > 0 then
-      local n_paired = #diff.creates
-      if n_paired <= 5 and #diff.deletes <= 5 and n_paired == #diff.deletes then
-        for i, cr in ipairs(diff.creates) do
-          local del_slug = diff.deletes[i]
-          if del_slug then
-            -- Strip identity/structural fields that should not be written to
-            -- frontmatter — they are part of the file identity, not metadata.
-            ---@type table<string, any>
-            local safe_fields = {}
-            ---@type table<string, boolean>
-            local skip = { slug = true, ["file.slug"] = true, ["file.name"] = true,
-                           ["file.folder"] = true, ["file.path"] = true, dir = true }
-            for k, v in pairs(cr.fields) do
-              if not skip[k] then safe_fields[k] = v end
-            end
-            table.insert(diff.updates, { id = del_slug, fields = safe_fields })
-          end
-        end
-        diff.creates = {}
-        diff.deletes = {}
-        log.info("Paired %d create+delete as edits", n_paired)
-      else
-        log.warn("SAFETY: %d creates + %d deletes — applying updates only",
-          #diff.creates, #diff.deletes)
-        diff.creates = {}
-        diff.deletes = {}
-      end
+      log.warn("SAFETY: Mixed create+delete diff detected (%d creates, %d deletes) — applying updates and structural moves only", #diff.creates, #diff.deletes)
+      diff.creates = {}
+      diff.deletes = {}
     end
 
-    -- ── Process renames ──
-    local n_renamed = 0
-    local n_patched = 0
-    if #renames > 0 then
-      local Note = require("vault.notes.note")
-      local config = require("vault.config")
-      local vault_root = vim.fn.expand(config.options.root or "")
-      for _, ren in ipairs(renames) do
-        local old_path = st.note_paths[ren.old_slug]
-        if not old_path then goto skip_ren end
-        local new_path = vault_root .. "/" .. ren.new_slug .. ".md"
-        if ren.new_slug:match("%.%.") then
-          log.error("SAFETY: Refusing rename '%s' — '..'", ren.new_slug); goto skip_ren
-        end
-        if vim.fn.filereadable(new_path) == 1 and old_path ~= new_path then
-          -- On case-insensitive FS (macOS), case-only renames report the
-          -- target as existing. Compare inodes to allow them through.
-          local old_st = uv.fs_stat(old_path)
-          local new_st = uv.fs_stat(new_path)
-          if not (old_st and new_st and old_st.ino == new_st.ino) then
-            log.error("SAFETY: Cannot rename to '%s' — exists", ren.new_slug); goto skip_ren
-          end
-        end
-        local ok, note = pcall(Note, old_path)
-        if ok and note then
-          local move_ok, result = pcall(note.move, note, new_path, false, false, { silent = true })
-          if move_ok then
-            n_patched = n_patched + (result or 0)
-            if undo_payload then
-              table.insert(undo_payload.renames, { old_path = old_path, new_path = new_path })
-            end
-            st.note_paths[ren.new_slug] = new_path
-            st.note_paths[ren.old_slug] = nil
-            if st.note_mtimes then
-              st.note_mtimes[ren.new_slug] = st.note_mtimes[ren.old_slug]
-              st.note_mtimes[ren.old_slug] = nil
-            end
-            -- Remap any pending updates from old_slug to new_slug so they
-            -- can find the path after rename.
-            for _, upd in ipairs(diff.updates) do
-              if upd.id == ren.old_slug then upd.id = ren.new_slug end
-            end
-            n_renamed = n_renamed + 1
-          else
-            log.error("Rename '%s' failed: %s", ren.old_slug, tostring(result))
-          end
-        end
-        ::skip_ren::
-      end
-    end
+    -- ── Process structural moves/renames ──
+    local n_renamed, n_patched = apply_structural_ops(structural_ops, diff, st, undo_payload)
 
     -- ── Handle deletes ──
     if #diff.deletes > 0 and #diff.deletes > DELETE_HARD_CAP then
@@ -980,6 +1139,7 @@ local function make_on_save(st)
       if n_c > 0 then table.insert(parts, string.format("%d created", n_c)) end
       if #parts == 0 then parts = { "no changes" } end
       log.info("Saved: %s", table.concat(parts, ", "))
+      invalidate_note_cache()
       leave_process_save()
       st.saving = false
       done(nil)
@@ -1057,12 +1217,26 @@ end
 ---@param snap vault.ProcessUndoSnapshot
 function M._apply_undo(bufnr, snap)
   local restored, deleted, renames_reversed = 0, 0, 0
+  local st = buf_states[bufnr]
   if snap.renames then
     for _, ren in ipairs(snap.renames) do
       if vim.fn.filereadable(ren.new_path) == 1 then
         local ok = uv.fs_rename(ren.new_path, ren.old_path)
-        if ok then renames_reversed = renames_reversed + 1
-        else log.error("Failed to reverse rename %s → %s", ren.new_path, ren.old_path) end
+        if ok then
+          renames_reversed = renames_reversed + 1
+          if st then
+            local old_slug = require("vault.utils").path_to_slug(ren.old_path)
+            local new_slug = require("vault.utils").path_to_slug(ren.new_path)
+            st.note_paths[new_slug] = nil
+            st.note_paths[old_slug] = ren.old_path
+            if st.note_mtimes then
+              st.note_mtimes[new_slug] = nil
+              st.note_mtimes[old_slug] = get_mtime(ren.old_path)
+            end
+          end
+        else
+          log.error("Failed to reverse rename %s → %s", ren.new_path, ren.old_path)
+        end
       end
     end
   end
@@ -1080,7 +1254,6 @@ function M._apply_undo(bufnr, snap)
     end
   end
   -- Re-register deleted note paths so M.reload can find them
-  local st = buf_states[bufnr]
   if st and snap.deleted_paths then
     for slug, path in pairs(snap.deleted_paths) do
       if vim.fn.filereadable(path) == 1 then
@@ -1094,6 +1267,7 @@ function M._apply_undo(bufnr, snap)
   if deleted > 0 then table.insert(parts, string.format("removed %d created", deleted)) end
   if renames_reversed > 0 then table.insert(parts, string.format("reversed %d rename(s)", renames_reversed)) end
   log.info("Undo: %s", #parts > 0 and table.concat(parts, ", ") or "nothing to undo")
+  invalidate_note_cache()
   M.refresh_current(bufnr)
 end
 
@@ -1151,10 +1325,30 @@ function M.save_range(bufnr, start_row, end_row)
     return
   end
 
+  ---@type table[]
+  local filtered_custom = {}
+  for _, custom in ipairs(diff.custom or {}) do
+    if custom.type == "rename" and custom.extra and selected_ids[custom.extra.old_slug] then
+      filtered_custom[#filtered_custom + 1] = custom
+    end
+  end
+
   ---@type { updates: table[], deletes: table[], creates: table[], custom: table[], errors: table[] }
-  local partial = { updates = filtered, deletes = {}, creates = {}, custom = {}, errors = {} }
+  local partial = { updates = filtered, deletes = {}, creates = {}, custom = filtered_custom, errors = {} }
+  local structural_ops = {}
+  for _, op in pairs(collect_structural_ops(partial)) do
+    structural_ops[#structural_ops + 1] = op
+  end
+  strip_structural_fields(partial)
   enter_process_save()
-  local undo_payload = snapshot_for_undo(partial, st, bufnr)
+  local undo_payload = snapshot_for_undo(partial, st, bufnr, structural_ops)
+  local ok_ren, n_r, n_patched = pcall(apply_structural_ops, structural_ops, partial, st, undo_payload)
+  if not ok_ren then
+    leave_process_save()
+    st.saving = false
+    log.error("Partial save failed: %s", tostring(n_r))
+    return
+  end
   local ok_apply, n_u = pcall(apply_mutations, partial, st, undo_payload)
   if not ok_apply then
     leave_process_save()
@@ -1162,7 +1356,8 @@ function M.save_range(bufnr, start_row, end_row)
     log.error("Partial save failed: %s", tostring(n_u))
     return
   end
-  log.info("Partial save: %d updated", n_u)
+  invalidate_note_cache()
+  log.info("Partial save: %d moved, %d updated%s", n_r, n_u, n_patched > 0 and string.format(" (%d patched)", n_patched) or "")
   vim.schedule(function()
     leave_process_save()
     M.refresh_current(bufnr)
@@ -1267,19 +1462,6 @@ function M.open(opts)
     if not has_slug then table.insert(columns, 1, "slug") end
   end
 
-  -- Prevent duplicates
-  for bufnr, s in pairs(buf_states) do
-    if vim.api.nvim_buf_is_valid(bufnr) then
-      if s.filter_desc == filter_desc then
-        vim.api.nvim_set_current_buf(bufnr)
-        log.info("Switched to existing grid process buffer (%s)", filter_desc)
-        return
-      end
-    else
-      buf_states[bufnr] = nil
-    end
-  end
-
   -- Get notes
   local notes
   if opts.notes then notes = opts.notes
@@ -1304,6 +1486,31 @@ function M.open(opts)
   local readonly_columns = {}
   for _, col in ipairs(opts.readonly_columns or {}) do readonly_columns[normalize_col(col)] = true end
 
+  local session_key = build_session_key({
+    filter_desc = filter_desc,
+    base = base and (base.data.path or base.data.name) or nil,
+    columns = columns,
+    visible_columns = visible_columns,
+    readonly_columns = sorted_true_keys(readonly_columns),
+    group_by = opts.group_by or (base and group_by_from_base(base)) or nil,
+    save_mode = opts.save_mode,
+    taxonomy_field = opts.taxonomy_field,
+    taxonomy_choices = opts.taxonomy_choices,
+  })
+
+  -- Prevent duplicates
+  for bufnr, s in pairs(buf_states) do
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      if s.session_key == session_key then
+        vim.api.nvim_set_current_buf(bufnr)
+        log.info("Switched to existing grid process buffer (%s)", filter_desc)
+        return
+      end
+    else
+      buf_states[bufnr] = nil
+    end
+  end
+
   -- Build grid.Column[] from visible columns
   local grid_columns = build_grid_columns(visible_columns, display_names, formula_cols, readonly_columns)
 
@@ -1315,6 +1522,7 @@ function M.open(opts)
     note_mtimes = {},
     base = base,
     filter_desc = filter_desc,
+    session_key = session_key,
     columns = columns,
     visible_columns = visible_columns,
     display_names = display_names,
@@ -2049,7 +2257,9 @@ M._read_frontmatter_fields = shared.read_frontmatter_fields
 M._set_frontmatter_field = shared.set_frontmatter_field
 M._set_frontmatter_fields = shared.set_frontmatter_fields
 M._snapshot_for_undo = snapshot_for_undo
+M._apply_structural_ops = apply_structural_ops
 M._apply_mutations = apply_mutations
 M._make_on_save = make_on_save
+M._get_mtime = get_mtime
 
 return M

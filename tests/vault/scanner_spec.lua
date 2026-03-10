@@ -40,4 +40,17 @@ describe("vault.scanner.paths", function()
         assert.are.equal(1, calls)
         assert.are.same(initial, cached)
     end)
+
+    it("invalidates note caches explicitly", function()
+        local scanner = require("vault.scanner")
+        state.set_global_key("cache.notes.paths", { demo = true })
+        state.set_global_key("cache.notes.slugs", { demo = true })
+        state.set_global_key("cache.notes.basename_index", { demo = true })
+
+        scanner.invalidate_notes_cache()
+
+        assert.is_nil(state.get_global_key("cache.notes.paths"))
+        assert.is_nil(state.get_global_key("cache.notes.slugs"))
+        assert.is_nil(state.get_global_key("cache.notes.basename_index"))
+    end)
 end)

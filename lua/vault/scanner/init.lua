@@ -29,6 +29,12 @@ local PROCESS_SAVE_DEPTH_KEY = "vault.process_save_depth"
 ---@type vault.Scanner
 local Scanner = {}
 
+function Scanner.invalidate_notes_cache()
+    state.set_global_key("cache.notes.paths", nil)
+    state.set_global_key("cache.notes.slugs", nil)
+    state.set_global_key("cache.notes.basename_index", nil)
+end
+
 --- Helper to determine root and ignore patterns based on options
 --- @param opts? { ignore: boolean|string[] }
 --- @return string root, string[] ignores
