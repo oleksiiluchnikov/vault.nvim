@@ -13,6 +13,7 @@ local M = {}
 local log = require("vault.log").scope("bases.views.grid")
 local shared = require("vault.bases.views.shared")
 local state = require("vault.core.state")
+local grid_config = require("vault.views.grid_config")
 
 -- ─── Lazy imports (avoid circular requires at module level) ───────────────────
 
@@ -22,13 +23,8 @@ end
 
 -- ─── Constants (delegated to shared) ──────────────────────────────────────────
 
-local DEFAULT_COLUMNS = { "slug", "title", "status", "tags" }
-
 local READONLY_FILE_COLS = shared.READONLY_FILE_COLS
 local uv = vim.uv or vim.loop
-
-local DELETE_HARD_CAP = 100
-local CREATE_HARD_CAP = 100
 
 local get_empty_cell = shared.get_empty_cell
 local get_mtime = shared.get_mtime
@@ -39,7 +35,54 @@ local build_records
 ---@field new_slug vault.slug
 ---@field source_field string
 
+---@class vault.ProcessMutationDetail
+---@field kind "update"|"delete"|"create"|"rename"
+---@field slug? vault.slug
+---@field new_slug? vault.slug
+---@field path? vault.path
+---@field new_path? vault.path
+
+---@class vault.ProcessUndoSnapshot
+---@field files table<string, string[]>
+---@field created_paths vault.path[]
+---@field deleted_paths table<vault.slug, vault.path>
+---@field renames { old_path: vault.path, new_path: vault.path }[]
+---@field timestamp integer
+---@field description string
+---@field mutation_details? vault.ProcessMutationDetail[]
+
 local SAVE_DEPTH_KEY = "vault.process_save_depth"
+
+---@param detail vault.ProcessMutationDetail
+---@return string
+local function format_mutation_detail(detail)
+  if detail.kind == "rename" then
+    return string.format("renamed %s -> %s", detail.slug or "?", detail.new_slug or "?")
+  elseif detail.kind == "update" then
+    return string.format("updated %s", detail.slug or detail.path or "?")
+  elseif detail.kind == "delete" then
+    return string.format("trashed %s", detail.slug or detail.path or "?")
+  elseif detail.kind == "create" then
+    return string.format("created %s", detail.slug or detail.path or "?")
+  end
+  return detail.kind
+end
+
+---@param details vault.ProcessMutationDetail[]
+---@param max_items? integer
+---@return string
+local function format_mutation_details(details, max_items)
+  if #details == 0 then return "" end
+  local limit = max_items or 6
+  local parts = {}
+  for i = 1, math.min(limit, #details) do
+    parts[#parts + 1] = format_mutation_detail(details[i])
+  end
+  if #details > limit then
+    parts[#parts + 1] = string.format("... and %d more", #details - limit)
+  end
+  return table.concat(parts, "; ")
+end
 
 local function enter_process_save()
   local depth = tonumber(state.get_global_key(SAVE_DEPTH_KEY) or 0) or 0
@@ -76,7 +119,7 @@ end
 --- Build a row_hl callback from config rules or a user function.
 --- @return fun(record: table, row_idx: integer): string|nil
 local function build_row_hl()
-  local cfg = require("vault.config").options.process or {}
+  local cfg = grid_config.get()
   local rules = cfg.row_hl
   if not rules then return function() return nil end end
 
@@ -803,6 +846,7 @@ local function snapshot_for_undo(diff, st, bufnr, structural_ops)
     description = string.format("%d updates, %d deletes, %d creates, %d renames",
       #diff.updates, #diff.deletes, #diff.creates,
       diff.custom and #diff.custom or 0),
+    mutation_details = {},
   }
   vt_undo.snapshot(bufnr, payload)
   return payload
@@ -813,8 +857,9 @@ end
 ---@param diff table
 ---@param st vault.GridEditorState
 ---@param undo_payload? vault.ProcessUndoSnapshot  Live undo payload to append created_paths/renames
+---@param mutation_details? vault.ProcessMutationDetail[]
 ---@return integer, integer, integer
-local function apply_mutations(diff, st, undo_payload)
+local function apply_mutations(diff, st, undo_payload, mutation_details)
   local n_updates, n_deletes, n_creates = 0, 0, 0
   ---@type string
   local empty = get_empty_cell()
@@ -859,6 +904,9 @@ local function apply_mutations(diff, st, undo_payload)
     end
     if next(fm_fields) then set_frontmatter_fields(path, fm_fields) end
     n_updates = n_updates + 1
+    if mutation_details then
+      mutation_details[#mutation_details + 1] = { kind = "update", slug = upd.id, path = path }
+    end
     ::continue::
   end
 
@@ -880,6 +928,9 @@ local function apply_mutations(diff, st, undo_payload)
       end)
       if del_ok then
         n_deletes = n_deletes + 1
+        if mutation_details then
+          mutation_details[#mutation_details + 1] = { kind = "delete", slug = slug, path = safe_del }
+        end
         st.note_paths[slug] = nil
         if st.note_mtimes then st.note_mtimes[slug] = nil end
       else
@@ -960,6 +1011,9 @@ local function apply_mutations(diff, st, undo_payload)
       local created_slug = dir .. slug
       st.note_paths[created_slug] = safe_create
       n_creates = n_creates + 1
+      if mutation_details then
+        mutation_details[#mutation_details + 1] = { kind = "create", slug = created_slug, path = safe_create }
+      end
     end
     ::cr_continue::
   end
@@ -971,8 +1025,9 @@ end
 ---@param diff table
 ---@param st vault.GridEditorState
 ---@param undo_payload? vault.ProcessUndoSnapshot
+---@param mutation_details? vault.ProcessMutationDetail[]
 ---@return integer, integer
-local function apply_structural_ops(structural_ops, diff, st, undo_payload)
+local function apply_structural_ops(structural_ops, diff, st, undo_payload, mutation_details)
   local n_renamed = 0
   local n_patched = 0
   if #structural_ops == 0 then
@@ -1009,6 +1064,15 @@ local function apply_structural_ops(structural_ops, diff, st, undo_payload)
               n_patched = n_patched + (result or 0)
               if undo_payload then
                 table.insert(undo_payload.renames, { old_path = old_path, new_path = new_path })
+              end
+              if mutation_details then
+                mutation_details[#mutation_details + 1] = {
+                  kind = "rename",
+                  slug = ren.old_slug,
+                  new_slug = ren.new_slug,
+                  path = old_path,
+                  new_path = new_path,
+                }
               end
               st.note_paths[ren.new_slug] = new_path
               st.note_paths[ren.old_slug] = nil
@@ -1098,8 +1162,9 @@ local function make_on_save(st)
     local undo_payload = snapshot_for_undo(diff, st, bufnr, structural_ops)
 
     -- ── Hard cap on creates ──
-    if #diff.creates > CREATE_HARD_CAP then
-      log.error("SAFETY: Refusing %d creates (cap %d). Applying updates only.", #diff.creates, CREATE_HARD_CAP)
+    local grid_cfg = grid_config.get()
+    if #diff.creates > grid_cfg.create_hard_cap then
+      log.error("SAFETY: Refusing %d creates (cap %d). Applying updates only.", #diff.creates, grid_cfg.create_hard_cap)
       diff.creates = {}
       diff.deletes = {}
     end
@@ -1110,17 +1175,20 @@ local function make_on_save(st)
       diff.deletes = {}
     end
 
+    ---@type vault.ProcessMutationDetail[]
+    local mutation_details = {}
+
     -- ── Process structural moves/renames ──
-    local n_renamed, n_patched = apply_structural_ops(structural_ops, diff, st, undo_payload)
+    local n_renamed, n_patched = apply_structural_ops(structural_ops, diff, st, undo_payload, mutation_details)
 
     -- ── Handle deletes ──
-    if #diff.deletes > 0 and #diff.deletes > DELETE_HARD_CAP then
-      log.error("SAFETY: Refusing %d deletes (cap %d)", #diff.deletes, DELETE_HARD_CAP)
+    if #diff.deletes > 0 and #diff.deletes > grid_cfg.delete_hard_cap then
+      log.error("SAFETY: Refusing %d deletes (cap %d)", #diff.deletes, grid_cfg.delete_hard_cap)
       diff.deletes = {}
     end
 
     local function finish_save()
-      local ok_apply, n_u, n_d, n_c = pcall(apply_mutations, diff, st, undo_payload)
+      local ok_apply, n_u, n_d, n_c = pcall(apply_mutations, diff, st, undo_payload, mutation_details)
       if not ok_apply then
         leave_process_save()
         st.saving = false
@@ -1138,7 +1206,18 @@ local function make_on_save(st)
       if n_d > 0 then table.insert(parts, string.format("%d trashed", n_d)) end
       if n_c > 0 then table.insert(parts, string.format("%d created", n_c)) end
       if #parts == 0 then parts = { "no changes" } end
-      log.info("Saved: %s", table.concat(parts, ", "))
+      if undo_payload and undo_payload.mutation_details then
+        for _, item in ipairs(mutation_details) do
+          undo_payload.mutation_details[#undo_payload.mutation_details + 1] = item
+        end
+      end
+      local summary = table.concat(parts, ", ")
+      local detail_text = format_mutation_details(mutation_details, 8)
+      if detail_text ~= "" then
+        log.info("Saved: %s — %s", summary, detail_text)
+      else
+        log.info("Saved: %s", summary)
+      end
       invalidate_note_cache()
       leave_process_save()
       st.saving = false
@@ -1217,6 +1296,8 @@ end
 ---@param snap vault.ProcessUndoSnapshot
 function M._apply_undo(bufnr, snap)
   local restored, deleted, renames_reversed = 0, 0, 0
+  ---@type string[]
+  local detail_parts = {}
   local st = buf_states[bufnr]
   if snap.renames then
     for _, ren in ipairs(snap.renames) do
@@ -1224,6 +1305,7 @@ function M._apply_undo(bufnr, snap)
         local ok = uv.fs_rename(ren.new_path, ren.old_path)
         if ok then
           renames_reversed = renames_reversed + 1
+          detail_parts[#detail_parts + 1] = string.format("reversed %s -> %s", require("vault.utils").path_to_slug(ren.new_path), require("vault.utils").path_to_slug(ren.old_path))
           if st then
             local old_slug = require("vault.utils").path_to_slug(ren.old_path)
             local new_slug = require("vault.utils").path_to_slug(ren.new_path)
@@ -1242,7 +1324,9 @@ function M._apply_undo(bufnr, snap)
   end
   for path, original_lines in pairs(snap.files) do
     local ok = atomic_writefile(path, original_lines)
-    if ok then restored = restored + 1
+    if ok then
+      restored = restored + 1
+      detail_parts[#detail_parts + 1] = string.format("restored %s", require("vault.utils").path_to_slug(path))
     else log.error("Failed to restore %s", path) end
   end
   if snap.created_paths then
@@ -1250,6 +1334,7 @@ function M._apply_undo(bufnr, snap)
       if vim.fn.filereadable(path) == 1 then
         vim.fn.delete(path)
         deleted = deleted + 1
+        detail_parts[#detail_parts + 1] = string.format("removed created %s", require("vault.utils").path_to_slug(path))
       end
     end
   end
@@ -1266,7 +1351,12 @@ function M._apply_undo(bufnr, snap)
   if restored > 0 then table.insert(parts, string.format("restored %d", restored)) end
   if deleted > 0 then table.insert(parts, string.format("removed %d created", deleted)) end
   if renames_reversed > 0 then table.insert(parts, string.format("reversed %d rename(s)", renames_reversed)) end
-  log.info("Undo: %s", #parts > 0 and table.concat(parts, ", ") or "nothing to undo")
+  local summary = #parts > 0 and table.concat(parts, ", ") or "nothing to undo"
+  if #detail_parts > 0 then
+    log.info("Undo: %s — %s", summary, table.concat(detail_parts, "; "))
+  else
+    log.info("Undo: %s", summary)
+  end
   invalidate_note_cache()
   M.refresh_current(bufnr)
 end
@@ -1447,9 +1537,9 @@ function M.open(opts)
     visible_columns = opts.columns or vis
     filter_desc = opts.filter_desc or ("base:" .. (base.data.name or "unnamed"))
   else
-    local cfg = require("vault.config")
-    local cfg_cols = cfg.options and cfg.options.process and cfg.options.process.columns
-    visible_columns = opts.columns or cfg_cols or DEFAULT_COLUMNS
+    local cfg = grid_config.get()
+    local cfg_cols = cfg.default_columns
+    visible_columns = opts.columns or cfg_cols
     for i, c in ipairs(visible_columns) do visible_columns[i] = normalize_col(c) end
     for _, c in ipairs(visible_columns) do
       if READONLY_FILE_COLS[c] then table.insert(formula_cols, c) end
@@ -1485,8 +1575,8 @@ function M.open(opts)
   ---@type table<string, boolean>
   local readonly_columns = {}
   for _, col in ipairs(opts.readonly_columns or {}) do readonly_columns[normalize_col(col)] = true end
-  local cfg = require("vault.config")
-  local process_identity_mode = (cfg.options.process and cfg.options.process.identity_mode) or "conceal"
+  local cfg = grid_config.get()
+  local process_identity_mode = cfg.identity_mode or "conceal"
   local grid_identity = slug_hidden and process_identity_mode or "visible"
 
   local session_key = build_session_key({
@@ -1581,7 +1671,7 @@ function M.open(opts)
     columns = grid_columns,
     records = records,
     id_field = "slug",
-    header = "winbar",
+    header = "inline",
     identity = grid_identity,
     separator = "\x1f",
     empty_cell = get_empty_cell(),

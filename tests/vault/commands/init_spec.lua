@@ -557,6 +557,79 @@ describe("Vault buffer-context commands", function()
     -- Legacy :VaultMove and :VaultGrep were removed — tested via :Vault subcommands now
 end)
 
+describe("Vault process taxonomy mode", function()
+    local commands
+    local original_grid
+    local original_taxonomy
+
+    before_each(function()
+        setup_vault()
+        clear_state()
+        commands = require("vault.commands")
+        original_grid = package.loaded["vault.bases.views.grid"]
+        original_taxonomy = package.loaded["vault.taxonomy"]
+    end)
+
+    after_each(function()
+        package.loaded["vault.bases.views.grid"] = original_grid
+        package.loaded["vault.taxonomy"] = original_taxonomy
+    end)
+
+    it("enables taxonomy actions from :Vault process taxonomy=<field>", function()
+        local captured = nil
+        package.loaded["vault.bases.views.grid"] = {
+            open = function(opts)
+                captured = opts
+            end,
+            undo = function() end,
+        }
+        package.loaded["vault.taxonomy"] = {
+            grid_process_opts = function(field)
+                return {
+                    taxonomy_field = field,
+                    taxonomy_choices = { "person", "software" },
+                }
+            end,
+            _get_settings = function()
+                return { field = "categories" }
+            end,
+        }
+
+        commands._get_subcommands().process.run({ "taxonomy=categories" })
+
+        assert.is_not_nil(captured)
+        assert.are.same({ "slug", "title", "categories" }, captured.columns)
+        assert.are.equal("categories", captured.taxonomy_field)
+        assert.are.same({ "person", "software" }, captured.taxonomy_choices)
+    end)
+
+    it("appends the taxonomy field to custom process columns", function()
+        local captured = nil
+        package.loaded["vault.bases.views.grid"] = {
+            open = function(opts)
+                captured = opts
+            end,
+            undo = function() end,
+        }
+        package.loaded["vault.taxonomy"] = {
+            grid_process_opts = function(field)
+                return {
+                    taxonomy_field = field,
+                    taxonomy_choices = { "person" },
+                }
+            end,
+            _get_settings = function()
+                return { field = "categories" }
+            end,
+        }
+
+        commands._get_subcommands().process.run({ "slug,title", "taxonomy=categories" })
+
+        assert.is_not_nil(captured)
+        assert.are.same({ "slug", "title", "categories" }, captured.columns)
+    end)
+end)
+
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- TIER 3 — Note-Context Commands (require a vault note in the buffer)
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -1103,6 +1176,20 @@ describe("Vault command completions", function()
                 ._get_subcommands().tags.promote
                 .complete("Pro", "Vault tags promote class/Project Pro")
             assert.is_true(vim.tbl_contains(result, "Project/My new masterpeace"))
+        end)
+    end)
+
+    describe("process completion", function()
+        it("includes taxonomy= among process subcommands", function()
+            local commands = require("vault.commands")
+            local result = commands._get_subcommands().process.complete("tax", "Vault process tax")
+            assert.is_true(vim.tbl_contains(result, "taxonomy="))
+        end)
+
+        it("completes taxonomy field names", function()
+            local commands = require("vault.commands")
+            local result = commands._get_subcommands().process.complete("taxonomy=c", "Vault process taxonomy=c")
+            assert.is_true(vim.tbl_contains(result, "taxonomy=categories"))
         end)
     end)
 

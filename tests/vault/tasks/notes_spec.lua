@@ -67,6 +67,33 @@ describe("vault.tasks.notes", function()
         assert.is_true(text:find('title: "Implement fast task capture"', 1, true) ~= nil)
     end)
 
+    it("respects modern tasks config defaults", function()
+        clear_modules()
+        Config = require("vault.config")
+        Config.reset()
+        Config.setup({
+            root = tmp_root,
+            ext = ".md",
+            features = {
+                cmp = false,
+                commands = false,
+                watcher = false,
+            },
+            tasks = {
+                defaults = {
+                    status = "[[Status - Todo]]",
+                    priority = "[[Priority - Critical]]",
+                },
+            },
+        })
+        task_notes = require("vault.tasks.notes")
+
+        local path = task_notes.create("Modern config task")
+        local text = table.concat(vim.fn.readfile(path), "\n")
+        assert.is_true(text:find('status: "[[Status - Todo]]"', 1, true) ~= nil)
+        assert.is_true(text:find('priority: "[[Priority - Critical]]"', 1, true) ~= nil)
+    end)
+
     it("updates status only for valid transitions", function()
         local path = tmp_root .. "/Tasks/T-20260306120000 Transition test.md"
         write_file(path, {

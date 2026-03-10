@@ -1,4 +1,5 @@
 local completions = require("vault.commands.completions")
+local registry = require("vault.commands.registry")
 local log = require("vault.log").scope("cmd")
 --- @class vault.commands.callback
 local callbacks = {}
@@ -103,7 +104,7 @@ end
 --- Build the subcommand tree lazily so pickers/callbacks resolve at call time.
 --- @return table<string, vault.Subcommand>
 local function build_subcommands()
-    return {
+    local tree = {
         -- :Vault note [method] — operate on current note
         note = {
             run = function(args, cmd_args)
@@ -861,7 +862,7 @@ local function build_subcommands()
         -- :Vault process [filter] — Grid-backed metadata editing buffer (default)
         -- Supports: base <name>, undo, orphans, leaves, empty, no-frontmatter,
         --           dir <path>, tag <name>, without-property <field>, empty-property <field> [value],
-        --           title,status,tags (inline columns), <slug> (fuzzy filter)
+        --           title,status,tags (inline columns), taxonomy=<field>, group_by=<field>, <slug> (fuzzy filter)
         process = {
             run = function(args)
                 local grid_editor = require("vault.bases.views.grid")
@@ -944,11 +945,25 @@ local function build_subcommands()
                             log.error("Base not found: %s", base_name)
                             return
                         end
-                        grid_editor.open({
+                        if kv_opts.taxonomy and kv_opts.taxonomy ~= "" then
+                            local taxonomy_field = kv_opts.taxonomy
+                            if not columns_arg then
+                                columns_arg = { "slug", "title", taxonomy_field }
+                            elseif not vim.tbl_contains(columns_arg, taxonomy_field) then
+                                table.insert(columns_arg, taxonomy_field)
+                            end
+                        end
+
+                        local open_opts = {
                             base = base,
                             columns = columns_arg,
                             group_by = kv_opts.group_by,
-                        })
+                        }
+                        if kv_opts.taxonomy and kv_opts.taxonomy ~= "" then
+                            local taxonomy = require("vault.taxonomy")
+                            open_opts = vim.tbl_extend("force", open_opts, taxonomy.grid_process_opts(kv_opts.taxonomy))
+                        end
+                        grid_editor.open(open_opts)
                     else
                         -- No base name given — open Telescope bases picker
                         local ok, picker =
@@ -1000,12 +1015,28 @@ local function build_subcommands()
                     desc = "filter:" .. filter
                 end
 
-                grid_editor.open({
+                if kv_opts.taxonomy and kv_opts.taxonomy ~= "" then
+                    local taxonomy_field = kv_opts.taxonomy
+                    if not columns_arg then
+                        columns_arg = { "slug", "title", taxonomy_field }
+                    elseif not vim.tbl_contains(columns_arg, taxonomy_field) then
+                        table.insert(columns_arg, taxonomy_field)
+                    end
+                end
+
+                local open_opts = {
                     notes = notes,
                     filter_desc = desc,
                     columns = columns_arg,
                     group_by = kv_opts.group_by,
-                })
+                }
+
+                if kv_opts.taxonomy and kv_opts.taxonomy ~= "" then
+                    local taxonomy = require("vault.taxonomy")
+                    open_opts = vim.tbl_extend("force", open_opts, taxonomy.grid_process_opts(kv_opts.taxonomy))
+                end
+
+                grid_editor.open(open_opts)
             end,
             complete = function(prefix, line)
                 if line and line:match("process%s+base%s+") then
@@ -1105,6 +1136,16 @@ local function build_subcommands()
                         end, cols)
                     )
                 end
+                if prefix:match("^taxonomy=") then
+                    local field = prefix:match("^taxonomy=(.*)$") or ""
+                    local settings = require("vault.taxonomy")._get_settings()
+                    local fields = { settings.field }
+                    return vim.tbl_map(function(item)
+                        return "taxonomy=" .. item
+                    end, vim.tbl_filter(function(item)
+                        return item:find(field, 1, true) == 1
+                    end, fields))
+                end
                 local subs = {
                     "base",
                     "undo",
@@ -1118,6 +1159,7 @@ local function build_subcommands()
                     "empty-property",
                     "candidates-delete",
                     "group_by=",
+                    "taxonomy=",
                 }
                 return vim.tbl_filter(function(s)
                     return s:find(prefix, 1, true) == 1
@@ -1450,61 +1492,6 @@ local function build_subcommands()
             end,
         },
 
-        -- :Vault classify — safe metadata-only taxonomy classification queue
-        classify = {
-            run = function(args)
-                if args[1] == "all" then
-                    require("vault.taxonomy").open_classify({
-                        dirs = false,
-                        filter_desc = "classify:all",
-                    })
-                    return
-                end
-                if args[1] and args[1] ~= "" then
-                    require("vault.taxonomy").open_classify({
-                        dirs = { args[1] },
-                        filter_desc = "classify:" .. args[1],
-                    })
-                    return
-                end
-                require("vault.taxonomy").open_classify()
-            end,
-            complete = function(prefix)
-                local dirs = completions.dirs(prefix, "Vault classify " .. (prefix or ""), nil) or {}
-                table.insert(dirs, 1, "all")
-                return vim.tbl_filter(function(item)
-                    return item:find(prefix or "", 1, true) == 1
-                end, dirs)
-            end,
-        },
-
-        -- :Vault taxonomy <subcommand> — preview/apply taxonomy-driven renames
-        taxonomy = {
-            run = function()
-                log.info("Subcommands: audit, preview, apply, undo-last")
-            end,
-            audit = {
-                run = function()
-                    require("vault.taxonomy").open_audit()
-                end,
-            },
-            preview = {
-                run = function()
-                    require("vault.taxonomy").preview()
-                end,
-            },
-            apply = {
-                run = function()
-                    require("vault.taxonomy").apply()
-                end,
-            },
-            ["undo-last"] = {
-                run = function()
-                    require("vault.taxonomy").undo_last()
-                end,
-            },
-        },
-
         -- :Vault stats — progress dashboard showing vault health metrics
         stats = {
             run = function()
@@ -1765,6 +1752,8 @@ local function build_subcommands()
             },
         },
     }
+
+    return registry.build(tree)
 end
 
 --- Cached subcommand tree (built on first use)
