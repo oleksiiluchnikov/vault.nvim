@@ -16,6 +16,7 @@ local Notes = require("vault.notes")
 --- @field note vault.Note -- The note which is the center of the cluster.
 --- @field depth number -- How deep we should go to scann the cluster.
 --- @field map vault.Notes.map
+--- @field _map vault.Notes.map
 --- @diagnostic disable-next-line: undefined-field
 local NotesCluster = Notes:extend("VaultNotesCluster")
 
@@ -24,6 +25,7 @@ local NotesCluster = Notes:extend("VaultNotesCluster")
 --- @param notes vault.Notes
 --- @param note vault.Note
 --- @param depth number
+---@return nil
 function NotesCluster:init(notes, note, depth)
     if not note then
         error(error_msg.MISSING_PARAMETER("note"))
@@ -35,7 +37,9 @@ function NotesCluster:init(notes, note, depth)
     self.notes = notes
     self.note = note
     self.depth = depth
+    ---@type vault.Notes.map
     self.map = {}
+    ---@type vault.Notes.map
     self._map = {}
 
     -- self:increase_depth()
@@ -76,7 +80,6 @@ end
 ---
 --- @return vault.Notes.Cluster
 function NotesCluster:scann_cluster()
-    local notes = self.notes
     --- Scann cluster recursively.
     ---
     --- @param note vault.Note
@@ -106,11 +109,11 @@ function NotesCluster:scann_cluster()
             end
         end
 
-        local inlinks = note.data.inlinks
+        local inlinks = note.data.inlinks or {}
 
         --- @type table<vault.slug, vault.Note>
         local inlinks_sources = {}
-        for slug, wikilinks in pairs(inlinks) do
+        for _, wikilinks in pairs(inlinks) do
             for _, wikilink in pairs(wikilinks) do
                 local sources = wikilink.data.sources
                 for source, _ in pairs(sources) do
@@ -119,16 +122,17 @@ function NotesCluster:scann_cluster()
             end
         end
 
-        local outlinks = note.data.outlinks
+        local outlinks = note.data.outlinks or {}
         --- @type table<vault.slug, vault.Note>
         local targets = {}
-        for slug, wikilink in pairs(outlinks) do
+        for _, wikilink in pairs(outlinks) do
             local target = wikilink.data.target
             if target then
                 targets[target] = self.notes._map[target]
             end
         end
 
+        ---@type vault.Notes.map
         local notes_group = vim.tbl_extend("keep", inlinks_sources, targets)
 
         for _, target_note in pairs(notes_group) do

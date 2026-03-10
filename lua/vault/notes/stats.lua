@@ -3,9 +3,11 @@ local state = require("vault.core.state")
 local Error = require("vault.utils.error")
 
 --- @class vault.Stats: vault.Object
+--- @field notes vault.Notes
 local Stats = Object("VaultStats")
 
 --- @param notes vault.Notes
+---@return nil
 function Stats:init(notes)
     if not notes then
         error(Error.MISSING_PARAMETER("notes"))
@@ -14,6 +16,7 @@ function Stats:init(notes)
     self.notes = notes
 end
 
+---@return number
 function Stats:average_content_length()
     local total_content_count = 0
     for _, note in pairs(self.notes.map) do
@@ -28,6 +31,7 @@ function Stats:average_content_length()
     return average_chars
 end
 
+---@return integer
 function Stats:total_content_length()
     local total_content_count = 0
     for _, note in pairs(self.notes.map) do
@@ -38,8 +42,10 @@ function Stats:total_content_length()
     return total_content_count
 end
 
+---@return vault.Note?
 function Stats:shortest_note()
     local shortest_length = math.huge
+    ---@type vault.Note?
     local shortest_note = nil
 
     for _, note in pairs(self.notes.map) do
@@ -53,8 +59,10 @@ function Stats:shortest_note()
     return shortest_note
 end
 
+---@return vault.Note?
 function Stats:longest_note()
     local longest_length = 0
+    ---@type vault.Note?
     local longest_note = nil
 
     for _, note in pairs(self.notes.map) do
@@ -68,12 +76,13 @@ function Stats:longest_note()
     return longest_note
 end
 
+---@return integer
 function Stats:word_count()
     local total_words = 0
     for _, note in pairs(self.notes.map) do
         local content = note.data.content
         local words = 0
-        for word in content:gmatch("%S+") do
+        for _ in content:gmatch("%S+") do
             words = words + 1
         end
         total_words = total_words + words
@@ -81,12 +90,14 @@ function Stats:word_count()
     return total_words
 end
 
+---@return number
 function Stats:average_words_per_note()
     local total_words = self:word_count()
     local average = total_words / self.notes:count()
     return math.floor(average * 100) / 100
 end
 
+---@return integer
 function Stats:created_this_week()
     local count = 0
     local current_time = os.time()
@@ -100,18 +111,24 @@ function Stats:created_this_week()
     return count
 end
 
+---@alias vault.Stats.link_counts table<vault.slug, integer>
+
+---@return vault.Note?, integer
 function Stats:most_linked_note()
+    ---@type vault.Stats.link_counts
     local link_counts = {}
+    ---@type vault.Note?
     local most_linked = nil
     local max_links = 0
 
     for _, note in pairs(self.notes.map) do
-        link_counts[note.id] = 0
+        link_counts[note.data.slug] = 0
     end
 
     for _, note in pairs(self.notes.map) do
-        if note.data.links then
-            for _, link in ipairs(note.data.links) do
+        local links = note.data.links
+        if links then
+            for _, link in ipairs(links) do
                 if link_counts[link] then
                     link_counts[link] = link_counts[link] + 1
                     if link_counts[link] > max_links then

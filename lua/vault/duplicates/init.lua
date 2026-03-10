@@ -6,15 +6,17 @@ local state_store = require("vault.core.state")
 local utils = require("vault.utils")
 local merge = require("vault.merge")
 
-local COPY_SUFFIX_RE = "^(.-) (%d+)$"
 local REVIEW_STATE_KEY = "vault.duplicates.review"
 
+--- Duplicate-detection kind discriminator.
+---@alias vault.duplicates.Kind string
+
 ---@class vault.duplicates.Item
----@field a_path string
----@field b_path string
----@field a_rel string
----@field b_rel string
----@field kind string
+---@field a_path vault.path
+---@field b_path vault.path
+---@field a_rel vault.relpath
+---@field b_rel vault.relpath
+---@field kind vault.duplicates.Kind
 ---@field recommended "a"|"b"
 ---@field recommended_reason string
 ---@field score number
@@ -27,8 +29,8 @@ local REVIEW_STATE_KEY = "vault.duplicates.review"
 
 ---@class vault.duplicates.ReviewPlan
 ---@field which "a"|"b"
----@field target_path string
----@field source_path string
+---@field target_path vault.path
+---@field source_path vault.path
 ---@field body_strategy string
 ---@field plan vault.merge.Plan|nil
 ---@field error string|nil
@@ -38,6 +40,22 @@ local REVIEW_STATE_KEY = "vault.duplicates.review"
 ---@field body string
 ---@field lines table<string, boolean>
 
+---@class vault.duplicates.PresetSpec
+---@field description? string
+---@field root? vault.path
+---@field dirs? vault.relpath[]
+---@field tags? string[]
+---@field kind? vault.duplicates.Kind[]
+
+---@class vault.duplicates.ResolvedPreset
+---@field name string
+---@field description string
+---@field root vault.path|nil
+---@field dirs vault.relpath[]
+---@field tags string[]
+---@field kind_tokens vault.duplicates.Kind[]
+---@field summary? string
+
 local function read_text(path)
     local ok, lines = pcall(vim.fn.readfile, path)
     if not ok then
@@ -46,18 +64,28 @@ local function read_text(path)
     return table.concat(lines, "\n")
 end
 
-local function normalize_text(text)
-    local lines = vim.split(text:gsub("\r\n", "\n"), "\n", { plain = true })
-    for i, line in ipairs(lines) do
-        lines[i] = line:gsub("%s+$", "")
+---@return string[]
+local function stem_suffix_patterns()
+    local configured = config.options.duplicates and config.options.duplicates.stem_suffix_patterns
+        or {}
+    if type(configured) ~= "table" or vim.tbl_isempty(configured) then
+        return { [[\s\+\d\+$]], [[_\d\+$]] }
     end
-    return vim.trim(table.concat(lines, "\n"))
+    return configured
 end
 
+---@param value string
+---@return string
 local function strip_copy_suffix(value)
     local trimmed = vim.trim(value)
-    local base = trimmed:match(COPY_SUFFIX_RE)
-    return base or trimmed
+    local normalized = trimmed
+    for _, pattern in ipairs(stem_suffix_patterns()) do
+        if type(pattern) == "string" and pattern ~= "" then
+            normalized = vim.fn.substitute(normalized, pattern, "", "")
+        end
+    end
+    normalized = vim.trim(normalized)
+    return normalized ~= "" and normalized or trimmed
 end
 
 local function split_frontmatter(text)
@@ -145,7 +173,7 @@ local function normalize_body(path, lines)
         if line:match("%S") then
             if line:match("^# ") then
                 local stem = vim.fn.fnamemodify(path, ":t:r")
-                local base = stem:match(COPY_SUFFIX_RE) or stem
+                local base = strip_copy_suffix(stem)
                 normalized[i] = "# " .. base
             end
             break
@@ -217,7 +245,7 @@ end
 
 local function has_copy_suffix(path)
     local stem = vim.fn.fnamemodify(path, ":t:r")
-    return stem:match(COPY_SUFFIX_RE) ~= nil
+    return strip_copy_suffix(stem) ~= vim.trim(stem)
 end
 
 local function order_pair_paths(a_path, b_path)
@@ -302,6 +330,23 @@ local NOISY_RELATED_TOKENS = {
     ["note"] = true,
 }
 
+---@return table<string, vault.duplicates.PresetSpec>
+local function duplicate_presets()
+    local configured = config.options.duplicates and config.options.duplicates.presets or {}
+    if type(configured) ~= "table" then
+        return {}
+    end
+    return configured
+end
+
+---@param values string[]|nil
+---@return string[]
+local function sorted_string_list(values)
+    local result = vim.deepcopy(values or {})
+    table.sort(result)
+    return result
+end
+
 ---@param tokens string[]|nil
 ---@return table<string, boolean>|nil, string|nil
 local function resolve_kind_filter(tokens)
@@ -342,6 +387,61 @@ local function resolve_related_filter(tokens)
     end
 
     return buckets, nil
+end
+
+---@param name string
+---@return vault.duplicates.ResolvedPreset|nil, string|nil
+local function resolve_preset(name)
+    local spec = duplicate_presets()[name]
+    if type(spec) ~= "table" then
+        return nil, string.format("Unknown duplicate preset: %s", name)
+    end
+
+    local dirs = sorted_string_list(spec.dirs)
+    local tags = sorted_string_list(spec.tags)
+    local kind_tokens = sorted_string_list(spec.kind)
+    if not vim.tbl_isempty(kind_tokens) then
+        local _, err = resolve_kind_filter(kind_tokens)
+        if err then
+            return nil, string.format("Invalid duplicate preset %s: %s", name, err)
+        end
+    end
+
+    return {
+        name = name,
+        description = spec.description or "",
+        root = spec.root,
+        dirs = dirs,
+        tags = tags,
+        kind_tokens = kind_tokens,
+    },
+        nil
+end
+
+---@return string[]
+local function preset_names()
+    local names = vim.tbl_keys(duplicate_presets())
+    table.sort(names)
+    return names
+end
+
+---@param preset vault.duplicates.ResolvedPreset
+---@return string
+local function preset_summary(preset)
+    local parts = {}
+    if not vim.tbl_isempty(preset.kind_tokens) then
+        parts[#parts + 1] = "kind: " .. table.concat(preset.kind_tokens, ", ")
+    end
+    if not vim.tbl_isempty(preset.dirs) then
+        parts[#parts + 1] = "dir: " .. table.concat(preset.dirs, ", ")
+    end
+    if not vim.tbl_isempty(preset.tags) then
+        parts[#parts + 1] = "tags: " .. table.concat(preset.tags, ", ")
+    end
+    if preset.root and preset.root ~= "" then
+        parts[#parts + 1] = "root: " .. preset.root
+    end
+    return #parts > 0 and table.concat(parts, "  |  ") or "full vault review"
 end
 
 ---@param path string|nil
@@ -427,13 +527,34 @@ local function path_is_excluded_from_files(path, excluded)
 end
 
 ---@param path string
+---@param patterns string[]
+---@return boolean
+local function path_is_excluded_from_patterns(path, patterns)
+    local relpath = utils.path_to_relpath(path)
+    local name = vim.fn.fnamemodify(path, ":t")
+    for _, pattern in ipairs(patterns) do
+        if type(pattern) == "string" and pattern ~= "" then
+            if vim.fn.match(relpath, pattern) >= 0 or vim.fn.match(name, pattern) >= 0 then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+---@param path string
 ---@return boolean
 local function review_path_is_excluded(path)
     local excluded = config.options.duplicates and config.options.duplicates.review_excluded_dirs
         or {}
     local files = config.options.duplicates and config.options.duplicates.review_excluded_files
         or {}
-    return path_is_excluded_from_dirs(path, excluded) or path_is_excluded_from_files(path, files)
+    local patterns = config.options.duplicates
+            and config.options.duplicates.review_excluded_patterns
+        or {}
+    return path_is_excluded_from_dirs(path, excluded)
+        or path_is_excluded_from_files(path, files)
+        or path_is_excluded_from_patterns(path, patterns)
 end
 
 ---@param path string
@@ -443,7 +564,12 @@ local function related_path_is_excluded(path)
         or {}
     local files = config.options.duplicates and config.options.duplicates.related_excluded_files
         or {}
-    return path_is_excluded_from_dirs(path, excluded) or path_is_excluded_from_files(path, files)
+    local patterns = config.options.duplicates
+            and config.options.duplicates.related_excluded_patterns
+        or {}
+    return path_is_excluded_from_dirs(path, excluded)
+        or path_is_excluded_from_files(path, files)
+        or path_is_excluded_from_patterns(path, patterns)
 end
 
 ---@param tokens_a string[]
@@ -1156,7 +1282,7 @@ local function summarize_keys(values, fallback)
     if #values <= 4 then
         return table.concat(values, ", ")
     end
-    local preview = { unpack(values, 1, 4) }
+    local preview = { table.unpack(values, 1, 4) }
     return table.concat(preview, ", ") .. string.format(" +%d", #values - 4)
 end
 
@@ -1240,7 +1366,6 @@ local function build_center_lines(item, session)
     mark(line, 0, 1, "VaultDuplicateLabel")
     mark(line, 3, #lines[#lines], "VaultDuplicatePath")
 
-    line = add("")
     line = add("Kind")
     mark(line, 0, #lines[#lines], "VaultDuplicateLabel")
     line = add("  " .. kind_title)
@@ -1248,7 +1373,6 @@ local function build_center_lines(item, session)
     line = add("  " .. kind_detail)
     mark(line, 0, #lines[#lines], "VaultDuplicateDim")
 
-    line = add("")
     line = add("Recommendation")
     mark(line, 0, #lines[#lines], "VaultDuplicateLabel")
     line = add(string.format("  Keep %s, trash %s", keep_label, trash_label))
@@ -1307,7 +1431,6 @@ local function build_center_lines(item, session)
         #(session.pending or {}) > 0 and "VaultDuplicateAction" or "VaultDuplicateDim"
     )
 
-    line = add("")
     line = add("Choices")
     mark(line, 0, #lines[#lines], "VaultDuplicateLabel")
     line = add(
@@ -1403,7 +1526,6 @@ local function build_center_lines(item, session)
         )
     end
 
-    line = add("")
     line = add("Merge plan")
     mark(line, 0, #lines[#lines], "VaultDuplicateLabel")
     if merge_plan then
@@ -1431,11 +1553,9 @@ local function build_center_lines(item, session)
         mark(line, 0, #lines[#lines], "VaultDuplicateDim")
     end
 
-    line = add("")
     line = add(string.rep("─", 44))
     mark(line, 0, #lines[#lines], "VaultDuplicateSeparator")
 
-    line = add("")
     line = add("Actions")
     mark(line, 0, #lines[#lines], "VaultDuplicateLabel")
 
@@ -1463,7 +1583,6 @@ local function build_center_lines(item, session)
         mark(line, 2, 2 + #action.key, "VaultDuplicateActionKey")
     end
 
-    line = add("")
     line = add(
         "  apply: a b <CR>   queue: A B X   preview: pa pb p   hunks: [c ]c   move: s ]d   quit: q"
     )
@@ -1955,28 +2074,28 @@ function M.review(root, opts)
 
         apply_buffer_highlights(state.bufs.center, hls)
 
-        local opts = { buffer = state.bufs.center, silent = true, nowait = true }
+        local keymap_opts = { buffer = state.bufs.center, silent = true, nowait = true }
         vim.keymap.set("n", "a", function()
             apply_keep("a")
-        end, vim.tbl_extend("force", opts, { desc = "Keep A" }))
+        end, vim.tbl_extend("force", keymap_opts, { desc = "Keep A" }))
         vim.keymap.set("n", "b", function()
             apply_keep("b")
-        end, vim.tbl_extend("force", opts, { desc = "Keep B" }))
+        end, vim.tbl_extend("force", keymap_opts, { desc = "Keep B" }))
         vim.keymap.set("n", "A", function()
             queue_keep("a")
-        end, vim.tbl_extend("force", opts, { desc = "Queue keep A" }))
+        end, vim.tbl_extend("force", keymap_opts, { desc = "Queue keep A" }))
         vim.keymap.set("n", "B", function()
             queue_keep("b")
-        end, vim.tbl_extend("force", opts, { desc = "Queue keep B" }))
+        end, vim.tbl_extend("force", keymap_opts, { desc = "Queue keep B" }))
         vim.keymap.set("n", "<CR>", function()
             apply_keep(item.recommended)
-        end, vim.tbl_extend("force", opts, { desc = "Apply recommended" }))
+        end, vim.tbl_extend("force", keymap_opts, { desc = "Apply recommended" }))
         vim.keymap.set("n", "X", function()
             flush_pending()
-        end, vim.tbl_extend("force", opts, { desc = "Apply queued batch" }))
+        end, vim.tbl_extend("force", keymap_opts, { desc = "Apply queued batch" }))
         vim.keymap.set("n", "pa", function()
             preview_merge_result("a")
-        end, vim.tbl_extend("force", opts, { desc = "Preview keep A result" }))
+        end, vim.tbl_extend("force", keymap_opts, { desc = "Preview keep A result" }))
         vim.keymap.set("n", "pb", function()
             preview_merge_result("b")
         end, vim.tbl_extend("force", opts, { desc = "Preview keep B result" }))
@@ -2051,6 +2170,25 @@ M.kind_filter_names = function()
     return names
 end
 M.resolve_kind_filter = resolve_kind_filter
+M.preset_names = function(prefix)
+    prefix = prefix or ""
+    return vim.tbl_filter(function(name)
+        return name:find(prefix, 1, true) == 1
+    end, preset_names())
+end
+M.presets = function()
+    local result = {}
+    for _, name in ipairs(preset_names()) do
+        local preset, _ = resolve_preset(name)
+        if preset then
+            preset.summary = preset_summary(preset)
+            result[#result + 1] = preset
+        end
+    end
+    return result
+end
+M.resolve_preset = resolve_preset
+M.preset_summary = preset_summary
 M.related_filter_names = function()
     local names = vim.tbl_keys(RELATED_FILTER_ALIASES)
     table.sort(names)

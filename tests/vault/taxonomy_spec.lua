@@ -160,6 +160,18 @@ describe("vault.taxonomy", function()
         assert.are.equal("target-exists", plan.skipped[1].reason)
     end)
 
+    it("builds a scoped plan for selected note paths", function()
+        local plan = taxonomy.build_plan({
+            paths = { tmp_root .. "/Inbox/Foo.md" },
+        })
+
+        assert.are.equal("selection", plan.scope)
+        assert.are.equal(1, plan.scope_count)
+        assert.are.equal(1, #plan.moves)
+        assert.are.equal("Inbox/person - Foo", plan.moves[1].to_slug)
+        assert.are.equal(0, #plan.skipped)
+    end)
+
     it("supports taxonomy from categories wikilinks", function()
         write(tmp_root .. "/Inbox/Category Driven.md", {
             "---",
@@ -193,6 +205,46 @@ describe("vault.taxonomy", function()
         assert.is_true(vim.tbl_contains(lines, "  - \"[[category - software]]\""))
     end)
 
+    it("creates a new category note from picker query", function()
+        clear_modules()
+        setup_vault({
+            field = "categories",
+            reference_prefix = "category - ",
+            classify = { dirs = { "Inbox" } },
+        })
+        taxonomy = require("vault.taxonomy")
+
+        local choice = taxonomy.ensure_category_choice("career")
+        assert.are.equal("career", choice)
+        assert.are.equal(1, vim.fn.filereadable(tmp_root .. "/category - career.md"))
+        local lines = vim.fn.readfile(tmp_root .. "/category - career.md")
+        assert.are.same({ "# Career", "" }, lines)
+
+        local written = taxonomy.apply_choice_to_paths({ tmp_root .. "/Inbox/Needs Kind.md" }, "career")
+        assert.are.equal(1, written)
+        local note_lines = vim.fn.readfile(tmp_root .. "/Inbox/Needs Kind.md")
+        assert.is_true(vim.tbl_contains(note_lines, "  - \"[[category - career]]\""))
+        assert.is_true(vim.tbl_contains(note_lines, "  - \"[[category - Notes]]\""))
+    end)
+
+    it("refreshes taxonomy choices after creating a category", function()
+        clear_modules()
+        setup_vault({
+            field = "categories",
+            reference_prefix = "category - ",
+            classify = { dirs = { "Inbox" } },
+        })
+        taxonomy = require("vault.taxonomy")
+
+        local before = taxonomy.kind_choices()
+        assert.is_false(vim.tbl_contains(before, "career"))
+
+        taxonomy.ensure_category_choice("career")
+
+        local after = taxonomy.kind_choices()
+        assert.is_true(vim.tbl_contains(after, "career"))
+    end)
+
     it("applies and undoes taxonomy renames", function()
         local plan = taxonomy.preview()
         assert.are.equal(2, #plan.moves)
@@ -212,5 +264,17 @@ describe("vault.taxonomy", function()
         assert.are.equal(1, vim.fn.filereadable(tmp_root .. "/Inbox/Foo.md"))
         assert.are.equal(0, vim.fn.filereadable(tmp_root .. "/Inbox/software - Gameloft.md"))
         assert.are.equal(0, vim.fn.filereadable(tmp_root .. "/Inbox/person - Foo.md"))
+    end)
+
+    it("applies only the scoped selection when paths are provided", function()
+        local report = taxonomy.apply({
+            paths = { tmp_root .. "/Inbox/Foo.md" },
+        })
+
+        assert.is_not_nil(report)
+        assert.are.equal(1, report.moved)
+        assert.are.equal(1, vim.fn.filereadable(tmp_root .. "/Inbox/person - Foo.md"))
+        assert.are.equal(1, vim.fn.filereadable(tmp_root .. "/Inbox/Gameloft.md"))
+        assert.are.equal(0, vim.fn.filereadable(tmp_root .. "/Inbox/software - Gameloft.md"))
     end)
 end)

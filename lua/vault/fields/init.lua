@@ -62,7 +62,7 @@ function Field:init(this)
     if type(this) == "string" then
         this = { line = this }
     end
-    if not type(this.line) == "string" then
+    if type(this.line) ~= "string" then
         error("Invalid argument: " .. vim.inspect(this))
     end
     local key, value = this.line:match([[^([%w_%-]-):%s*(.*)$]])
@@ -166,8 +166,8 @@ end
 
 function Fields:datas()
     local datas = {}
-    for key, field in pairs(self.map) do
-        for value, data in pairs(field) do
+    for _, field in pairs(self.map) do
+        for _, data in pairs(field) do
             table.insert(datas, data)
         end
     end
@@ -176,11 +176,11 @@ end
 
 function Fields:flatten()
     local flattened = {}
-    for key, field in pairs(self.map) do
-        for value, data in pairs(field) do
-            for slug, source in pairs(data.sources) do
-                for line_number, source_line in pairs(source) do
-                    for column, source_column in pairs(source_line) do
+    for _, field in pairs(self.map) do
+        for _, data in pairs(field) do
+            for _, source in pairs(data.sources) do
+                for _, source_line in pairs(source) do
+                    for _, source_column in pairs(source_line) do
                         table.insert(flattened, source_column)
                     end
                 end
@@ -192,8 +192,8 @@ end
 
 function Fields:text()
     local text = ""
-    for key, field in pairs(self.map) do
-        for value, data in pairs(field) do
+    for _, field in pairs(self.map) do
+        for value, _ in pairs(field) do
             text = text .. value .. "\n"
         end
     end
@@ -202,15 +202,8 @@ end
 
 -- print(vim.inspect(Fields():sources()))
 function Fields:sources_with_few_fields()
-    local sources = self:sources()
+    local _ = self
     local same_line = {}
-    for slug, source in pairs(sources) do
-        for row, cols in pairs(source) do
-            if #cols > 1 then
-                -- debug: print(vim.inspect(cols))
-            end
-        end
-    end
     return same_line
 end
 

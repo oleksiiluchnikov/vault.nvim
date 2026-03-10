@@ -22,6 +22,19 @@
 --- @class vault.SubClass: vault.Class
 --- @field super vault.Class
 
+--- @alias vault.ObjectKey string
+--- @alias vault.ObjectMetaIndex table|fun(self: table, key: vault.ObjectKey): any
+--- @alias vault.SubclassRegistry table<vault.Class, true>
+
+--- @class vault.ClassMeta
+--- @field is_instance_of fun(instance: vault.Object, class: vault.Class|vault.SubClass): boolean
+--- @field __index table|fun(self: table, key: vault.ObjectKey): any
+
+--- @class vault.ClassStatic
+--- @field is_subclass_of fun(subclass: vault.Class|vault.SubClass, class: vault.Class|vault.SubClass): boolean
+--- @field new fun(self: vault.Class, ...): vault.Object
+--- @field extend fun(self: vault.Class, subclass_name: string): vault.SubClass
+
 local idx = {
     subclasses = { "<vault.utils.object:subclasses>" },
 }
@@ -38,7 +51,7 @@ local function __call(self, ...)
 end
 
 --- @param class vault.Class|vault.SubClass
---- @param index table|function
+--- @param index vault.ObjectMetaIndex
 --- @return table|function
 local function create_index_wrapper(class, index)
     if type(index) == "table" then
@@ -64,6 +77,7 @@ end
 
 --- @param class vault.Class|vault.SubClass
 --- @param key string - property name
+--- @param value any
 --- @return nil
 local function propagate_instance_property(class, key, value)
     value = key == "__index" and create_index_wrapper(class, value) or value
@@ -129,6 +143,7 @@ local function create_class(name, super)
     local meta = {
         is_instance_of = is_instance,
     }
+    --- @cast meta vault.ClassMeta
     meta.__index = meta
 
     local class = {
@@ -143,6 +158,7 @@ local function create_class(name, super)
         __meta = meta,
         __properties = {},
     }
+    --- @cast class.static vault.ClassStatic
 
     setmetatable(class.static, {
         __index = function(_, key)
@@ -182,6 +198,7 @@ local function create_object(_, name)
     function Class:init() end -- luacheck: no unused args
 
     function Class.static:new(...)
+        --- @type vault.Object
         local instance = setmetatable({ class = self }, self.__meta)
         instance:init(...)
         return instance
@@ -216,7 +233,7 @@ local function create_object(_, name)
     return Class
 end
 
---luacheck: push no max line length
+-- luacheck: push no max line length
 
 --- Create `VaultObject`
 ---
@@ -236,3 +253,5 @@ local Object = setmetatable({
 --- @field is_instance_of fun(self: table, class: vault.Class): boolean -- Checks if the class is an instance of another class.
 
 return Object
+
+-- luacheck: pop

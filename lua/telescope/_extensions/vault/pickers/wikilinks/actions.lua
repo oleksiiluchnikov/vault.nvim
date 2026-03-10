@@ -67,7 +67,7 @@ end
 --- <CR> action: open target (resolved) or create note (unresolved).
 --- @param ctx table
 --- @return function
-function M.make_enter(ctx)
+function M.make_enter(_)
     return function(prompt_bufnr)
         local actions = require("telescope.actions")
         local action_state = require("telescope.actions.state")

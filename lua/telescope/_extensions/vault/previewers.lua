@@ -1,6 +1,127 @@
 local previewers = require("telescope.previewers")
-local state = require("vault.core.state")
 local M = {}
+
+local PROPERTY_PREVIEW_NS = vim.api.nvim_create_namespace("vault_property_preview")
+
+---@param value any
+---@return string
+local function preview_cell(value)
+    return tostring(value):gsub("\r\n", " <NL> "):gsub("\n", " <NL> "):gsub("\t", "  ")
+end
+
+---@param lines string[]
+---@return string[]
+local function normalize_preview_lines(lines)
+    local normalized = {}
+    for _, line in ipairs(lines or {}) do
+        local text = tostring(line or "")
+        local split = vim.split(text, "\n", { plain = true })
+        if #split == 0 then
+            normalized[#normalized + 1] = ""
+        else
+            for _, part in ipairs(split) do
+                normalized[#normalized + 1] = part
+            end
+        end
+    end
+    return normalized
+end
+
+---@param bufnr integer
+---@param message string
+local function render_preview_error(bufnr, message)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+        "Property preview failed.",
+        "",
+        tostring(message),
+    })
+    vim.api.nvim_set_option_value("filetype", "text", {
+        buf = bufnr,
+        scope = "local",
+    })
+end
+
+---@param property vault.Property
+---@return string[], table<integer, { col: integer, end_col: integer, hl: string }[]>
+local function property_preview_lines(property)
+    --- @type string[]
+    local lines = {}
+    --- @type table<integer, { col: integer, end_col: integer, hl: string }[]>
+    local highlights = {}
+    local values = vim.tbl_values(property.data.values or {})
+
+    table.sort(values, function(a, b)
+        if a.data.count ~= b.data.count then
+            return a.data.count > b.data.count
+        end
+        return tostring(a.data.name) < tostring(b.data.name)
+    end)
+
+    local function add(line, spans)
+        lines[#lines + 1] = line
+        if spans then
+            highlights[#lines] = spans
+        end
+    end
+
+    local property_name = preview_cell(property.data.name)
+    add(property_name, {
+        { col = 0, end_col = #property_name, hl = "Title" },
+    })
+    add(string.format("sources %d   values %d", property.data.count or 0, #values), {
+        { col = 0, end_col = #lines[#lines], hl = "Comment" },
+    })
+    add("")
+
+    if #values == 0 then
+        add("No values found.", {
+            { col = 0, end_col = 15, hl = "Comment" },
+        })
+    else
+        local type_width = 12
+        local value_width = 0
+        for _, value in ipairs(values) do
+            value_width =
+                math.max(value_width, vim.fn.strdisplaywidth(preview_cell(value.data.name)))
+        end
+        value_width = math.min(math.max(value_width, 16), 48)
+
+        local header =
+            string.format("%-12s  %-" .. tostring(value_width) .. "s  %s", "type", "value", "count")
+        add(header, {
+            { col = 0, end_col = #header, hl = "Comment" },
+        })
+        add(string.rep("-", #header), {
+            { col = 0, end_col = #header, hl = "Comment" },
+        })
+        for _, value in ipairs(values) do
+            local type_text = preview_cell(value.data.type)
+            local value_text = preview_cell(value.data.name)
+            local count_text = tostring(value.data.count or 0)
+            local line = string.format(
+                "%-12s  %-" .. tostring(value_width) .. "s  %s",
+                type_text,
+                value_text,
+                count_text
+            )
+            add(line, {
+                { col = 0, end_col = #type_text, hl = "TelescopeResultsNormal" },
+                {
+                    col = type_width + 2,
+                    end_col = type_width + 2 + #value_text,
+                    hl = "TelescopeResultsIdentifier",
+                },
+                {
+                    col = type_width + 2 + value_width + 2,
+                    end_col = #line,
+                    hl = "TelescopeResultsNumber",
+                },
+            })
+        end
+    end
+
+    return lines, highlights
+end
 
 M.notes = previewers.vim_buffer_vimgrep.new({
     get_buffer_by_name = function(_, entry)
@@ -63,6 +184,46 @@ M.tags = previewers.new_buffer_previewer({
         return vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
     end,
 })
+
+M.properties = previewers.new_buffer_previewer({
+    --- @param self table
+    --- @param entry { value: vault.Property }
+    define_preview = function(self, entry)
+        --- @type integer
+        local bufnr = self.state.bufnr
+        local ok, lines, highlights = pcall(function()
+            --- @type vault.Property
+            local property = entry.value
+            local preview_lines, preview_highlights = property_preview_lines(property)
+            return normalize_preview_lines(preview_lines), preview_highlights
+        end)
+        if not ok then
+            vim.api.nvim_buf_clear_namespace(bufnr, PROPERTY_PREVIEW_NS, 0, -1)
+            render_preview_error(bufnr, lines)
+            return
+        end
+
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+        vim.api.nvim_buf_clear_namespace(bufnr, PROPERTY_PREVIEW_NS, 0, -1)
+        for lnum, spans in pairs(highlights) do
+            for _, span in ipairs(spans) do
+                vim.api.nvim_buf_add_highlight(
+                    bufnr,
+                    PROPERTY_PREVIEW_NS,
+                    span.hl,
+                    lnum - 1,
+                    span.col,
+                    span.end_col
+                )
+            end
+        end
+        vim.api.nvim_set_option_value("filetype", "text", {
+            buf = bufnr,
+            scope = "local",
+        })
+    end,
+})
+
 -- Previewer for bases: show filter tree, formulas, views, and properties
 M.bases = previewers.new_buffer_previewer({
     --- @param self table
@@ -240,10 +401,10 @@ M.wikilinks = previewers.new_buffer_previewer({
                             local label = strategy_labels[strategy] or strategy
                             table.insert(lines, "### " .. label)
                             for _, candidate in ipairs(unique) do
-                                local slug = candidate.slug or candidate[1] or "?"
+                                local candidate_slug = candidate.slug or candidate[1] or "?"
                                 local score = candidate.score or candidate[2] or 0
                                 local pct = math.floor(score * 100 + 0.5)
-                                table.insert(lines, "- [[" .. slug .. "]] (" .. pct .. "%)")
+                                table.insert(lines, "- [[" .. candidate_slug .. "]] (" .. pct .. "%)")
                             end
                         end
                     end
@@ -282,5 +443,8 @@ M.wikilinks = previewers.new_buffer_previewer({
         })
     end,
 })
+
+M._property_preview_lines = property_preview_lines
+M._normalize_preview_lines = normalize_preview_lines
 
 return M

@@ -8,36 +8,62 @@ local M = {}
 local uv = vim.uv or vim.loop
 local is_list = vim.islist or vim.tbl_islist
 
+---@param text string
+---@return string
+local function normalize_choice_text(text)
+    local value = vim.trim(text or "")
+    value = value:gsub("%s+", " ")
+    return value
+end
+
+--- Taxonomy kind identifier (lowercase, e.g. "software").
+---@alias vault.taxonomy.kind string
+
 ---@class vault.Taxonomy.MappingEntry
 ---@field prefix string
----@field dir? string
+---@field dir? vault.relpath
 
 ---@class vault.Taxonomy.Settings
 ---@field field string
 ---@field reference_prefix? string
----@field classify { columns?: string[], readonly_columns?: string[], dirs?: string[]|nil }
+---@field classify { columns?: string[], readonly_columns?: string[], dirs?: vault.relpath[]|nil }
 ---@field rename { require_preview?: boolean, update_links?: boolean, chunk_size?: integer, skip_collisions?: boolean }
----@field mapping table<string, vault.Taxonomy.MappingEntry>
+---@field mapping table<vault.taxonomy.kind, vault.Taxonomy.MappingEntry>
+
+---@class vault.Taxonomy.NoteInspection
+---@field note vault.Note
+---@field kind vault.taxonomy.kind
+---@field prefix string
+---@field from vault.path
+---@field to vault.path
+---@field from_slug vault.slug
+---@field to_slug vault.slug
+
+---@class vault.Taxonomy.StatKey
+---@field dev integer
+---@field ino integer
 
 ---@class vault.Taxonomy.PlanMove
----@field from string
----@field to string
----@field from_slug string
----@field to_slug string
----@field kind string
+---@field from vault.path
+---@field to vault.path
+---@field from_slug vault.slug
+---@field to_slug vault.slug
+---@field kind vault.taxonomy.kind
 ---@field prefix string
 
 ---@class vault.Taxonomy.PlanSkip
----@field path string
----@field slug string
----@field kind? string
+---@field path vault.path
+---@field slug vault.slug
+---@field kind? vault.taxonomy.kind
 ---@field reason string
----@field target? string
+---@field target? vault.path
 
 ---@class vault.Taxonomy.Plan
 ---@field created_at string
 ---@field root string
 ---@field field string
+---@field scope string
+---@field scope_count integer
 ---@field moves vault.Taxonomy.PlanMove[]
 ---@field skipped vault.Taxonomy.PlanSkip[]
 ---@field unchanged integer
@@ -135,6 +161,7 @@ end
 ---@return vault.Taxonomy.Settings
 local function get_settings()
     local cfg = config.options.taxonomy or {}
+    ---@type table<string, vault.Taxonomy.MappingEntry>
     local mapping = {}
     for kind, entry in pairs(cfg.mapping or {}) do
         local normalized_kind = normalize_kind({ reference_prefix = cfg.reference_prefix }, kind)
@@ -145,6 +172,7 @@ local function get_settings()
     end
 
     local field = type(cfg.field) == "string" and cfg.field or "categories"
+    ---@type vault.Taxonomy.Settings["classify"]
     local classify = vim.deepcopy(cfg.classify or {})
     if type(classify.columns) ~= "table" or #classify.columns == 0 then
         classify.columns = { "slug", "title", field, "file.mtime" }
@@ -162,8 +190,37 @@ local function get_settings()
     }
 end
 
----@param path string
----@return table<string, integer|string>|nil
+---@param opts? { paths?: vault.path[] }
+---@return vault.Notes
+---@return string
+---@return integer
+local function scoped_notes(opts)
+    local notes = require("vault.notes")()
+    if not opts or type(opts.paths) ~= "table" or #opts.paths == 0 then
+        return notes, "vault", vim.tbl_count(notes.map)
+    end
+
+    ---@type table<vault.path, boolean>
+    local wanted = {}
+    for _, path in ipairs(opts.paths) do
+        if type(path) == "string" and path ~= "" then
+            wanted[vim.fs.normalize(path)] = true
+        end
+    end
+
+    ---@type table<vault.slug, vault.Note>
+    local filtered = {}
+    for slug, note in pairs(notes.map) do
+        if wanted[vim.fs.normalize(note.data.path)] then
+            filtered[slug] = note
+        end
+    end
+    notes.map = filtered
+    return notes, "selection", vim.tbl_count(filtered)
+end
+
+---@param path vault.path
+---@return vault.Taxonomy.StatKey|nil
 local function stat_key(path)
     local stat = uv.fs_stat(path)
     if not stat then
@@ -172,8 +229,8 @@ local function stat_key(path)
     return { dev = stat.dev, ino = stat.ino }
 end
 
----@param a string
----@param b string
+---@param a vault.path
+---@param b vault.path
 ---@return boolean
 local function same_inode(a, b)
     local sa = stat_key(a)
@@ -181,9 +238,9 @@ local function same_inode(a, b)
     return sa ~= nil and sb ~= nil and sa.dev == sb.dev and sa.ino == sb.ino
 end
 
----@param root string
+---@param root vault.path
 ---@param dir string?
----@return string?
+---@return vault.relpath?
 local function normalize_dir(root, dir)
     if type(dir) ~= "string" or dir == "" then
         return nil
@@ -196,8 +253,8 @@ local function normalize_dir(root, dir)
     return dir:gsub("^/*", ""):gsub("/*$", "")
 end
 
----@param relpath string
----@param dirs string[]|nil
+---@param relpath vault.relpath
+---@param dirs vault.relpath[]|nil
 ---@return boolean
 local function relpath_in_dirs(relpath, dirs)
     if not dirs or #dirs == 0 then
@@ -329,10 +386,10 @@ local function stripped_stem(note, settings)
     return stem
 end
 
----@param root string
----@param rel_dir string?
+---@param root vault.path
+---@param rel_dir vault.relpath?
 ---@param filename string
----@return string
+---@return vault.path
 local function join_under_root(root, rel_dir, filename)
     if rel_dir and rel_dir ~= "" and rel_dir ~= "." then
         return vim.fs.normalize(root .. "/" .. rel_dir .. "/" .. filename)
@@ -342,7 +399,7 @@ end
 
 ---@param note vault.Note
 ---@param settings vault.Taxonomy.Settings
----@return table|nil, string?
+---@return vault.Taxonomy.NoteInspection|nil, string?
 local function inspect_note(note, settings)
     local kind, reason = extract_kind(settings, get_frontmatter_value(note, settings.field))
     if not kind then
@@ -382,6 +439,7 @@ local function classify_dirs(settings, override_dirs)
         return nil
     end
     if type(override_dirs) == "table" then
+        ---@type string[]
         local normalized_override = {}
         for _, dir in ipairs(override_dirs) do
             local value = normalize_dir(config.options.root, dir)
@@ -402,6 +460,7 @@ local function classify_dirs(settings, override_dirs)
         return nil
     end
 
+    ---@type string[]
     local normalized = {}
     for _, dir in ipairs(dirs) do
         local value = normalize_dir(config.options.root, dir)
@@ -413,12 +472,90 @@ local function classify_dirs(settings, override_dirs)
     return #normalized > 0 and normalized or nil
 end
 
+---@param note vault.Note
+---@param settings vault.Taxonomy.Settings
+---@param dirs string[]|nil
+---@return boolean
+local function note_needs_classify(note, settings, dirs)
+    local _, reason = extract_kind(settings, get_frontmatter_value(note, settings.field))
+    return relpath_in_dirs(note.data.relpath, dirs) and reason ~= "ok"
+end
+
+---@param note vault.Note
+---@param settings vault.Taxonomy.Settings
+---@return boolean
+local function note_needs_audit(note, settings)
+    local info = inspect_note(note, settings)
+    return info ~= nil and info.from ~= info.to
+end
+
 ---@return string[]
 function M.kind_choices()
     local settings = get_settings()
-    local choices = vim.tbl_keys(settings.mapping)
+    ---@type string[]
+    local choices = {}
+    ---@type table<string, boolean>
+    local seen = {}
+
+    for kind in pairs(settings.mapping) do
+        choices[#choices + 1] = kind
+        seen[kind] = true
+    end
+
+    if settings.field == "categories" and settings.reference_prefix then
+        local prefix = settings.reference_prefix:lower()
+        local notes = require("vault.notes")()
+        for _, note in pairs(notes.map) do
+            local stem = note.data.stem or ""
+            local lower_stem = stem:lower()
+            if lower_stem:sub(1, #prefix) == prefix then
+                local choice = normalize_choice_text(vim.trim(stem:sub(#settings.reference_prefix + 1))):lower()
+                if choice ~= "" and not seen[choice] then
+                    choices[#choices + 1] = choice
+                    seen[choice] = true
+                end
+            end
+        end
+    end
+
     table.sort(choices)
     return choices
+end
+
+---@param choice string
+---@return string|nil
+function M.ensure_category_choice(choice)
+    local settings = get_settings()
+    local normalized = normalize_choice_text(choice)
+    if normalized == "" then
+        return nil
+    end
+    if settings.field ~= "categories" then
+        return normalized
+    end
+
+    local slug = (settings.reference_prefix or "category - ") .. normalized
+    local path = utils.slug_to_path(slug)
+    if vim.fn.filereadable(path) == 1 then
+        return normalized:lower()
+    end
+
+    local title = normalized
+    local first = title:sub(1, 1)
+    if first ~= "" then
+        title = first:upper() .. title:sub(2)
+    end
+
+    local ok, err = shared.atomic_writefile(path, {
+        "# " .. title,
+        "",
+    })
+    if not ok then
+        log.error("Failed to create category note: %s", err or path)
+        return nil
+    end
+
+    return normalized:lower()
 end
 
 ---@param label string
@@ -433,6 +570,8 @@ local function build_classify_statusline(label, count, field)
         string.format(" | %d %s missing %s ", count, noun, field),
         "| gk set taxonomy ",
         "| gP set + preview ",
+        "| gV preview row ",
+        "| gA apply row ",
         "| :w save ",
     }, "")
 end
@@ -445,7 +584,7 @@ local function build_classify_banner(label, count, field)
     local noun = count == 1 and "note" or "notes"
     return {
         string.format("Taxonomy classify: %s | %d %s missing %s", label, count, noun, field),
-        "gk set taxonomy | gP set taxonomy + preview | :w save | :Vault taxonomy preview",
+        "gk set taxonomy (<C-n> creates category) | gP set taxonomy + preview | gV preview row | gA apply row | :w save",
     }
 end
 
@@ -454,7 +593,7 @@ end
 local function build_audit_banner(field)
     return {
         string.format("Taxonomy audit | filenames disagree with %s", field),
-        "gk set taxonomy | gP set taxonomy + preview | :Vault taxonomy preview",
+        "gk set taxonomy (<C-n> creates category) | gP set taxonomy + preview | gV preview row | gA apply row",
     }
 end
 
@@ -466,10 +605,12 @@ local function build_audit_statusline(field)
         string.format("| filenames disagree with %s ", field),
         "| gk set taxonomy ",
         "| gP set + preview ",
+        "| gV preview row ",
+        "| gA apply row ",
     }, "")
 end
 
----@param paths string[]
+---@param paths vault.path[]
 ---@param choice string
 function M.apply_choice_to_paths(paths, choice)
     local settings = get_settings()
@@ -506,10 +647,10 @@ function M.classify_notes(opts)
     local settings = get_settings()
     local dirs = classify_dirs(settings, opts.dirs)
     local notes = require("vault.notes")()
+    ---@type table<vault.slug, vault.Note>
     local filtered = {}
     for slug, note in pairs(notes.map) do
-        local _, reason = extract_kind(settings, get_frontmatter_value(note, settings.field))
-        if relpath_in_dirs(note.data.relpath, dirs) and reason ~= "ok" then
+        if note_needs_classify(note, settings, dirs) then
             filtered[slug] = note
         end
     end
@@ -521,10 +662,10 @@ end
 function M.audit_notes()
     local settings = get_settings()
     local notes = require("vault.notes")()
+    ---@type table<vault.slug, vault.Note>
     local filtered = {}
     for slug, note in pairs(notes.map) do
-        local info = inspect_note(note, settings)
-        if info and info.from ~= info.to then
+        if note_needs_audit(note, settings) then
             filtered[slug] = note
         end
     end
@@ -532,11 +673,14 @@ function M.audit_notes()
     return notes:to_group()
 end
 
+---@param opts? { paths?: vault.path[] }
 ---@return vault.Taxonomy.Plan
-function M.build_plan()
+function M.build_plan(opts)
     local settings = get_settings()
-    local notes = require("vault.notes")()
+    local notes, scope, scope_count = scoped_notes(opts)
+    ---@type vault.Taxonomy.NoteInspection[]
     local candidates = {}
+    ---@type vault.Taxonomy.PlanSkip[]
     local skipped = {}
     local unchanged = 0
 
@@ -560,11 +704,13 @@ function M.build_plan()
         end
     end
 
+    ---@type table<vault.path, integer>
     local target_counts = {}
     for _, info in ipairs(candidates) do
         target_counts[info.to] = (target_counts[info.to] or 0) + 1
     end
 
+    ---@type vault.Taxonomy.PlanMove[]
     local moves = {}
     local skip_collisions = settings.rename.skip_collisions ~= false
     for _, info in ipairs(candidates) do
@@ -606,14 +752,16 @@ function M.build_plan()
         created_at = os.date("!%Y-%m-%dT%H:%M:%SZ"),
         root = config.options.root,
         field = settings.field,
+        scope = scope,
+        scope_count = scope_count,
         moves = moves,
         skipped = skipped,
         unchanged = unchanged,
     }
 end
 
----@param path string
----@param payload table
+---@param path vault.path
+---@param payload vault.Taxonomy.Plan
 local function write_manifest(path, payload)
     vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
     local encoded = vim.json.encode(payload)
@@ -621,8 +769,8 @@ local function write_manifest(path, payload)
     vim.fn.writefile(lines, path)
 end
 
----@param path string
----@return table|nil
+---@param path vault.path
+---@return vault.Taxonomy.Plan|nil
 local function read_manifest(path)
     if vim.fn.filereadable(path) == 0 then
         return nil
@@ -640,10 +788,12 @@ end
 
 ---@param plan vault.Taxonomy.Plan
 local function open_preview_buffer(plan)
+    ---@type string[]
     local lines = {
         "# Vault taxonomy preview",
         "",
         string.format("field: %s", plan.field),
+        string.format("scope: %s (%d notes)", plan.scope or "vault", plan.scope_count or 0),
         string.format("ready: %d", #plan.moves),
         string.format("skipped: %d", #plan.skipped),
         string.format("unchanged: %d", plan.unchanged),
@@ -685,6 +835,7 @@ end
 function M.open_classify(opts)
     opts = opts or {}
     local settings = get_settings()
+    local dirs = classify_dirs(settings, opts.dirs)
     local notes = M.classify_notes({ dirs = opts.dirs })
     if notes:count() == 0 then
         log.info("No notes missing taxonomy field '%s'", settings.field)
@@ -700,11 +851,20 @@ function M.open_classify(opts)
         save_mode = "metadata_only",
         taxonomy_field = settings.field,
         taxonomy_choices = M.kind_choices(),
+        taxonomy_choices_provider = function()
+            return M.kind_choices()
+        end,
         taxonomy_apply_choice = function(paths, choice)
             return M.apply_choice_to_paths(paths, choice)
         end,
+        taxonomy_create_choice = function(query)
+            return M.ensure_category_choice(query)
+        end,
         reload_notes = function()
             return M.classify_notes({ dirs = opts.dirs })
+        end,
+        retain_note = function(note)
+            return note_needs_classify(note, settings, dirs)
         end,
         statusline_builder = function(count)
             return build_classify_statusline(label, count, settings.field)
@@ -731,11 +891,20 @@ function M.open_audit()
         save_mode = "metadata_only",
         taxonomy_field = settings.field,
         taxonomy_choices = M.kind_choices(),
+        taxonomy_choices_provider = function()
+            return M.kind_choices()
+        end,
         taxonomy_apply_choice = function(paths, choice)
             return M.apply_choice_to_paths(paths, choice)
         end,
+        taxonomy_create_choice = function(query)
+            return M.ensure_category_choice(query)
+        end,
         reload_notes = function()
             return M.audit_notes()
+        end,
+        retain_note = function(note)
+            return note_needs_audit(note, settings)
         end,
         statusline_builder = function()
             return build_audit_statusline(settings.field)
@@ -746,13 +915,18 @@ function M.open_audit()
     })
 end
 
+---@param opts? { paths?: string[], open?: boolean }
 ---@return vault.Taxonomy.Plan
-function M.preview()
-    local plan = M.build_plan()
+function M.preview(opts)
+    opts = opts or {}
+    local plan = M.build_plan(opts)
     write_manifest(preview_manifest_path(), plan)
-    open_preview_buffer(plan)
+    if opts.open ~= false then
+        open_preview_buffer(plan)
+    end
     log.info(
-        "Taxonomy preview: %d ready, %d skipped, %d unchanged",
+        "Taxonomy preview (%s): %d ready, %d skipped, %d unchanged",
+        plan.scope or "vault",
         #plan.moves,
         #plan.skipped,
         plan.unchanged
@@ -760,11 +934,18 @@ function M.preview()
     return plan
 end
 
+---@class vault.Taxonomy.MoveReport
+---@field moved integer
+---@field patched_files integer
+---@field skipped integer
+---@field renames table[]
+
 ---@param moves vault.Taxonomy.PlanMove[]
 ---@param opts { update_links?: boolean, chunk_size?: integer }
----@return table
+---@return vault.Taxonomy.MoveReport
 local function apply_moves(moves, opts)
     local notes = require("vault.notes")()
+    ---@type vault.Taxonomy.MoveReport
     local report = {
         moved = 0,
         patched_files = 0,
@@ -773,6 +954,7 @@ local function apply_moves(moves, opts)
     }
     local chunk_size = math.max(1, tonumber(opts.chunk_size) or #moves)
     for idx = 1, #moves, chunk_size do
+        ---@type { from: string, to: string }[]
         local chunk = {}
         for move_idx = idx, math.min(idx + chunk_size - 1, #moves) do
             table.insert(chunk, {
@@ -793,8 +975,65 @@ local function apply_moves(moves, opts)
     return report
 end
 
-function M.apply()
+---@class vault.Taxonomy.ApplyManifest
+---@field applied_at string
+---@field root string
+---@field field string
+---@field scope string
+---@field scope_count integer
+---@field renames table[]
+---@field patched_files integer
+
+---@param plan vault.Taxonomy.Plan
+---@param settings vault.Taxonomy.Settings
+---@return vault.Taxonomy.MoveReport|nil
+local function apply_plan(plan, settings)
+    if not plan.moves or #plan.moves == 0 then
+        log.info("No taxonomy renames to apply")
+        return nil
+    end
+
+    local ok, report = pcall(apply_moves, plan.moves, {
+        update_links = settings.rename.update_links ~= false,
+        chunk_size = settings.rename.chunk_size or 25,
+    })
+    if not ok then
+        log.error("Taxonomy apply failed: %s", tostring(report))
+        return nil
+    end
+
+    ---@type vault.Taxonomy.ApplyManifest
+    local applied = {
+        applied_at = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        root = config.options.root,
+        field = settings.field,
+        scope = plan.scope,
+        scope_count = plan.scope_count,
+        renames = report.renames,
+        patched_files = report.patched_files,
+    }
+    write_manifest(last_apply_manifest_path(), applied)
+    log.info(
+        "Taxonomy apply (%s): %d renamed, %d files patched",
+        plan.scope or "vault",
+        report.moved or 0,
+        report.patched_files or 0
+    )
+    return report
+end
+
+---@param opts? { paths?: string[], plan?: vault.Taxonomy.Plan }
+function M.apply(opts)
+    opts = opts or {}
     local settings = get_settings()
+    if opts.plan then
+        return apply_plan(opts.plan, settings)
+    end
+    if type(opts.paths) == "table" and #opts.paths > 0 then
+        local plan = M.build_plan({ paths = opts.paths })
+        return apply_plan(plan, settings)
+    end
+
     local preview_path = preview_manifest_path()
     if settings.rename.require_preview ~= false and vim.fn.filereadable(preview_path) == 0 then
         log.warn("Run :Vault taxonomy preview before apply")
@@ -810,34 +1049,12 @@ function M.apply()
         log.error("Preview plan root mismatch; run :Vault taxonomy preview again")
         return nil
     end
-    if not plan.moves or #plan.moves == 0 then
-        log.info("No taxonomy renames to apply")
-        return nil
-    end
-
-    local ok, report = pcall(apply_moves, plan.moves, {
-        update_links = settings.rename.update_links ~= false,
-        chunk_size = settings.rename.chunk_size or 25,
-    })
-    if not ok then
-        log.error("Taxonomy apply failed: %s", tostring(report))
-        return nil
-    end
-
-    local applied = {
-        applied_at = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-        root = config.options.root,
-        field = settings.field,
-        renames = report.renames,
-        patched_files = report.patched_files,
-    }
-    write_manifest(last_apply_manifest_path(), applied)
-    log.info("Taxonomy apply: %d renamed, %d files patched", report.moved or 0, report.patched_files or 0)
-    return report
+    return apply_plan(plan, settings)
 end
 
 function M.undo_last()
     local settings = get_settings()
+    ---@type vault.Taxonomy.ApplyManifest|nil
     local applied = read_manifest(last_apply_manifest_path())
     if not applied or not applied.renames or #applied.renames == 0 then
         log.warn("No taxonomy apply manifest to undo")
@@ -848,6 +1065,7 @@ function M.undo_last()
         return nil
     end
 
+    ---@type vault.Taxonomy.PlanMove[]
     local reversed = {}
     for idx = #applied.renames, 1, -1 do
         local rename = applied.renames[idx]

@@ -13,6 +13,7 @@
 
 local root_cwd = vim.fn.getcwd()
 local fixture_root = root_cwd .. "/tests/fixtures/demo-vault"
+local promote_tmp_root = root_cwd .. "/tests/tmp_tags_promote_vault"
 
 -- ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -60,6 +61,20 @@ local function clear_state()
     package.loaded["vault.core.state"] = nil
     package.loaded["vault.bases"] = nil
     package.loaded["vault.tags"] = nil
+end
+
+local function rm_rf(path)
+    if vim.fn.isdirectory(path) == 1 then
+        vim.fn.delete(path, "rf")
+    elseif vim.fn.filereadable(path) == 1 then
+        vim.fn.delete(path)
+    end
+end
+
+local function write(path, lines)
+    local dir = vim.fn.fnamemodify(path, ":h")
+    vim.fn.mkdir(dir, "p")
+    vim.fn.writefile(lines, path)
 end
 
 --- Capture vim.notify messages during a callback
@@ -703,6 +718,229 @@ describe("Vault filesystem commands", function()
     end)
 end)
 
+describe("Vault tag promotion", function()
+    before_each(function()
+        rm_rf(promote_tmp_root)
+        vim.fn.mkdir(promote_tmp_root, "p")
+        write(promote_tmp_root .. "/Inbox/tag-source.md", {
+            "---",
+            "tags:",
+            "  - wash-face",
+            "---",
+            "# tag source",
+            "Do #wash-face now.",
+            "Repeat #wash-face later.",
+        })
+
+        require("vault").setup({
+            root = promote_tmp_root,
+            ext = ".md",
+            features = {
+                cmp = false,
+                commands = true,
+                watcher = false,
+            },
+            tags = {
+                valid = { hex = true },
+            },
+            search_tool = "rg",
+        })
+        clear_state()
+    end)
+
+    after_each(function()
+        rm_rf(promote_tmp_root)
+        clear_state()
+    end)
+
+    it("promotes inline tags to wikilinks and keeps frontmatter tags by default", function()
+        require("vault.commands")
+        vim.cmd("Vault tags promote wash-face wash-face")
+
+        local canonical_path = promote_tmp_root .. "/wash-face.md"
+        assert.are.equal(1, vim.fn.filereadable(canonical_path))
+        local canonical_lines = vim.fn.readfile(canonical_path)
+        assert.are.equal("# wash-face", canonical_lines[1])
+
+        local source_lines = vim.fn.readfile(promote_tmp_root .. "/Inbox/tag-source.md")
+        assert.are.equal("  - wash-face", source_lines[3])
+        assert.are.equal("Do [[wash-face]] now.", source_lines[6])
+        assert.are.equal("Repeat [[wash-face]] later.", source_lines[7])
+    end)
+
+    it("opens the combined resolve picker when no promote target is given", function()
+        local original_resolve_picker = package.loaded["vault.ui.resolve_picker"]
+        local original_commands = package.loaded["vault.commands"]
+        local original_api = package.loaded["vault.api"]
+        local called = nil
+        package.loaded["vault.ui.resolve_picker"] = {
+            open = function(opts)
+                called = opts
+            end,
+        }
+
+        package.loaded["vault.commands"] = nil
+        package.loaded["vault.api"] = nil
+
+        require("vault.commands")._get_subcommands().tags.promote.run({ "wash-face" })
+
+        package.loaded["vault.ui.resolve_picker"] = original_resolve_picker
+        package.loaded["vault.commands"] = original_commands
+        package.loaded["vault.api"] = original_api
+        assert.is_not_nil(called)
+        assert.is_function(called.on_resolve)
+        assert.are.equal("wash-face", called.wikilink.data.slug)
+    end)
+end)
+
+describe("Vault note merge", function()
+    it("opens the combined target picker when no merge target is given", function()
+        local original_commands = package.loaded["vault.commands"]
+        local original_api = package.loaded["vault.api"]
+        local called = nil
+        package.loaded["vault.api"] = {
+            open_picker_promote_tag = function() end,
+            open_picker_merge_note = function(source, opts)
+                called = { source = source, opts = opts }
+            end,
+            open_picker_retarget_note = function() end,
+            merge_note = function() end,
+        }
+        package.loaded["vault.commands"] = nil
+
+        require("vault.commands")._get_subcommands().note.merge.run({ "test_note" })
+
+        package.loaded["vault.commands"] = original_commands
+        package.loaded["vault.api"] = original_api
+        assert.is_not_nil(called)
+        assert.are.equal("test_note", called.source)
+    end)
+
+    it("merges directly when source and target are both provided", function()
+        local original_commands = package.loaded["vault.commands"]
+        local original_api = package.loaded["vault.api"]
+        local called = nil
+        package.loaded["vault.api"] = {
+            open_picker_promote_tag = function() end,
+            open_picker_merge_note = function() end,
+            open_picker_retarget_note = function() end,
+            merge_note = function(source, target, opts)
+                called = { source = source, target = target, opts = opts }
+            end,
+        }
+        package.loaded["vault.commands"] = nil
+
+        require("vault.commands")
+            ._get_subcommands().note.merge
+            .run({ "test_note", "Project/My new masterpeace" })
+
+        package.loaded["vault.commands"] = original_commands
+        package.loaded["vault.api"] = original_api
+        assert.is_not_nil(called)
+        assert.are.equal("test_note", called.source)
+        assert.are.equal("Project/My new masterpeace", called.target)
+    end)
+end)
+
+describe("Vault note retarget", function()
+    it("renames the source note when create is selected with a query", function()
+        setup_vault()
+        clear_state()
+
+        local original_api = package.loaded["vault.api"]
+        local original_picker = package.loaded["vault.ui.resolve_picker"]
+        local original_note = package.loaded["vault.notes.note"]
+        local captured = nil
+        local renamed_to = nil
+
+        package.loaded["vault.ui.resolve_picker"] = {
+            open = function(opts)
+                captured = opts
+            end,
+        }
+        package.loaded["vault.notes.note"] = function()
+            return {
+                rename = function(_, slug)
+                    renamed_to = slug
+                end,
+            }
+        end
+        package.loaded["vault.api"] = nil
+
+        local api = require("vault.api")
+        api.open_picker_retarget_note("test_note")
+        assert.is_not_nil(captured)
+        captured.on_resolve({ action = "create", prompt = "Retargeted note" })
+
+        package.loaded["vault.ui.resolve_picker"] = original_picker
+        package.loaded["vault.notes.note"] = original_note
+        package.loaded["vault.api"] = original_api
+        assert.are.equal("Retargeted note", renamed_to)
+    end)
+
+    it("merges into the selected existing target when rewrite is chosen", function()
+        setup_vault()
+        clear_state()
+
+        local original_api = package.loaded["vault.api"]
+        local original_picker = package.loaded["vault.ui.resolve_picker"]
+        local captured = nil
+        local merged = nil
+
+        package.loaded["vault.ui.resolve_picker"] = {
+            open = function(opts)
+                captured = opts
+            end,
+        }
+        package.loaded["vault.api"] = nil
+
+        local api = require("vault.api")
+        api.merge_note = function(source, target)
+            merged = { source = source, target = target }
+        end
+        api.open_picker_retarget_note("test_note")
+        assert.is_not_nil(captured)
+        captured.on_resolve({ action = "rewrite", slug = "Project/My new masterpeace" })
+
+        package.loaded["vault.ui.resolve_picker"] = original_picker
+        package.loaded["vault.api"] = original_api
+        assert.is_not_nil(merged)
+        assert.are.equal(fixture_root .. "/test_note.md", merged.source)
+        assert.are.equal("Project/My new masterpeace", merged.target)
+    end)
+
+    it("canonicalizes a bare selected slug to the unique existing note target", function()
+        setup_vault()
+        clear_state()
+
+        local original_api = package.loaded["vault.api"]
+        local original_picker = package.loaded["vault.ui.resolve_picker"]
+        local captured = nil
+        local merged = nil
+
+        package.loaded["vault.ui.resolve_picker"] = {
+            open = function(opts)
+                captured = opts
+            end,
+        }
+        package.loaded["vault.api"] = nil
+
+        local api = require("vault.api")
+        api.merge_note = function(source, target)
+            merged = { source = source, target = target }
+        end
+        api.open_picker_retarget_note("test_note")
+        assert.is_not_nil(captured)
+        captured.on_resolve({ action = "rewrite", slug = "lua-patterns" })
+
+        package.loaded["vault.ui.resolve_picker"] = original_picker
+        package.loaded["vault.api"] = original_api
+        assert.is_not_nil(merged)
+        assert.are.equal(fixture_root .. "/test_note.md", merged.source)
+        assert.are.equal("Reference/lua-patterns", merged.target)
+    end)
+end)
+
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- TIER 4 — Completion Functions
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -843,6 +1081,43 @@ describe("Vault command completions", function()
         end)
     end)
 
+    describe("tags promote completion", function()
+        it("should expose promote under the tags subcommands", function()
+            local commands = require("vault.commands")
+            local result = commands._get_subcommands().tags.complete("pro")
+            assert.is_true(vim.tbl_contains(result, "promote"))
+        end)
+
+        it("should keep nested tag completion through the dispatcher", function()
+            clear_state()
+            require("vault.tags")()
+            local result = completions.api("class/", "Vault tags promote class/", 25)
+            assert.is_true(vim.tbl_contains(result, "class/Project"))
+        end)
+
+        it("should complete promote targets from notes and wikilink slugs", function()
+            clear_state()
+            require("vault.wikilinks")()
+            local commands = require("vault.commands")
+            local result = commands
+                ._get_subcommands().tags.promote
+                .complete("Pro", "Vault tags promote class/Project Pro")
+            assert.is_true(vim.tbl_contains(result, "Project/My new masterpeace"))
+        end)
+    end)
+
+    describe("note merge completion", function()
+        it("should complete merge targets from notes and wikilinks", function()
+            clear_state()
+            require("vault.wikilinks")()
+            local commands = require("vault.commands")
+            local result = commands
+                ._get_subcommands().note.merge
+                .complete("Pro", "Vault note merge test_note Pro")
+            assert.is_true(vim.tbl_contains(result, "Project/My new masterpeace"))
+        end)
+    end)
+
     describe("duplicates_review()", function()
         local commands
         local original_duplicates
@@ -911,6 +1186,76 @@ describe("Vault command completions", function()
             assert.is_true(captured.opts.kinds.divergent)
         end)
 
+        it("defaults duplicate review to the vault root", function()
+            local captured = nil
+            package.loaded["vault.duplicates"] = {
+                review = function(root, opts)
+                    captured = { root = root, opts = opts }
+                end,
+                resolve_kind_filter = function(tokens)
+                    return {}, nil
+                end,
+                kind_filter_names = function()
+                    return { "metadata" }
+                end,
+                preset_names = function()
+                    return { "easy" }
+                end,
+                related_filter_names = function()
+                    return { "likely", "maybe", "weak" }
+                end,
+            }
+
+            commands.duplicates_review({ fargs = {} })
+
+            assert.is_not_nil(captured)
+            assert.are.equal(fixture_root, captured.root)
+        end)
+
+        it("runs duplicate review presets by name", function()
+            local captured = nil
+            package.loaded["vault.duplicates"] = {
+                review = function(root, opts)
+                    captured = { root = root, opts = opts }
+                end,
+                resolve_preset = function(name)
+                    if name == "easy" then
+                        return {
+                            name = "easy",
+                            description = "Easy duplicates",
+                            root = nil,
+                            dirs = {},
+                            tags = {},
+                            kind_tokens = { "metadata", "subset" },
+                        },
+                            nil
+                    end
+                    return nil, "missing"
+                end,
+                resolve_kind_filter = function(tokens)
+                    return { metadata = true, a_subset = true, b_subset = true }, nil
+                end,
+                preset_names = function()
+                    return { "body", "easy" }
+                end,
+                kind_filter_names = function()
+                    return { "metadata", "subset" }
+                end,
+                related_filter_names = function()
+                    return { "likely", "maybe", "weak" }
+                end,
+            }
+
+            commands.duplicates_review_preset({ fargs = { "easy" } })
+
+            assert.is_not_nil(captured)
+            assert.are.equal(fixture_root, captured.root)
+            assert.are.equal("easy", captured.opts.filter_spec.preset)
+            assert.is_true(captured.opts.kinds.metadata)
+            assert.is_true(captured.opts.kinds.a_subset)
+            assert.is_true(captured.opts.kinds.b_subset)
+        end)
+
         it("completes duplicate review clause keywords at top level", function()
             local result = commands.complete_duplicates_review("", "Vault duplicates review ")
 
@@ -941,6 +1286,11 @@ describe("Vault command completions", function()
                 commands.complete_duplicates_review("", "Vault duplicates review kind ")
             assert.is_true(vim.tbl_contains(kind_values, "metadata"))
             assert.is_true(vim.tbl_contains(kind_values, "body"))
+        end)
+
+        it("completes duplicate review preset names", function()
+            local preset_values = commands._get_subcommands().duplicates.review.preset.complete("e")
+            assert.is_true(vim.tbl_contains(preset_values, "easy"))
         end)
 
         it("passes related buckets into related duplicate review", function()

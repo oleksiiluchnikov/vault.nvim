@@ -4,7 +4,6 @@ local log = require("vault.log").scope("conflicts")
 local utils = require("vault.utils")
 local Resolver = require("vault.ui.resolver")
 local Wikilink = require("vault.wikilinks.wikilink")
-local merge = require("vault.merge")
 
 local COPY_SUFFIX_RE = "^(.-) (%d+)$"
 

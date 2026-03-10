@@ -372,18 +372,6 @@ local function make_buf(name)
     return buf
 end
 
---- Close a window and wipe its buffer.
---- @param win integer|nil
---- @param buf integer|nil
-local function close_win(win, buf)
-    if win and vim.api.nvim_win_is_valid(win) then
-        pcall(vim.api.nvim_win_close, win, true)
-    end
-    if buf and vim.api.nvim_buf_is_valid(buf) then
-        pcall(vim.api.nvim_buf_delete, buf, { force = true })
-    end
-end
-
 -- ── Action execution ───────────────────────────────────────────────────────
 
 --- Execute a resolver action.

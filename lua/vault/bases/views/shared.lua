@@ -8,6 +8,12 @@ local M = {}
 
 local log = require("vault.log").scope("bases.shared")
 
+---@alias vault.bases.views.ColumnName string
+---@alias vault.bases.views.FrontmatterScalar string|number|boolean
+---@alias vault.bases.views.FrontmatterList vault.bases.views.FrontmatterScalar[]
+---@alias vault.bases.views.FrontmatterValue vault.bases.views.FrontmatterScalar|vault.bases.views.FrontmatterList
+---@alias vault.bases.views.FrontmatterMap table<string, vault.bases.views.FrontmatterValue>
+
 -- ─── Constants ────────────────────────────────────────────────────────────────
 
 ---@type table<string, true>
@@ -93,8 +99,8 @@ end
 
 -- ─── Path safety ──────────────────────────────────────────────────────────────
 
----@param path string
----@return string|nil safe_path, string|nil error_msg
+---@param path vault.path
+---@return vault.path|nil safe_path, string|nil error_msg
 function M.validate_path_in_vault(path)
   local config = require("vault.config")
   local raw_root = config.options.root
@@ -116,7 +122,7 @@ end
 
 -- ─── File I/O ─────────────────────────────────────────────────────────────────
 
----@param path string
+---@param path vault.path
 ---@param lines string[]
 ---@return boolean ok, string|nil error_msg
 function M.atomic_writefile(path, lines)
@@ -132,7 +138,7 @@ function M.atomic_writefile(path, lines)
   return true, nil
 end
 
----@param path string
+---@param path vault.path
 ---@return integer
 function M.get_mtime(path)
   local stat = vim.uv.fs_stat(path)
@@ -141,10 +147,11 @@ end
 
 -- ─── Frontmatter I/O ──────────────────────────────────────────────────────────
 
----@param path string
----@param columns string[]
----@return table<string, any>
-function M.read_frontmatter_fields(path, columns)
+---@param path vault.path
+---@param _columns string[]
+---@return vault.bases.views.FrontmatterMap
+function M.read_frontmatter_fields(path, _columns)
+  ---@type vault.bases.views.FrontmatterMap
   local fields = {}
   local ok, lines = pcall(vim.fn.readfile, path, "", 50)
   if not ok then return fields end
@@ -154,6 +161,7 @@ function M.read_frontmatter_fields(path, columns)
     if lines[i]:match("^%-%-%-") then break end
     table.insert(fm_lines, lines[i])
   end
+  ---@type string|nil, vault.bases.views.FrontmatterList|nil
   local current_key, current_list = nil, nil
   for _, l in ipairs(fm_lines) do
     local list_item = l:match("^%s+%-%s+(.+)")
@@ -190,9 +198,9 @@ function M.read_frontmatter_fields(path, columns)
   return fields
 end
 
----@param path string
+---@param path vault.path
 ---@param key string
----@param value any
+---@param value vault.bases.views.FrontmatterValue|nil
 function M.set_frontmatter_field(path, key, value)
   local safe_path, path_err = M.validate_path_in_vault(path)
   if not safe_path then log.error("SAFETY: %s", path_err); return end
@@ -261,8 +269,8 @@ function M.set_frontmatter_field(path, key, value)
   M.atomic_writefile(safe_path, result)
 end
 
----@param path string
----@param fields table<string, any>
+---@param path vault.path
+---@param fields vault.bases.views.FrontmatterMap
 function M.set_frontmatter_fields(path, fields)
   if not next(fields) then return end
   local safe_path, path_err = M.validate_path_in_vault(path)
@@ -352,7 +360,7 @@ end
 
 -- ─── Value formatting ─────────────────────────────────────────────────────────
 
----@param value any
+---@param value unknown
 ---@param col_name? string
 ---@return string
 function M.fmt_value(value, col_name)
@@ -382,7 +390,7 @@ end
 
 ---@param text string
 ---@param col_name string
----@return any
+---@return vault.bases.views.FrontmatterValue|nil
 function M.parse_value(text, col_name)
   if text == M.get_empty_cell() or text == "" then return nil end
   if col_name == "tags" then

@@ -8,11 +8,13 @@ local Notes = state.get_global_key("class.vault.Notes") or require("vault.notes"
 local NotesGroup = Notes:extend("VaultNotesGroup")
 
 --- @param notes vault.Notes
+---@return nil
 function NotesGroup:init(notes)
     if not notes then
         error(error_formatter.MISSING_PARAMETER("notes"))
     end
 
+    ---@type vault.Notes.map
     self.map = {}
     for k, v in pairs(notes.map) do
         self.map[k] = v

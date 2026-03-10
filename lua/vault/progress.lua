@@ -14,20 +14,33 @@
 local log = require("vault.log").scope("progress")
 
 local M = {}
+local uv = vim.uv or vim.loop
+
+--- @class vault.FidgetProgressHandle
+--- @field report fun(self: vault.FidgetProgressHandle, opts: { message?: string, percentage?: number|nil }): nil
+--- @field finish fun(self: vault.FidgetProgressHandle): nil
 
 --- @class vault.ProgressHandle
---- @field private _fidget? table  fidget ProgressHandle (nil if fidget unavailable)
+--- @field private _fidget? vault.FidgetProgressHandle
+--- fidget ProgressHandle (nil if fidget unavailable)
 --- @field private _title string
 --- @field private _t0 number      hrtime nanoseconds at creation
 local Handle = {}
 Handle.__index = Handle
 
+--- @alias vault.FidgetCreateOpts { title: string, message: string, lsp_client: { name: string }, percentage: number|nil }
+--- @alias vault.FidgetProgressModule { create: fun(opts: vault.FidgetCreateOpts): vault.FidgetProgressHandle }
+
+--- @class vault.ProgressModule
+--- @field start fun(title: string, message?: string): vault.ProgressHandle
+
 --- Try to load fidget.progress.handle. Cached after first attempt.
---- @return table|nil
+--- @return vault.FidgetProgressModule|nil
 local _fidget_checked = false
---- @type table|nil
+--- @type vault.FidgetProgressModule|nil
 local _fidget_handle_mod = nil
 
+--- @return vault.FidgetProgressModule|nil
 local function get_fidget()
     if _fidget_checked then
         return _fidget_handle_mod
@@ -52,7 +65,7 @@ end
 --- Mark the progress as complete.
 --- @param msg? string  Optional completion message (default: "Done")
 function Handle:finish(msg)
-    local elapsed = (vim.uv.hrtime() - self._t0) / 1e9
+    local elapsed = (uv.hrtime() - self._t0) / 1e9
     local message = msg or "Done"
     if self._fidget then
         self._fidget:report({ message = ("%s (%.1fs)"):format(message, elapsed) })
@@ -69,9 +82,10 @@ end
 --- @param message? string  Initial detail message
 --- @return vault.ProgressHandle
 function M.start(title, message)
+    --- @type vault.ProgressHandle
     local handle = setmetatable({
         _title = title,
-        _t0 = vim.uv.hrtime(),
+        _t0 = uv.hrtime(),
     }, Handle)
 
     local fidget_mod = get_fidget()

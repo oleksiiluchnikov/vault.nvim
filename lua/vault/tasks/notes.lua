@@ -3,14 +3,19 @@ local shared = require("vault.bases.views.shared")
 
 local M = {}
 
----@class vault.TasksNote
----@field path string
----@field stem string
----@field title string
----@field status string
----@field priority string
----@field blocked_by string[]
+--- A lightweight representation of a task note read from disk.
+--- @class vault.TasksNote
+--- @field path string Absolute filesystem path to the task file.
+--- @field stem string Filename without directory or extension (e.g. `"T-20240101120000 My Task"`).
+--- @field title string Human-readable task title (falls back to `stem` when absent from frontmatter).
+--- @field status string Canonical status string, e.g. `"Status - Todo"`.
+--- @field priority string Canonical priority string, e.g. `"Priority - Medium"`.
+--- @field blocked_by string[] Stems of tasks that must complete before this one can start.
 
+--- Allowed status values sorted by workflow order (lower = earlier in workflow).
+--- @alias vault.TasksNote.StatusOrder table<string, integer>
+
+--- @type vault.TasksNote.StatusOrder
 local STATUS_ORDER = {
     ["Status - Backlog"] = 1,
     ["Status - Todo"] = 2,
@@ -22,6 +27,10 @@ local STATUS_ORDER = {
     ["Status - Archived"] = 8,
 }
 
+--- Allowed priority values sorted by urgency (lower = higher priority).
+--- @alias vault.TasksNote.PriorityOrder table<string, integer>
+
+--- @type vault.TasksNote.PriorityOrder
 local PRIORITY_ORDER = {
     ["Priority - Critical"] = 1,
     ["Priority - High"] = 2,
@@ -29,6 +38,8 @@ local PRIORITY_ORDER = {
     ["Priority - Low"] = 4,
 }
 
+--- Set of status strings that represent a task that is no longer actionable.
+--- @type table<string, true>
 local COMPLETED_STATUS = {
     ["Status - Done"] = true,
     ["Status - Failed"] = true,
@@ -36,6 +47,10 @@ local COMPLETED_STATUS = {
     ["Status - Archived"] = true,
 }
 
+--- Valid status-transition graph. Each key maps to the statuses it may advance to.
+--- @alias vault.TasksNote.TransitionMap table<string, table<string, true>>
+
+--- @type vault.TasksNote.TransitionMap
 local VALID_TRANSITIONS = {
     ["Status - Backlog"] = { ["Status - Todo"] = true, ["Status - Archived"] = true },
     ["Status - Todo"] = { ["Status - In-Progress"] = true, ["Status - Archived"] = true },
@@ -55,6 +70,8 @@ local VALID_TRANSITIONS = {
     ["Status - Archived"] = {},
 }
 
+--- Maps lowercase weekday names to the Lua `os.date("%w")` convention + 1  (1=Sun..7=Sat).
+--- @type table<string, integer>
 local WEEKDAY_TO_NUM = {
     sunday = 1,
     monday = 2,
@@ -65,34 +82,40 @@ local WEEKDAY_TO_NUM = {
     saturday = 7,
 }
 
----@return table
+--- Return the plugin-level task_notes config table (or an empty table when absent).
+--- @return table
 local function cfg()
     local options = require("vault.config").options
     return options.task_notes or {}
 end
 
----@param value string
----@return string
+--- Strip leading and trailing whitespace from a string.
+--- @param value string
+--- @return string
 local function trim(value)
     return (value or ""):gsub("^%s+", ""):gsub("%s+$", "")
 end
 
----@param value string
----@return string
+--- Remove wikilink brackets from a value, e.g. `"[[foo]]"` → `"foo"`.
+--- @param value string
+--- @return string
 local function unwrap_link(value)
     local out = trim(value)
     out = out:gsub("^%[%[(.-)%]%]$", "%1")
     return trim(out)
 end
 
----@param value string
----@return string
+--- Normalise a raw status string (possibly a wikilink or alias) to its canonical form.
+--- Falls back to the unwrapped candidate if no alias matches.
+--- @param value string
+--- @return string
 local function normalize_status(value)
     local candidate = unwrap_link(value)
     if STATUS_ORDER[candidate] then
         return candidate
     end
     local lowered = candidate:lower():gsub("_", "-")
+    --- @type table<string, string>
     local aliases = {
         backlog = "Status - Backlog",
         todo = "Status - Todo",
@@ -108,8 +131,10 @@ local function normalize_status(value)
     return aliases[lowered] or candidate
 end
 
----@param value string
----@return string
+--- Normalise a raw priority string to its canonical form.
+--- Returns `"Priority - Medium"` when the value is unknown.
+--- @param value string
+--- @return string
 local function normalize_priority(value)
     local candidate = unwrap_link(value)
     if PRIORITY_ORDER[candidate] then
@@ -118,13 +143,17 @@ local function normalize_priority(value)
     return "Priority - Medium"
 end
 
----@return string
+--- Return today's date formatted as an ISO 8601 string (`"YYYY-MM-DD"`).
+--- @return string
 local function today_iso()
     return os.date("%Y-%m-%d")
 end
 
----@param value any
----@return string|nil
+--- Parse a value into an ISO 8601 date string (`"YYYY-MM-DD"`).
+--- Accepts both `"YYYY-MM-DD"` and `"YYYYMMDD"` formats (possibly wrapped in `[[ ]]`).
+--- Returns `nil` when the value is not a recognisable date.
+--- @param value any
+--- @return string|nil
 local function parse_iso_date(value)
     if type(value) ~= "string" then return nil end
     local v = unwrap_link(value)
@@ -135,8 +164,9 @@ local function parse_iso_date(value)
     return nil
 end
 
----@param iso string
----@return string
+--- Wrap an ISO date in a wikilink with weekday appended, e.g. `"[[2024-01-01 Monday]]"`.
+--- @param iso string ISO 8601 date string (`"YYYY-MM-DD"`).
+--- @return string
 local function iso_to_wikilink(iso)
     local y, m, d = iso:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
     if not y then return string.format("[[%s]]", iso) end
@@ -144,9 +174,11 @@ local function iso_to_wikilink(iso)
     return string.format("[[%s %s]]", iso, os.date("%A", ts))
 end
 
----@param iso string
----@param days integer
----@return string
+--- Return the ISO date that is `days` calendar days after `iso`.
+--- Returns `iso` unchanged when it is not a valid `"YYYY-MM-DD"` string.
+--- @param iso string Base ISO 8601 date.
+--- @param days integer Number of days to add (may be negative).
+--- @return string
 local function add_days_iso(iso, days)
     local y, m, d = iso:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
     if not y then return iso end
@@ -154,8 +186,9 @@ local function add_days_iso(iso, days)
     return os.date("%Y-%m-%d", t)
 end
 
----@param iso string
----@return integer|nil
+--- Return the weekday number (1=Sun … 7=Sat) for the given ISO date, or `nil` on parse failure.
+--- @param iso string ISO 8601 date string (`"YYYY-MM-DD"`).
+--- @return integer|nil
 local function weekday_num_from_iso(iso)
     local y, m, d = iso:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
     if not y then return nil end
@@ -163,9 +196,11 @@ local function weekday_num_from_iso(iso)
     return tonumber(os.date("%w", t)) + 1
 end
 
----@param from_iso string
----@param target_wday integer 1=Sun..7=Sat
----@return string
+--- Return the ISO date of the next occurrence of `target_wday` after `from_iso`.
+--- Always advances by at least one day (never returns `from_iso` itself).
+--- @param from_iso string ISO 8601 base date.
+--- @param target_wday integer Target weekday number (1=Sun … 7=Sat).
+--- @return string
 local function next_weekday_iso(from_iso, target_wday)
     local from_wday = weekday_num_from_iso(from_iso) or target_wday
     local delta = (target_wday - from_wday) % 7
@@ -173,10 +208,12 @@ local function next_weekday_iso(from_iso, target_wday)
     return add_days_iso(from_iso, delta)
 end
 
----@param iso string
----@param months integer
----@param day_override integer|nil
----@return string
+--- Return the ISO date `months` calendar months after `iso`, optionally pinning to `day_override`.
+--- Clamps the day to the last valid day of the resulting month.
+--- @param iso string ISO 8601 base date (`"YYYY-MM-DD"`).
+--- @param months integer Number of months to add.
+--- @param day_override integer|nil When provided, use this day-of-month instead of `iso`'s day.
+--- @return string
 local function add_months_iso(iso, months, day_override)
     local y, m, d = iso:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
     if not y then return iso end
@@ -190,8 +227,9 @@ local function add_months_iso(iso, months, day_override)
     return string.format("%04d-%02d-%02d", ny, nm, nd)
 end
 
----@param value any
----@return string|nil
+--- Normalise a repeat rule value to a trimmed, lowercase string, or `nil` when blank/absent.
+--- @param value any
+--- @return string|nil
 local function normalize_repeat(value)
     if type(value) ~= "string" then return nil end
     local v = trim(value):lower():gsub("%s+", " ")
@@ -199,9 +237,30 @@ local function normalize_repeat(value)
     return v
 end
 
----@param task_values table
----@param completed_iso string
----@return string|nil
+--- Frontmatter values read from a task file for recurrence calculation.
+--- @class vault.TasksNote.RecurValues
+--- @field title string|nil Human-readable task title.
+--- @field status string|nil Raw status value from frontmatter.
+--- @field executor string|nil Executor wikilink value.
+--- @field category string|nil Category wikilink value.
+--- @field priority string|nil Priority wikilink value.
+--- @field feature string|nil Feature wikilink value.
+--- @field project string|nil Project wikilink value.
+--- @field initiative string|nil Initiative wikilink value.
+--- @field estimation string|nil Estimation value.
+--- @field due string|nil Due date value (ISO or wikilink).
+--- @field repeat string|nil Repeat rule string.
+--- @field repeat_start string|nil Override start date for recurrence window.
+--- @field repeat_weekday string|nil Explicit weekday name for weekly recurrence.
+--- @field repeat_day_of_month string|nil Explicit day-of-month for monthly recurrence.
+--- @field series_id string|nil Slug identifying the recurrence series.
+--- @field last_recur_spawned string|nil Wikilink to the last spawned child task.
+
+--- Compute the ISO date of the next due occurrence given the task's recurrence rule.
+--- Returns `nil` when the task has no repeat rule or the rule is unrecognised.
+--- @param task_values vault.TasksNote.RecurValues Frontmatter values of the task.
+--- @param completed_iso string ISO date on which the task was (or is being) completed.
+--- @return string|nil
 local function next_due_iso(task_values, completed_iso)
     local rule = normalize_repeat(task_values["repeat"])
     if not rule then return nil end
@@ -277,23 +336,27 @@ local function next_due_iso(task_values, completed_iso)
     return nil
 end
 
----@return string
+--- Return the absolute path to the vault root (with symlinks resolved).
+--- @return string
 local function vault_root()
     local root = require("vault.config").options.root
     return vim.fn.resolve(vim.fn.expand(root))
 end
 
----@return string
+--- Return the relative path of the tasks directory inside the vault.
+--- @return string
 function M.tasks_dir_rel()
     return cfg().dir or "Tasks"
 end
 
----@return string
+--- Return the absolute filesystem path of the tasks directory.
+--- @return string
 function M.tasks_dir_abs()
     return vault_root() .. "/" .. M.tasks_dir_rel()
 end
 
----@return string[]
+--- Return the ordered list of all recognised status strings.
+--- @return string[]
 function M.statuses()
     return {
         "Status - Backlog",
@@ -307,13 +370,16 @@ function M.statuses()
     }
 end
 
----@return string
+--- Return a timestamp string suitable for use in filenames (`"YYYYMMDDHHmmSS"`).
+--- @return string
 function M.timestamp()
     return os.date("%Y%m%d%H%M%S")
 end
 
----@param name string
----@return string
+--- Sanitise a user-supplied task name for use as a filename component.
+--- Strips control characters, replaces path separators with `-`, and collapses whitespace.
+--- @param name string Raw task name.
+--- @return string
 function M.sanitize_name(name)
     local out = trim(name)
     out = out:gsub("[\r\n\t]", " ")
@@ -322,21 +388,26 @@ function M.sanitize_name(name)
     return trim(out)
 end
 
----@param name string
----@param ts string
----@return string
+--- Build the filename stem for a new task file.
+--- Format: `"T-<timestamp> <sanitised name>"`.
+--- @param name string Sanitised task name.
+--- @param ts string Timestamp string from `M.timestamp()`.
+--- @return string
 function M.filename(name, ts)
     return string.format("T-%s %s", ts, M.sanitize_name(name))
 end
 
----@param path string
----@return string
+--- Extract the filename stem (no directory, no extension) from an absolute path.
+--- @param path string Absolute filesystem path.
+--- @return string
 local function stem_from_path(path)
     return vim.fn.fnamemodify(path, ":t:r")
 end
 
----@param path string
----@return vault.TasksNote|nil
+--- Read frontmatter fields from a task file and return a structured note representation.
+--- Returns `nil` when the path cannot be read.
+--- @param path string Absolute path to the task `.md` file.
+--- @return vault.TasksNote|nil
 function M.read_task(path)
     local values = shared.read_frontmatter_fields(path, {
         "title",
@@ -351,6 +422,7 @@ function M.read_task(path)
     if type(blocked) ~= "table" then
         blocked = {}
     end
+    --- @type string[]
     local blocked_by = {}
     for _, item in ipairs(blocked) do
         if type(item) == "string" and item ~= "" then
@@ -367,14 +439,16 @@ function M.read_task(path)
     }
 end
 
----@return string[]
+--- Collect all task file paths under the tasks directory (recursively), sorted.
+--- Returns an empty list when the directory does not exist.
+--- @return string[]
 local function collect_task_paths()
     local dir = M.tasks_dir_abs()
     if vim.fn.isdirectory(dir) == 0 then
         return {}
     end
     local ext = require("vault.config").options.ext or ".md"
-    local out = {}
+    local out = {} ---@type string[]
     local function walk(current)
         for name, kind in vim.fs.dir(current) do
             local child = current .. "/" .. name
@@ -390,9 +464,10 @@ local function collect_task_paths()
     return out
 end
 
----@return vault.TasksNote[]
+--- Return all task notes found under the tasks directory.
+--- @return vault.TasksNote[]
 function M.all()
-    local result = {}
+    local result = {} ---@type vault.TasksNote[]
     for _, path in ipairs(collect_task_paths()) do
         local task = M.read_task(path)
         if task then
@@ -402,9 +477,11 @@ function M.all()
     return result
 end
 
----@param stem string
----@param by_stem table<string, vault.TasksNote>
----@return boolean
+--- Return `true` when the dependency identified by `stem` is in a completed state.
+--- Returns `false` when the dependency does not exist in `by_stem`.
+--- @param stem string Stem of the dependency task.
+--- @param by_stem table<string, vault.TasksNote> Index of all tasks keyed by stem.
+--- @return boolean
 local function dependency_complete(stem, by_stem)
     local dep = by_stem[unwrap_link(stem)]
     if not dep then
@@ -413,9 +490,10 @@ local function dependency_complete(stem, by_stem)
     return COMPLETED_STATUS[dep.status] == true
 end
 
----@param task vault.TasksNote
----@param by_stem table<string, vault.TasksNote>
----@return boolean
+--- Return `true` when `task` has at least one incomplete dependency.
+--- @param task vault.TasksNote
+--- @param by_stem table<string, vault.TasksNote> Index of all tasks keyed by stem.
+--- @return boolean
 function M.is_blocked(task, by_stem)
     for _, dep in ipairs(task.blocked_by) do
         if not dependency_complete(dep, by_stem) then
@@ -425,20 +503,23 @@ function M.is_blocked(task, by_stem)
     return false
 end
 
----@param task vault.TasksNote
----@return boolean
+--- Return `true` when `task` has a status considered completed (done/failed/deprecated/archived).
+--- @param task vault.TasksNote
+--- @return boolean
 function M.is_completed(task)
     return COMPLETED_STATUS[task.status] == true
 end
 
----@return vault.TasksNote[]
+--- Return all tasks that are neither completed nor blocked, sorted by priority then status then title.
+--- @return vault.TasksNote[]
 function M.pick_candidates()
     local all = M.all()
+    --- @type table<string, vault.TasksNote>
     local by_stem = {}
     for _, item in ipairs(all) do
         by_stem[item.stem] = item
     end
-    local candidates = {}
+    local candidates = {} ---@type vault.TasksNote[]
     for _, item in ipairs(all) do
         if not M.is_completed(item) and not M.is_blocked(item, by_stem) then
             table.insert(candidates, item)
@@ -460,15 +541,21 @@ function M.pick_candidates()
     return candidates
 end
 
----@param status string
----@return string
+--- Wrap a status string in wikilink brackets.
+--- @param status string Canonical status string.
+--- @return string
 local function status_link(status)
     return string.format("[[%s]]", status)
 end
 
----@param path string
----@param new_status string
----@return boolean, string|nil
+--- Transition the task at `path` to `new_status`, enforcing the allowed transition graph.
+--- When the task transitions to `"Status - Done"` and has an active repeat rule, a new
+--- recurring child task is automatically created with the next computed due date.
+--- Returns `(true, nil)` on success or `(false, error_message)` on failure.
+--- @param path string Absolute path to the task file.
+--- @param new_status string Desired target status (raw or canonical form).
+--- @return boolean ok
+--- @return string|nil error_message
 function M.set_status(path, new_status)
     local task = M.read_task(path)
     if not task then
@@ -492,6 +579,7 @@ function M.set_status(path, new_status)
     })
 
     if to_status == "Status - Done" then
+        --- @type vault.TasksNote.RecurValues
         local values = shared.read_frontmatter_fields(path, {
             "title",
             "status",
@@ -558,11 +646,12 @@ function M.set_status(path, new_status)
     return true, nil
 end
 
----@param status string
----@return string[]
+--- Return the status strings that `status` may legally transition to.
+--- @param status string Current status (raw or canonical form).
+--- @return string[]
 function M.next_statuses(status)
     local current = normalize_status(status)
-    local out = {}
+    local out = {} ---@type string[]
     local allowed = VALID_TRANSITIONS[current] or {}
     for _, candidate in ipairs(M.statuses()) do
         if allowed[candidate] then
@@ -572,7 +661,9 @@ function M.next_statuses(status)
     return out
 end
 
----@return string|nil
+--- Return the absolute path of the task file currently open in the active Neovim buffer.
+--- Returns `nil` when the buffer does not contain a task file.
+--- @return string|nil
 function M.current_task_path()
     local path = vim.fn.expand("%:p")
     if type(path) ~= "string" or path == "" then
@@ -590,9 +681,11 @@ function M.current_task_path()
     return abs
 end
 
----@param name string
----@param opts table|nil
----@return string|nil
+--- Create a new task file with default frontmatter and body template.
+--- Returns the absolute path of the created file, or `nil` on failure.
+--- @param name string Human-readable task name (will be sanitised).
+--- @param opts table|nil Optional overrides for frontmatter fields (`status`, `executor`, `category`, `priority`, `title`).
+--- @return string|nil
 function M.create(name, opts)
     opts = opts or {}
     local options = cfg()
@@ -619,6 +712,7 @@ function M.create(name, opts)
     local category = opts.category or options.default_category or "[[Category - Green Task]]"
     local priority = opts.priority or options.default_priority or "[[Priority - Medium]]"
 
+    --- @type string[]
     local lines = {
         "---",
         'categories:',
@@ -663,30 +757,38 @@ function M.create(name, opts)
     return path
 end
 
----@class vault.TasksDoctorIssue
----@field kind string
----@field path string
----@field stem string
----@field title string
----@field status_raw string|nil
----@field status_normalized string|nil
+--- A single issue found by the doctor scan.
+--- @class vault.TasksDoctorIssue
+--- @field kind string Category of issue (e.g. `"missing-status"`, `"unknown-status"`, `"non-wikilink-status"`).
+--- @field path string Absolute path to the offending task file.
+--- @field stem string Filename stem of the offending task.
+--- @field title string Title of the offending task.
+--- @field status_raw string|nil Raw status value read from frontmatter.
+--- @field status_normalized string|nil Normalised form of the status (may be unknown).
 
----@class vault.TasksDoctorReport
----@field scanned integer
----@field issues vault.TasksDoctorIssue[]
----@field fixed integer
+--- Aggregated report returned by `M.doctor()`.
+--- @class vault.TasksDoctorReport
+--- @field scanned integer Total number of task files examined.
+--- @field issues vault.TasksDoctorIssue[] List of problems found.
+--- @field fixed integer Number of issues automatically repaired (only when `fix = true`).
 
----@param args table|nil
----@return vault.TasksDoctorReport
+--- Scan all task files for frontmatter quality issues and optionally repair them.
+--- @param args table|nil Options table; set `args.fix = true` to apply automatic fixes.
+--- @return vault.TasksDoctorReport
 function M.doctor(args)
     args = args or {}
     local fix = args.fix == true
+    --- @type vault.TasksDoctorReport
     local report = {
         scanned = 0,
         issues = {},
         fixed = 0,
     }
 
+    --- @param kind string
+    --- @param path string
+    --- @param values table<string, any>|nil
+    --- @param normalized string|nil
     local function add_issue(kind, path, values, normalized)
         local stem = stem_from_path(path)
         local title = (values and values.title) or stem
@@ -737,10 +839,15 @@ function M.doctor(args)
     return report
 end
 
----@param path string
----@param force boolean|nil
----@return string|nil, string|nil
+--- Manually spawn the next recurring instance of a task that already has a repeat rule.
+--- When `force` is `false` (default) the call is a no-op if `last_recur_spawned` is set.
+--- Returns `(new_path, nil)` on success or `(nil, error_message)` on failure.
+--- @param path string Absolute path to the source (parent) task file.
+--- @param force boolean|nil When `true`, spawns even if a child was already created.
+--- @return string|nil new_path
+--- @return string|nil error_message
 function M.recur_spawn(path, force)
+    --- @type vault.TasksNote.RecurValues
     local values = shared.read_frontmatter_fields(path, {
         "title",
         "status",
@@ -811,9 +918,14 @@ function M.recur_spawn(path, force)
     return created, nil
 end
 
----@param path string
----@return string|nil, string|nil
+--- Preview the wikilink that would be written as the due date of the next recurring instance.
+--- Returns `(wikilink_string, nil)` on success or `(nil, error_message)` when the rule is
+--- absent or the next date cannot be computed.
+--- @param path string Absolute path to the task file.
+--- @return string|nil next_due_wikilink
+--- @return string|nil error_message
 function M.recur_preview(path)
+    --- @type vault.TasksNote.RecurValues
     local values = shared.read_frontmatter_fields(path, {
         "repeat",
         "due",
@@ -832,7 +944,11 @@ function M.recur_preview(path)
     return iso_to_wikilink(next_iso), nil
 end
 
----@return integer, integer
+--- Walk all task files and spawn a new recurring instance for every completed task
+--- that has a repeat rule and has not yet had its successor created.
+--- Returns `(scanned, spawned)` counts.
+--- @return integer scanned Total files examined.
+--- @return integer spawned Number of new recurring tasks created.
 function M.recur_sweep()
     local scanned = 0
     local spawned = 0

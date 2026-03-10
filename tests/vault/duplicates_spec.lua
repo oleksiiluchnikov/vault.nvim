@@ -192,6 +192,38 @@ describe("vault.duplicates.scan", function()
         assert.are.equal(1, vim.tbl_count(cache))
     end)
 
+    it("matches configurable stem suffix patterns like underscore timestamps", function()
+        write(tmp_root .. "/wash face.md", {
+            "# wash face",
+            "root note",
+        })
+        write(tmp_root .. "/Inbox/wash face_1772142561.md", {
+            "# wash face_1772142561",
+            "inbox note",
+        })
+
+        local duplicates = require("vault.duplicates")
+        local items = duplicates.scan("vault")
+        local found = false
+        for _, item in ipairs(items) do
+            if item.a_rel == "wash face.md" and item.b_rel == "Inbox/wash face_1772142561.md" then
+                found = true
+                break
+            end
+        end
+
+        assert.is_true(found)
+    end)
+
+    it("resolves built-in duplicate review presets", function()
+        local duplicates = require("vault.duplicates")
+        local preset = assert(duplicates.resolve_preset("easy"))
+
+        assert.are.equal("easy", preset.name)
+        assert.are.same({ "metadata", "subset" }, preset.kind_tokens)
+        assert.are.equal("kind: metadata, subset", duplicates.preset_summary(preset))
+    end)
+
     it("can filter duplicate review sets by kind aliases", function()
         local duplicates = require("vault.duplicates")
         local kinds = assert(duplicates.resolve_kind_filter({ "metadata", "body" }))
@@ -329,57 +361,91 @@ describe("vault.duplicates.scan", function()
         end
     end)
 
-    it("can exclude basenames like README.md from review and named files from related suggestions", function()
-        local duplicates = require("vault.duplicates")
-        local items = duplicates.scan("vault")
-        local saw_review_readme = false
-        for _, item in ipairs(items) do
-            if item.a_rel == "Docs/Guide/README.md" and item.b_rel == "Docs/Manual/README.md" then
-                saw_review_readme = true
-                break
+    it(
+        "can exclude basenames like README.md from review and named files from related suggestions",
+        function()
+            local duplicates = require("vault.duplicates")
+            local items = duplicates.scan("vault")
+            local saw_review_readme = false
+            for _, item in ipairs(items) do
+                if
+                    item.a_rel == "Docs/Guide/README.md"
+                    and item.b_rel == "Docs/Manual/README.md"
+                then
+                    saw_review_readme = true
+                    break
+                end
+            end
+            assert.is_true(saw_review_readme)
+
+            local buckets = assert(duplicates.resolve_related_filter({ "all" }))
+            local related_items =
+                duplicates.scan_related("vault", nil, { related_buckets = buckets })
+            local saw_related_keyboard = false
+            for _, item in ipairs(related_items) do
+                if
+                    item.a_rel == "Inbox/Build Keyboard Centric Software Environment.md"
+                    and item.b_rel == "Research/Build Keyboard Centric Software Setup.md"
+                then
+                    saw_related_keyboard = true
+                    break
+                end
+            end
+            assert.is_true(saw_related_keyboard)
+
+            config.setup({
+                root = tmp_root,
+                ext = ".md",
+                features = { watcher = false, commands = true },
+                duplicates = {
+                    review_excluded_files = { "README.md" },
+                    related_excluded_files = { "Build Keyboard Centric Software Environment.md" },
+                },
+            })
+            reset_modules()
+
+            duplicates = require("vault.duplicates")
+            items = duplicates.scan("vault")
+            for _, item in ipairs(items) do
+                assert.is_false(
+                    item.a_rel == "Docs/Guide/README.md" and item.b_rel == "Docs/Manual/README.md"
+                )
+            end
+
+            related_items = duplicates.scan_related("vault", nil, { related_buckets = buckets })
+            for _, item in ipairs(related_items) do
+                assert.is_false(
+                    item.a_rel == "Inbox/Build Keyboard Centric Software Environment.md"
+                        and item.b_rel == "Research/Build Keyboard Centric Software Setup.md"
+                )
             end
         end
-        assert.is_true(saw_review_readme)
+    )
 
-        local buckets = assert(duplicates.resolve_related_filter({ "all" }))
-        local related_items = duplicates.scan_related("vault", nil, { related_buckets = buckets })
-        local saw_related_keyboard = false
-        for _, item in ipairs(related_items) do
-            if
-                item.a_rel == "Inbox/Build Keyboard Centric Software Environment.md"
-                and item.b_rel == "Research/Build Keyboard Centric Software Setup.md"
-            then
-                saw_related_keyboard = true
-                break
-            end
-        end
-        assert.is_true(saw_related_keyboard)
-
+    it("supports regex-based exclusion patterns for review and related scans", function()
         config.setup({
             root = tmp_root,
             ext = ".md",
             features = { watcher = false, commands = true },
             duplicates = {
-                review_excluded_files = { "README.md" },
-                related_excluded_files = { "Build Keyboard Centric Software Environment.md" },
+                review_excluded_patterns = { [[^Ai/]], [[README\.md$]] },
+                related_excluded_patterns = { [[^Daily/]], [[README\.md$]] },
             },
         })
         reset_modules()
 
-        duplicates = require("vault.duplicates")
-        items = duplicates.scan("vault")
-        for _, item in ipairs(items) do
-            assert.is_false(
-                item.a_rel == "Docs/Guide/README.md" and item.b_rel == "Docs/Manual/README.md"
-            )
+        local duplicates = require("vault.duplicates")
+        local review_items = duplicates.scan("vault")
+        for _, item in ipairs(review_items) do
+            assert.is_nil(item.a_rel:match("^Ai/") or item.b_rel:match("^Ai/"))
+            assert.is_nil(item.a_rel:match("README%.md$") or item.b_rel:match("README%.md$"))
         end
 
-        related_items = duplicates.scan_related("vault", nil, { related_buckets = buckets })
+        local buckets = assert(duplicates.resolve_related_filter({ "all" }))
+        local related_items = duplicates.scan_related("vault", nil, { related_buckets = buckets })
         for _, item in ipairs(related_items) do
-            assert.is_false(
-                item.a_rel == "Inbox/Build Keyboard Centric Software Environment.md"
-                    and item.b_rel == "Research/Build Keyboard Centric Software Setup.md"
-            )
+            assert.is_nil(item.a_rel:match("^Daily/") or item.b_rel:match("^Daily/"))
+            assert.is_nil(item.a_rel:match("README%.md$") or item.b_rel:match("README%.md$"))
         end
     end)
 end)

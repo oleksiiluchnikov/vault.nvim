@@ -5,12 +5,32 @@ local state = require("vault.core.state")
 local log = require("vault.log").scope("task")
 
 -- local config = require("vault.config")
-local data = require("vault.tasks.task.data")
+-- local data = require("vault.tasks.task.data")
+
+--- Metadata fields that can be embedded in a task line using the `[field:: value]` syntax.
+--- @alias vault.Task.MetadataField "id"|"created"|"due"|"start"|"schedule"|"completed"|"priority"|"repeat"
 
 --- @class vault.Task.Data: vault.Object
+--- @field line string Raw task line as it appears in a note.
+--- @field tags string[]|fun(): string[] Tags extracted from the task line (e.g. `#tag`).
+--- @field sources vault.Sources.map Map of note slugs to their occurrence sets.
+--- @field is_nested boolean Whether this task is a sub-task of another.
+--- @field wikilinks string[] Wikilink targets referenced in the task line.
+--- @field status string Status character from the checkbox, e.g. `" "`, `"x"`, `"-"`.
+--- @field content string Task description with status marker and metadata stripped.
+--- @field count integer Number of distinct notes that contain this task.
+--- @field occurences integer Total number of line-level occurrences across all notes.
+--- @field id string Task plugin identifier (empty string when absent).
+--- @field created string Creation date metadata field value (empty string when absent).
+--- @field due string Due date metadata field value (empty string when absent).
+--- @field start string Start date metadata field value (empty string when absent).
+--- @field schedule string Schedule metadata field value (empty string when absent).
+--- @field completed string Completion date metadata field value (empty string when absent).
+--- @field priority string|number Priority metadata field value (empty string when absent).
+--- @field repeat string Recurrence rule metadata field value (empty string when absent).
 local TaskData = Object("VaultTaskData")
 
---- @alias vault.Task.Data.partial table - The partial Data of the task.
+--- @alias vault.Task.Data.partial { line?: string, tags?: string[]|fun(): string[], sources?: table<string, table|boolean>, is_nested?: boolean, wikilinks?: string[], id?: string, created?: string, due?: string, start?: string, schedule?: string, completed?: string, priority?: string|number, repeat?: string }
 
 --- @param this vault.Task.Data.partial
 function TaskData:init(this)
@@ -37,6 +57,7 @@ function TaskData:init(this)
 
 
     -- Parse metadata fields
+    --- @type vault.Task.MetadataField[]
     local metadata_fields = {
         "id",
         "created",
@@ -84,6 +105,7 @@ end
 --- @field data vault.Task.Data - The Data of the task.
 --- @field init fun(self: vault.Task, this: vault.Task.Data.name|vault.Task.Data.partial): vault.Task
 --- @field add_slug fun(self: vault.Task, slug: string): vault.Task - Add a slug to the `self.Data.sources` table.
+--- @field rename fun(self: vault.Task, name: vault.Task.Data.name, verbose?: boolean): vault.Task
 local Task = Object("VaultTask")
 
 --- Create a new |vault.Task| instance.
@@ -118,17 +140,17 @@ function Task:rename(name, verbose)
     --- @type vault.Note.constructor
     local Note = state.get_global_key("class.vault.Note") or require("vault.notes.note")
 
-    --- @type table<string, vault.source.lnums> - A table of paths to update.
-    local paths_to_update = {}
+    --- @type table<vault.path, vault.source.lnums> - A table of paths to update.
+    local paths_to_update = {} ---@type table<string, vault.source.lnums>
     for slug, lnums in pairs(self.data.sources) do
         local path = utils.slug_to_path(slug)
         paths_to_update[path] = lnums
     end
 
-    local old_name = self.data.line
-    local new_name = name
+    local old_name = self.data.line ---@type string
+    local new_name = name ---@type string
 
-    local message = ""
+    local message = "" ---@type string
     if verbose == true then
         message = self.data.line .. " -> " .. name
     end

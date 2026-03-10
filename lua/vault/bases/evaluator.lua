@@ -17,7 +17,6 @@
 --- @module vault.bases.evaluator
 
 local config = require("vault.config")
-local utils = require("vault.utils")
 
 local M = {}
 
@@ -78,7 +77,6 @@ local function tokenize(input)
 
         -- Double-quoted string
         elseif ch == '"' then
-            local start = pos + 1
             pos = pos + 1
             local parts = {}
             while pos <= len do
@@ -99,7 +97,6 @@ local function tokenize(input)
 
         -- Single-quoted string
         elseif ch == "'" then
-            local start = pos + 1
             pos = pos + 1
             local parts = {}
             while pos <= len do
@@ -673,7 +670,7 @@ local eval_node
 --- @param args any[] Evaluated argument values
 --- @param ctx vault.bases.EvalContext
 --- @return any
-local function eval_method(obj, method, args, ctx)
+local function eval_method(obj, method, args, _ctx)
     -- nil/missing values: isEmpty → true, everything else → nil/false
     if obj == nil then
         if method == "isEmpty" then return true end
@@ -1025,7 +1022,7 @@ end
 --- @param args any[]
 --- @param ctx vault.bases.EvalContext
 --- @return any
-local function eval_global_function(name, args, ctx)
+local function eval_global_function(name, args, _ctx)
     if name == "date" then
         local s = args[1]
         if not s then

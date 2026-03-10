@@ -1,3 +1,26 @@
+---@class vault.Utils
+---@field validate_path fun(path: string): nil
+---@field path_to_relpath fun(path: vault.path): vault.relpath
+---@field path_to_slug fun(path: vault.path): vault.slug
+---@field path_to_stem fun(path: vault.path): vault.stem
+---@field path_to_basename fun(path: vault.path): string
+---@field path_to_dirname fun(path: vault.path): string
+---@field relpath_to_path fun(relpath: string): string
+---@field relpath_to_slug fun(relpath: string): vault.slug
+---@field slug_to_path fun(slug: vault.slug): string
+---@field slug_to_relpath fun(slug: vault.slug): string
+---@field is_tag fun(tag_name: vault.Tag.Data.name): boolean
+---@field validate_tag_name fun(tag_name: vault.Tag.Data.name): nil
+---@field is_flatten_list fun(tbl: table, expected_type: string): boolean
+---@field warn fun(msg: string): nil
+---@field error fun(msg: string): nil
+---@field debug fun(msg: string): nil
+---@field info fun(msg: string): nil
+---@field fuzzy_match fun(a: string, b: string): boolean
+---@field match fun(a: string, b: string, match_opt: vault.enum.MatchOpts.key, case_sensitive?: boolean): boolean
+---@field generate_uuid fun(): string
+
+---@type vault.Utils
 local utils = {}
 local config = require("vault.config")
 local enums = require("vault.enums")
@@ -158,6 +181,8 @@ function utils.is_tag(tag_name)
     return true
 end
 
+--- @param tag_name vault.Tag.Data.name
+--- @return nil
 function utils.validate_tag_name(tag_name)
     tag_name = "#" .. tag_name
     if not utils.is_tag(tag_name) then
@@ -201,20 +226,28 @@ function utils.is_flatten_list(tbl, expected_type)
     return false
 end
 
+--- @param msg string
+--- @return nil
 function utils.warn(msg)
     require("vault.log").scope("utils").warn(msg)
 end
 
+--- @param msg string
+--- @return nil
 function utils.error(msg)
     require("vault.log").scope("utils").error(msg)
 end
 
+--- @param msg string
+--- @return nil
 function utils.debug(msg)
     if config.options.debug then
         require("vault.log").scope("utils").debug(msg)
     end
 end
 
+--- @param msg string
+--- @return nil
 function utils.info(msg)
     require("vault.log").scope("utils").info(msg)
 end
@@ -445,4 +478,3 @@ function utils._split_brace_for_tests(pattern)
 end
 
 return utils
-

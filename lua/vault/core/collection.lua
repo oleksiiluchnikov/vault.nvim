@@ -4,15 +4,25 @@ local utils = require("vault.utils")
 local Filter = require("vault.filter")
 local Error = require("vault.utils.error")
 
+--- @class vault.CollectionEntryWithSources: vault.CollectionEntryLike
+--- @field data vault.CollectionEntryData & { sources?: table<vault.slug, table>, name?: string, line?: string, stem?: string }
+
+--- @alias vault.CollectionValuesMapOpts { lowercase?: boolean, as_value?: boolean }
+--- @alias vault.CollectionSlugList vault.slug[]
+--- @alias vault.CollectionFilterInput string|vault.CollectionSlugList|vault.Filter|vault.Filter.option.partial|vault.Filter.option.partial[]
+
 --- @class vault.CollectionGroup: vault.Collection
 
 --- Base Collection class for managing groups of related objects
 --- @class vault.Collection: vault.Object
---- @field map table<string, any> Map of items in the collection
+--- @field map vault.CollectionMap<vault.CollectionEntryLike> Map of items in the collection
+--- @field _map vault.CollectionMap<vault.CollectionEntryLike>
 local Collection = Object("VaultCollection")
 
 function Collection:init()
+    --- @type vault.CollectionMap<vault.CollectionEntryLike>
     self.map = {}
+    --- @type vault.CollectionMap<vault.CollectionEntryLike>
     self._map = {}
 end
 
@@ -21,12 +31,12 @@ function Collection:__len()
     return vim.tbl_count(self.map)
 end
 
-function Collection:load()
+function Collection.load(_)
     error("Load method not implemented")
 end
 
 --- Push an item into the collection
---- @param item any Item to add
+--- @param item? vault.CollectionEntryLike Item to add
 function Collection:push(item)
     if not item then
         return
@@ -42,6 +52,7 @@ function Collection:push(item)
 end
 
 function Collection:push_all(items)
+    --- @cast items vault.CollectionEntryLike[]
     for _, item in pairs(items) do
         self:push(item)
     end
@@ -54,13 +65,14 @@ function Collection:count()
 end
 
 --- Convert collection to a list
---- @return table List of items
+--- @return vault.CollectionEntryLike[] List of items
 function Collection:list()
+    --- @type vault.CollectionEntryLike[]
     return vim.tbl_values(self.map)
 end
 
 --- Get a random item from the collection
---- @return any Random item from collection
+--- @return vault.CollectionEntryLike|nil Random item from collection
 function Collection:get_random()
     local items = self:list()
     if next(items) == nil then
@@ -250,6 +262,7 @@ function Collection:to_group()
         return Group(self)
     end
 
+    --- @type vault.CollectionGroup
     local copy = self.class()
     copy.map = {}
     for k, v in pairs(self.map) do
@@ -266,7 +279,7 @@ end
 --- @param value? string Optional value when using simple key/value filtering
 --- @param match_opt? vault.enum.MatchOpts.key Optional match option for simple filtering
 --- @param case_sensitive? boolean Optional case sensitivity for simple filtering
---- @return vault.Collection
+--- @return vault.CollectionGroup
 function Collection:filter(opts, value, match_opt, case_sensitive)
     if not opts then
         error(Error.MISSING_PARAMETER("opts"))
@@ -276,6 +289,7 @@ function Collection:filter(opts, value, match_opt, case_sensitive)
     if type(opts) == "string" then
         local key = opts
         match_opt = match_opt or "exact"
+        --- @type vault.CollectionMap<vault.CollectionEntryLike>
         local filtered = {}
         for id, item in pairs(self.map) do
             if item.data and item.data[key] then
@@ -295,10 +309,12 @@ function Collection:filter(opts, value, match_opt, case_sensitive)
         -- by checking that opts[1] is NOT a known NoteData search_term field.
         local NoteData = require("vault.notes.note.data")
         if not NoteData[opts[1]] then
+            --- @type table<vault.slug, boolean>
             local slug_set = {}
             for _, slug in ipairs(opts) do
                 slug_set[slug] = true
             end
+            --- @type vault.CollectionMap<vault.CollectionEntryLike>
             local filtered = {}
             for id, item in pairs(self.map) do
                 local item_slug = (item.data and item.data.slug) or id
@@ -316,7 +332,10 @@ function Collection:filter(opts, value, match_opt, case_sensitive)
         opts = Filter(opts).opts
     end
 
+    --- @cast opts vault.Filter.option.normalized[]
+
     for _, opt in ipairs(opts) do
+        --- @type string[]
         local search_keys = type(opt.search_term) == "string" and { opt.search_term }
             or opt.search_term
         local pattern = table.concat(opt.include or {}, " ")
@@ -365,11 +384,13 @@ function Collection:filter(opts, value, match_opt, case_sensitive)
 end
 
 --- Get sources map for collection items
---- @return table<string, table> Map of sources
+--- @return vault.CollectionSourcesMap<vault.CollectionEntryWithSources> Map of sources
 function Collection:sources()
+    --- @type vault.CollectionSourcesMap<vault.CollectionEntryWithSources>
     local sources_map = {}
 
     for _, item in pairs(self.map) do
+        --- @cast item vault.CollectionEntryWithSources
         if item.data and item.data.sources then
             for slug, _ in pairs(item.data.sources) do
                 if not sources_map[slug] then
@@ -388,7 +409,7 @@ end
 
 --- Get a notes with duplicate value for a specific key
 --- @param key string Key to check for duplicates
---- @return table<string, table[]> Table with values as keys and arrays of duplicate items
+--- @return vault.GroupedValuesMap<vault.CollectionEntryLike> Table with values as keys and arrays of duplicate items
 --- ```lua
 --- local notes = require("vault.notes")()
 --- local duplicates = notes:duplicates("name")
@@ -402,7 +423,9 @@ function Collection:duplicates(key)
     end
     local list = self:list()
 
+    --- @type vault.GroupedValuesMap<vault.CollectionEntryLike>
     local value_map = {}
+    --- @type vault.GroupedValuesMap<vault.CollectionEntryLike>
     local duplicates = {}
 
     -- First pass: collect items by their key values
@@ -455,8 +478,8 @@ end
 ---
 --- @param self.map table[] Array of items, each containing a 'data' field
 --- @param key string The key to extract from item.data
---- @param opts? table<{ lowercase?: boolean, as_value?: boolean }> Optional configuration
---- @return table<string,boolean|number|string> Lookup map where keys are stringified values
+--- @param opts? vault.CollectionValuesMapOpts Optional configuration
+--- @return vault.CollectionValueLookup Lookup map where keys are stringified values
 --- @error "items must be a table" when items parameter is not a table
 --- @error "key must be a string" when key parameter is not a string
 --- @error "items table is empty" when items table has no elements
@@ -515,11 +538,12 @@ function Collection:values_map_by_key(key, opts)
         opts = {}
     end
     opts = vim.tbl_extend("force", { lowercase = false, as_value = false }, opts)
+    --- @cast opts { lowercase: boolean, as_value: boolean }
     local lowercase = opts.lowercase
     local as_value = opts.as_value
 
     -- Pre-allocate result table with expected size
-    --- @type table<string,boolean|number|string>
+    --- @type vault.CollectionValueLookup
     local result = {}
 
     -- Single-pass iteration with optimized value extraction
@@ -556,6 +580,7 @@ function Collection:filter_by_source(source_slug, match_opt, case_sensitive)
     match_opt = match_opt or "exact"
     case_sensitive = case_sensitive or false
 
+    --- @type vault.CollectionMap<vault.CollectionEntryLike>
     local filtered = {}
     local search_slug = case_sensitive and source_slug or source_slug:lower()
 

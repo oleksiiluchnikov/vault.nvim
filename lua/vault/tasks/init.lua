@@ -7,23 +7,28 @@ end
 local Collection = require("vault.core.collection")
 
 -- Aliases
---- @alias vault.Tasks.map table<string, vault.Task> - Map of tasks.
---- @alias vault.Tasks.list table<integer, vault.Task> - Map of tasks.
+
+--- Keyed map of task line text → Task object.
+--- @alias vault.Tasks.map table<string, vault.Task>
+
+--- Ordered list of Task objects.
+--- @alias vault.Tasks.list table<integer, vault.Task>
 
 --- @alias VaultMap.tasks.sources vault.Sources.map - Map of sources.
 
---- @alias VaultTasksGroup vault.Tasks - Tasks that have children.
+--- Tasks collection that has been filtered to only include nested (child) tasks.
+--- @alias VaultTasksGroup vault.Tasks
 
 --- VaultTasks class represents a collection of tasks loaded from vault.
---- @class vault.Tasks: vault.Object - Retrieve tasks from vault.
---- @field map vault.Tasks.map - Map of tasks.
---- @field nested VaultTasksGroup -- Tasks that have children.
---- @field sources fun(self: vault.Tasks): VaultMap.tasks.sources - Get all sources from tasks.
---- @field list fun(self: vault.Tasks): vault.Tasks.list - Return `VaultTasks` as a `VaultArray`.
+--- @class vault.Tasks: vault.Collection
+--- @field map vault.Tasks.map Keyed map of all tasks indexed by their line text.
+--- @field nested VaultTasksGroup Tasks that have child sub-tasks.
+--- @field sources fun(self: vault.Tasks): VaultMap.tasks.sources Return the source-note map for all tasks.
+--- @field list fun(self: vault.Tasks): vault.Tasks.list Return the tasks collection as an ordered array.
 local Tasks = Collection:extend("VaultTasks")
 
---- Initializes the VaultTasks object by scanning all tasks from the vault.
---- Sets the tasks map and registers the tasks globally.
+--- Initialise the VaultTasks object by scanning all tasks from the vault.
+--- Populates `self.map` and registers this instance in global plugin state.
 --- @return nil
 function Tasks:init()
     self.map = scanner().tasks()

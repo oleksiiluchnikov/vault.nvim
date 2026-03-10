@@ -88,7 +88,6 @@ return function(opts)
     if not root_dir or vim.fn.isdirectory(root_dir) == 0 then
         error("Root directory does not exist")
     end
-    local utils = require("vault.utils")
     for _, dir in ipairs(utils.safe_globpath(root_dir, "**/", true, true)) do
         table.insert(results, dir)
     end

@@ -10,6 +10,17 @@
 --- Falls back to vim.ui.select if NUI is not available.
 local M = {}
 
+---@class vault.ui.PopupHandle
+---@field close fun()
+
+---@class vault.ui.PopupConfig
+---@field title? string
+---@field lines string[]
+---@field width integer
+---@field height integer
+---@field keymaps table<string, fun()>
+---@field on_close? fun()
+
 -- ── Highlight groups ───────────────────────────────────────────────────────
 
 local function ensure_highlights()
@@ -55,8 +66,8 @@ local function split_lines(s)
 end
 
 --- Create and mount a NUI popup with the given content and keymaps.
---- @param opts { title?: string, lines: string[], width: number, height: number, keymaps: table<string, fun()>, on_close?: fun() }
---- @return { close: fun() }
+--- @param opts vault.ui.PopupConfig
+--- @return vault.ui.PopupHandle?
 local function create_popup(opts)
     local ok_nui, Popup = pcall(require, "nui.popup")
     if not ok_nui then
@@ -216,7 +227,7 @@ end
 
 --- Show a yes/no confirmation popup.
 --- @param opts vault.ui.ConfirmOpts
---- @return { close: fun() }?
+--- @return vault.ui.PopupHandle?
 function M.confirm(opts)
     local on_yes = opts.on_yes
     local on_no = opts.on_no or function() end
@@ -270,7 +281,7 @@ end
 
 --- Show a multi-choice selection popup.
 --- @param opts vault.ui.SelectOpts
---- @return { close: fun() }?
+--- @return vault.ui.PopupHandle?
 function M.select(opts)
     local choices = opts.choices
     local on_cancel = opts.on_cancel or function() end

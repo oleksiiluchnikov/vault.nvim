@@ -1,20 +1,22 @@
 local Job = require("plenary.job")
 --- @type vault.Config|vault.Config.options
 local config = require("vault.config")
-local state = require("vault.core.state")
 --- @type vault.Note.constructor|vault.Note
 local Note = require("vault.notes.note")
 
 --- Task documentation.
 --- A task documentation is an object that represents a documentation file for a task.
 --- @class vault.Task.Documentation: vault.Note
---- @field description vault.Note.body
---- @field path vault.path
---- @field exists boolean
---- @field content string|function
+--- @field name string Display name of this documentation item.
+--- @field description vault.Note.body Content description of the documentation.
+--- @field path vault.path Absolute filesystem path to the documentation file.
+--- @field exists boolean Whether the documentation file currently exists on disk.
+--- @field content string|function Raw content string or a callable that returns it.
 local TaskDocumentation = Note:extend("VaultTaskDocumentation")
 
---- @param name string
+--- Initialise a TaskDocumentation for the given task name.
+--- @param name string Name of the task (used to derive the doc file path).
+--- @return nil
 function TaskDocumentation:init(name)
     if not name then
         error("Tag documentation name is required")
@@ -29,6 +31,9 @@ function TaskDocumentation:init(name)
     self.__index = self
 end
 
+--- Open the documentation file in the current Neovim window.
+--- Creates the file with boilerplate if it does not yet exist.
+--- @return nil
 function TaskDocumentation:open()
     if self.exists then
         vim.cmd("edit " .. vim.fn.fnameescape(self.path))
@@ -37,7 +42,11 @@ function TaskDocumentation:open()
     end
 end
 
-function TaskDocumentation:write(path)
+--- Write the documentation file at the given path, creating parent directories
+--- as needed and populating an empty buffer with a title and class/parent fields.
+--- @param path vault.path Absolute path at which to create the documentation file.
+--- @return nil
+function TaskDocumentation:write(path) -- luacheck: ignore 212
     local root_dir = config.options.root
     local parent_dir = vim.fn.fnamemodify(path, ":h")
     if not parent_dir then
@@ -64,8 +73,9 @@ function TaskDocumentation:write(path)
     vim.cmd("normal! Go")
 end
 
---- Scann content of tag documentation.
---- @return string
+--- Read and return the full content of the documentation file.
+--- Returns an empty string if the file does not exist.
+--- @return string content Raw file content, or `""` when the file is missing.
 function TaskDocumentation:content()
     local docs_dir = config.options.dirs.docs
     local path = docs_dir .. "/" .. self.name .. ".md"

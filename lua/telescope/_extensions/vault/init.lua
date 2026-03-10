@@ -76,7 +76,7 @@
 --- @field fix_preview_title? boolean,
 
 return require("telescope").register_extension({
-    setup = function(ext_config, config) end,
+    setup = function(_, _) end,
 
     exports = {
         vault = function(opts)

@@ -53,7 +53,7 @@ function callbacks.toggle_link()
     local search_start = math.max(1, col - 100)
     local md_start = search_start
     while md_start do
-        local s, e, title, mdurl = line:find(md_link_pattern, md_start)
+        local s, e, _, mdurl = line:find(md_link_pattern, md_start)
         if not s then
             break
         end
@@ -1216,7 +1216,7 @@ local function build_subcommands()
         kanban = {
             run = function(args)
                 local grid_kanban = require("vault.bases.views.kanban")
-                local filter = args[1]
+                local filter
                 local notes, desc
 
                 -- Parse key=value args anywhere in the arg list
@@ -1325,7 +1325,7 @@ local function build_subcommands()
         calendar = {
             run = function(args)
                 local cal_view = require("vault.bases.views.calendar")
-                local filter = args[1]
+                local filter
                 local notes, desc
 
                 -- Parse key=value args
@@ -1750,7 +1750,7 @@ local function build_subcommands()
                     log.warn("Unknown API function: %s", func_name)
                     return
                 end
-                api_func(unpack(args, 2))
+                api_func(table.unpack(args, 2))
             end,
             complete = function()
                 return vim.tbl_keys(require("vault.api"))
@@ -1789,7 +1789,6 @@ function callbacks.api(args)
 
     -- Walk the tree
     local node = get_subcommands()
-    local depth = 0
     for i, arg in ipairs(fargs) do
         local child = node[arg]
         if not child then
@@ -1802,7 +1801,6 @@ function callbacks.api(args)
             log.warn("Unknown subcommand: %s", table.concat(vim.list_slice(fargs, 1, i), " "))
             return
         end
-        depth = i
         -- child is a subtree or a leaf
         if type(child) == "table" and child.run then
             -- Check if there are deeper children matching the next arg
@@ -2112,8 +2110,6 @@ function callbacks.open_live_grep_picker(args)
     if args.range and args.range > 0 then
         -- Visual selection: use selected text as initial query
         local lines = vim.api.nvim_buf_get_lines(0, args.line1 - 1, args.line2, false)
-        query = table.concat(lines, "\n")
-        -- Trim to first line for grep prompt (multiline not practical)
         query = vim.trim(lines[1] or "")
     elseif args.fargs and #args.fargs > 0 then
         query = table.concat(args.fargs, " ")
@@ -2241,8 +2237,13 @@ local function collect_clause_text(args, start_index, stop_words)
     return table.concat(parts, " "), index
 end
 
+---@class vault.commands.DuplicatesClauses
+---@field dirs vault.relpath[]
+---@field tags string[]
+---@field kind_tokens vault.duplicates.Kind[]
+
 ---@param args string[]
----@return string|nil, table|nil
+---@return vault.path|nil, vault.commands.DuplicatesClauses|nil
 local function parse_duplicates_review_args(args)
     local stop_words = {
         dir = true,
@@ -2313,19 +2314,19 @@ end
 
 local DUPLICATES_CLAUSE_KEYWORDS = { "vault", "root", "dir", "tags", "kind", "preset" }
 
----@param root string|nil
----@param clauses table
----@return string
-local function resolve_duplicates_root(root, clauses)
+---@param root vault.path|nil
+---@param _clauses vault.commands.DuplicatesClauses
+---@return vault.path
+local function resolve_duplicates_root(root, _clauses)
     if root ~= nil and root ~= "" then
         return root
     end
     return require("vault.config").options.root
 end
 
----@param clauses table
+---@param clauses vault.commands.DuplicatesClauses
 ---@param path_index table<string, table>
----@return table<string, table<string, boolean>>
+---@return table<string, table<vault.path, boolean>>
 local function build_duplicates_path_filters(clauses, path_index)
     local path_filters = {}
     if not vim.tbl_isempty(clauses.dirs) then
@@ -2361,11 +2362,17 @@ local function build_duplicates_path_filters(clauses, path_index)
     return path_filters
 end
 
----@param clauses table
----@param kinds string[]|nil
+---@class vault.commands.DuplicatesFilterSpec
+---@field dirs vault.relpath[]
+---@field tags string[]
+---@field kinds vault.duplicates.Kind[]
+---@field related string[]
+
+---@param clauses vault.commands.DuplicatesClauses
+---@param _kinds vault.duplicates.Kind[]|nil
 ---@param related string[]|nil
----@return table
-local function build_duplicates_filter_spec(clauses, kinds, related)
+---@return vault.commands.DuplicatesFilterSpec
+local function build_duplicates_filter_spec(clauses, _kinds, related)
     table.sort(clauses.dirs)
     table.sort(clauses.tags)
     table.sort(clauses.kind_tokens)
@@ -2379,10 +2386,10 @@ local function build_duplicates_filter_spec(clauses, kinds, related)
     }
 end
 
----@param root string
----@param clauses table
----@param kind_tokens string[]
----@return string, table, table<string, boolean>|nil
+---@param root vault.path
+---@param clauses vault.commands.DuplicatesClauses
+---@param kind_tokens vault.duplicates.Kind[]
+---@return vault.path, table<string, table<vault.path, boolean>>, table<string, boolean>|nil
 local function build_review_request(root, clauses, kind_tokens)
     local path_index = require("vault.scanner").paths()
     local path_filters = build_duplicates_path_filters(clauses, path_index)
@@ -2810,8 +2817,8 @@ function callbacks.note_tags_picker(args)
 end
 
 --- Create a new note from the selected text, and replace the selected text with a link to the new note
---- @param args vim.api.keyset.create_user_command.command_args
-function callbacks.note_from_selected_text(args)
+--- @param _args vim.api.keyset.create_user_command.command_args
+function callbacks.note_from_selected_text(_args)
     local start_pos = vim.api.nvim_buf_get_mark(0, "<")
     local end_pos = vim.api.nvim_buf_get_mark(0, ">")
 
@@ -2969,7 +2976,7 @@ function callbacks.note(args)
     end
     table.insert(arguments, 1, note)
     -- Apply the method to the note
-    local ok, output = pcall(note[method], unpack(arguments))
+    local ok, output = pcall(note[method], table.unpack(arguments))
     if not ok then
         log.error("Error: %s", tostring(output):match("[^\n]+"))
         return
@@ -3005,7 +3012,6 @@ local function construct_notes_picker_args(input)
         args = { input[2], input[3], input[4], input[5], input[6] }
     end
     if #args == 0 then
-        args = input
         safe_find(pickers.notes(), "No notes found")
     elseif #args == 1 then
         if args[1] ~= "by" then

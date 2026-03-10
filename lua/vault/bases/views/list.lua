@@ -3,9 +3,19 @@ local M = {}
 local log = require("vault.log").scope("bases.views.list")
 local shared = require("vault.bases.views.shared")
 
+---@class vault.ListRecord
+---@field slug vault.slug
+---@field _path vault.path
+
+---@class vault.ListOpenOpts
+---@field notes? vault.Notes
+---@field columns? string[]
+---@field filter_desc? string
+---@field base? vault.Base
+
 ---@class vault.ListEditorState
 ---@field list table
----@field note_paths table<string, string>
+---@field note_paths table<vault.slug, vault.path>
 ---@field base? vault.Base
 ---@field filter_desc string
 ---@field columns string[]
@@ -21,8 +31,8 @@ local function get_List()
 end
 
 ---@param st vault.ListEditorState
----@param rec table
----@param new_status any
+---@param rec vault.ListRecord
+---@param new_status vault.bases.views.FrontmatterValue|nil
 ---@param done fun(err: string|nil)
 local function on_toggle(st, rec, new_status, done)
     local path = st.note_paths[rec.slug]
@@ -90,7 +100,7 @@ function M.reload(bufnr)
     st.list:reload(records)
 end
 
----@param opts? { notes?: vault.Notes, columns?: string[], filter_desc?: string, base?: vault.Base }
+---@param opts? vault.ListOpenOpts
 function M.open(opts)
     opts = opts or {}
     local grid = require("vault.bases.views.grid")
@@ -155,6 +165,7 @@ function M.open(opts)
             break
         end
     end
+    ---@type vault.ListEditorState
     local st = {
         list = nil,
         note_paths = {},

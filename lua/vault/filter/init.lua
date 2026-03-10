@@ -22,6 +22,27 @@ local enums = require("vault.enums")
 --- Search term to filter on.
 --- @field search_term vault.FilterOpts.search_term
 
+--- @alias vault.Filter.option.partial {
+---     search_term?: vault.FilterOpts.search_term,
+---     include?: string[]|number[]|string,
+---     exclude?: string[]|number[]|string,
+---     match_opt?: vault.enum.MatchOpts.key,
+---     mode?: vault.enum.MatchOpts.mode,
+---     case_sensitive?: boolean
+--- }
+
+--- @class vault.Filter.option.normalized
+--- @field search_term vault.FilterOpts.search_term
+--- @field include string[]|number[]
+--- @field exclude string[]|number[]
+--- @field match_opt vault.enum.MatchOpts.key
+--- @field mode vault.enum.MatchOpts.mode
+--- @field case_sensitive boolean
+
+---@class vault.FilterConstructor
+---@field init fun(self: vault.Filter, opts: vault.Filter.option.partial|vault.Filter.option.partial[], search_term?: string): nil
+---@field invert fun(self: vault.Filter): vault.Filter
+
 --- Filter tags.
 --- @class vault.Filter: vault.Object
 --- This module provides functionality for filtering notes based on various criteria.
@@ -48,14 +69,16 @@ local enums = require("vault.enums")
 --- }
 --- local filtered_notes = notes:filter(opts)
 --- ```
+---@type vault.Filter|vault.FilterConstructor
 local Filter = Object("VaultFilter")
 
 --- Convert args to opts.
 ---
 --- Table of filter opts.
---- @param opt vault.Filter.option|vault.Filter.option[]
---- @return vault.Filter.option
+---@param opt vault.Filter.option.partial|vault.Filter.option.partial[]
+---@return vault.Filter.option.partial
 local function args_to_opts(opt)
+    ---@type vault.Filter.option.partial
     local new_opts = {}
     -- try to convert to a table
     for i, v in ipairs(opt) do
@@ -85,9 +108,10 @@ end
 --- Create a new Filter object.
 ---
 --- Table of filter opts.
---- @param opts vault.Filter.option|vault.Filter.option[]
+---@param opts vault.Filter.option.partial|vault.Filter.option.partial[]
 --- Search term to filter on.
 --- @param search_term? string
+--- @return nil
 function Filter:init(opts, search_term)
     -- if not any valid
     if not opts then
@@ -104,7 +128,7 @@ function Filter:init(opts, search_term)
         opts = { opts }
     end
 
-    --- @type table<string, vault.Filter.option>
+    --- @type table<integer, vault.Filter.option.normalized>
     self.opts = {}
     for k, opt in pairs(opts) do
         -- Validate opts
@@ -120,6 +144,7 @@ function Filter:init(opts, search_term)
             error("invalid argument: must be a string: " .. vim.inspect(opt.search_term))
         end
 
+        ---@type vault.Filter.option.normalized
         self.opts[k] = {}
 
         -- Validate `search_term`
@@ -186,6 +211,7 @@ end
 -- Invert filter options
 function Filter:invert()
     for _, opt in pairs(self.opts) do
+        ---@cast opt vault.Filter.option.normalized
         opt.include = vim.tbl_filter(function(v)
             return not vim.tbl_contains(opt.exclude, v)
         end, opt.include)
@@ -199,7 +225,8 @@ function Filter:invert()
 end
 
 --- Filter
---- @alias vault.Filter.constructor fun(opts: vault.Filter.option|vault.Filter.option[], search_term?: string): vault.Filter
+--- @alias vault.Filter.constructor fun(opts: vault.Filter.option|vault.Filter.option[], search_term?: string):
+---     vault.Filter
 --- @type vault.Filter.constructor|vault.Filter
 local M = Filter
 

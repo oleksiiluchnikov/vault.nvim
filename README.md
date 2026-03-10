@@ -28,10 +28,26 @@ require("vault").setup({
   duplicates = {
     preferred_dirs = { "Inbox", "Daily", "References" },
     ignored_frontmatter_keys = { "modified", "committed" },
+    stem_suffix_patterns = {
+      [[\s\+\d\+$]],
+      [[_\d\+$]],
+    },
     review_excluded_dirs = { "Ai" },
     review_excluded_files = { "README.md" },
+    review_excluded_patterns = { [[^Ai/]], [[README\.md$]] },
     related_excluded_dirs = { "Daily", "Ai" },
     related_excluded_files = { "README.md" },
+    related_excluded_patterns = { [[^Daily/]], [[^Ai/]], [[README\.md$]] },
+    presets = {
+      easy = {
+        description = "Metadata and subset duplicates first",
+        kind = { "metadata", "subset" },
+      },
+      inbox = {
+        description = "Pairs touching Inbox",
+        dirs = { "Inbox" },
+      },
+    },
     frontmatter_normalizers = {
       title = function(value)
         return value
@@ -60,10 +76,14 @@ require("vault").setup({
 
 - `duplicates.preferred_dirs` controls which folders are favored when recommending keep `A` vs `B`
 - `duplicates.ignored_frontmatter_keys` removes noisy frontmatter keys from duplicate similarity checks
+- `duplicates.stem_suffix_patterns` strips configurable suffix regexes before same-stem duplicate grouping, so names like `note 1` and `note_1772142561` can land in normal review
 - `duplicates.review_excluded_dirs` removes whole directories such as `Ai` from same-stem `:Vault duplicates review ...` suggestions
 - `duplicates.review_excluded_files` removes noisy basenames such as `README.md` from same-stem `:Vault duplicates review ...` suggestions
+- `duplicates.review_excluded_patterns` applies regex-style exclusions against relpaths and basenames for same-stem review
 - `duplicates.related_excluded_dirs` removes whole directories such as `Daily` or `Ai` from Rust-backed `:Vault duplicates related ...` suggestions
 - `duplicates.related_excluded_files` removes noisy basenames such as `README.md` from Rust-backed `:Vault duplicates related ...` suggestions
+- `duplicates.related_excluded_patterns` applies regex-style exclusions against relpaths and basenames for related suggestions
+- `duplicates.presets` defines named review sessions for `:Vault duplicates review preset`; each preset can set `root`, `dirs`, `tags`, `kind`, and `description`
 - `duplicates.frontmatter_normalizers[key]` can normalize a frontmatter value before duplicate comparison
 - `merge.ignored_conflict_fields` suppresses conflict prompts for fields you consider noise
 - `merge.field_normalizers[key]` can normalize metadata values before conflict detection
@@ -84,6 +104,7 @@ All commands live under a single `:Vault` entry point. Running `:Vault` with no 
 |---------|-------------|
 | `:Vault fleeting [text]` | Open fleeting note popup. First line becomes title. Saves to inbox on `<Esc>`. |
 | `:Vault note new [slug]` | Create a named note (or open it if it exists). No slug = fleeting popup. |
+| `:Vault note merge [source-slug] [target-slug]` | Merge one note into another. With no args, uses the current note and opens the combined target picker. With one arg, uses the current note if present, otherwise treats the arg as source and opens the target picker. The target can be a note, resolved wikilink, or unresolved wikilink. |
 | `:'<,'>Vault note extract [slug]` | Extract visual selection into a new note, replace with `[[wikilink]]`. |
 | `:Vault today` | Open/create today's daily journal note. |
 | `:Vault today append <text>` | Append `- <text>` to today's journal without opening it. |
@@ -174,6 +195,17 @@ require("vault").setup({
 | `:Vault move [slug]` | Move note to a different directory via Telescope picker. |
 | `:Vault toggle-link` | Toggle between bare URL and `[title](url)` markdown link under cursor. |
 
+#### Merge, retarget, and promote flows
+
+- `:Vault note merge` uses the current note as source and opens the combined target picker
+- `:Vault note merge <source> <target>` merges directly without opening the target picker
+- picker targets can resolve to existing notes, resolved wikilinks, or unresolved wikilinks
+- when a bare unresolved slug uniquely matches an existing note by basename, vault.nvim canonicalizes it to that existing note before merge/promotion runs
+- in the notes picker, single-note `<C-r>` is a smart retarget flow: picking an existing target merges into it, while choosing the create row renames the source note to the current query
+- in the combined resolve UI, pressing `<CR>` with an empty filtered result list creates a target from the typed query
+- in the combined resolve UI, pressing `<C-n>` forces create from the current query even if matching results still exist
+- in the tags picker, `<C-p>` and `:Vault tags promote <tag>` use the same combined target picker
+
 ### Tags & Properties
 
 | Command | Description |
@@ -181,13 +213,26 @@ require("vault").setup({
 | `:Vault tags rename <old> <new>` | Rename tag across all notes. |
 | `:Vault tags merge <target> <s1> [s2 ...]` | Merge multiple tags into target. |
 | `:Vault tags doc <tag>` | Open/create tag documentation note. |
+| `:Vault tags promote <tag> [note-slug] [--frontmatter]` | Promote a hashtag into a canonical note link. With no slug, opens a combined target picker with all notes plus resolved and unresolved wikilinks. Rewrites inline `#tag` uses to `[[note]]` and keeps frontmatter `tags:` unchanged by default; pass `--frontmatter` to rewrite those too. |
 | `:Vault properties rename <old> <new>` | Rename frontmatter property across all notes. |
+
+To migrate a property value across the vault, use the property values picker:
+
+- `:Vault properties`
+- select a property like `status`
+- press `<CR>` to open its values
+- select `todo`
+- press `<C-r>` to batch rename that value across all matching notes
+
+For YAML/frontmatter wikilinks, prefer quoted values such as `'[[Status - Todo]]'`.
+The batch rename popup for property values uses a plain text buffer, so typing `[[...]]` is literal.
 
 ### Utilities
 
 | Command | Description |
 |---------|-------------|
-| `:Vault duplicates review [vault\|root <dir>\|dir <dir>\|tags <tag...>\|kind <set...>]` | Review duplicate-note candidates, optionally scoped by directory, tag set, or duplicate kind (`exact`, `metadata`, `subset`, `body`, `divergent`, etc.). |
+| `:Vault duplicates review [vault\|root <dir>\|dir <dir>\|tags <tag...>\|kind <set...>]` | Review duplicate-note candidates across the whole vault by default, or intentionally narrow by directory, tag set, or duplicate kind (`exact`, `metadata`, `subset`, `body`, `divergent`, etc.). |
+| `:Vault duplicates review preset [name]` | Open a Telescope picker of duplicate-review presets, or run a named preset directly. |
 | `:Vault duplicates related [likely\|maybe\|weak] [vault\|root <dir>\|dir <dir>\|tags <tag...>\|kind <set...>]` | Review Rust-ranked near-duplicate candidates where titles are strongly related even when filenames are not exact suffix copies. |
 | `:Vault trash` | Browse trashed notes. Restore or permanently delete. |
 | `:Vault merge biases` | Open the learned merge-bias file for editing. |
@@ -203,13 +248,17 @@ Each Telescope picker has buffer-local keymaps for actions. These work in both i
 | Key | Action |
 |-----|--------|
 | `<CR>` | Edit selected note |
-| `<C-r>` | Batch rename (multi-select with `<Tab>`, then `<C-r>` to open rename popup) |
+| `<C-j>` | Merge selected note into another target chosen from notes and wikilinks |
+| `<C-r>` | Smart retarget for one note (resolve UI: merge to existing target or create from query); batch rename for multi-select |
 | `<C-s>` | Re-sort results |
 | `<C-a>` | Select all entries |
 | `<C-d>` | Deselect all entries |
 | `<C-c>` | Close picker |
 
 > **Note:** Delete is available via `:Vault note delete` but is not mapped in the notes Telescope picker.
+>
+> Notes picker rows now show compact link counts on the right:
+> `out` = outgoing wikilinks, `in` = backlinks, `dang` = unresolved outgoing wikilinks.
 
 ### Tags Picker
 
@@ -219,6 +268,7 @@ Each Telescope picker has buffer-local keymaps for actions. These work in both i
 | `<C-r>` | Batch rename selected tags |
 | `<C-m>` | Merge selected tags into one |
 | `<C-e>` | Edit tag documentation note |
+| `<C-p>` | Promote selected tag into a canonical target chosen from notes and wikilinks |
 | `<C-s>` | Re-sort results |
 | `<C-a>` / `<C-d>` | Select all / deselect all |
 

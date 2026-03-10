@@ -64,7 +64,8 @@ return function(opts)
         local mark_hl = resolved and "TelescopeResultsDiffAdd" or "TelescopeResultsDiffChange"
 
         local backlinks_count = (wikilink.data and type(wikilink.data.sources) == "table")
-            and vim.tbl_count(wikilink.data.sources) or 0
+                and vim.tbl_count(wikilink.data.sources)
+            or 0
 
         local slug_hl = resolved and "TelescopeResultsNormal" or "TelescopeResultsComment"
         if resolved and colors then
@@ -163,17 +164,27 @@ return function(opts)
 
     -- Keybinding definitions: { lhs, description, action_factory }
     local keybinds = {
-        { "<C-l>",  "resolve",    "make_resolve" },
-        { "<C-b>",  "batch",      "make_batch_resolve" },
-        { "<C-a>",  "create-all", "make_batch_create" },
-        { "<C-j>",  "compare",    "make_merge" },
+        { "<C-l>", "resolve", "make_resolve" },
+        { "<C-b>", "batch", "make_batch_resolve" },
+        { "<C-a>", "create-all", "make_batch_create" },
+        { "<C-j>", "compare", "make_merge" },
     }
 
     local attach_mappings = function(prompt_bufnr, map)
         local actions = require("telescope.actions")
 
         -- <CR> — open target (resolved) or create note (unresolved)
-        actions.select_default:replace(wl_actions.make_enter(ctx))
+        if opts.on_select then
+            actions.select_default:replace(function()
+                local selection = require("telescope.actions.state").get_selected_entry()
+                actions.close(prompt_bufnr)
+                if selection and selection.value then
+                    opts.on_select(selection.value)
+                end
+            end)
+        else
+            actions.select_default:replace(wl_actions.make_enter(ctx))
+        end
 
         for _, kb in ipairs(keybinds) do
             local action = wl_actions[kb[3]](prompt_bufnr, ctx)

@@ -4,8 +4,10 @@ local state = { global = {} }
 
 --- @class vault.GlobalState
 --- @field global table<string, any>
-VaultState = VaultState or { global = {} }
-VaultState.global = VaultState.global or {}
+---@type vault.GlobalState
+local vault_state = rawget(_G, "VaultState") or { global = {} }
+vault_state.global = vault_state.global or {}
+rawset(_G, "VaultState", vault_state)
 
 --- @alias vault.StateManager.key string
 
@@ -19,7 +21,7 @@ VaultState.global = VaultState.global or {}
 --- @param key vault.StateManager.key
 --- @return any
 function state.get_global_key(key)
-    return VaultState.global[key]
+    return vault_state.global[key]
 end
 
 --- Set a global state key to a value.
@@ -33,7 +35,7 @@ end
 --- @param value any
 --- @return nil
 function state.set_global_key(key, value)
-    VaultState.global[key] = value
+    vault_state.global[key] = value
 end
 
 --- Clears all global state.
@@ -45,7 +47,7 @@ end
 --- ```
 --- @return nil
 function state.clear_all()
-    VaultState.global = {}
+    vault_state.global = {}
 end
 
 return state
