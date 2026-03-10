@@ -95,7 +95,7 @@ function M.reload(bufnr)
     end
     for _, slug in ipairs(dead) do st.note_paths[slug] = nil end
 
-    local grid = require("vault.bases.views.grid")
+    local grid = require("vault.views.grid")
     local records = grid._build_records(notes_map, st.columns, st.base)
     st.list:reload(records)
 end
@@ -103,7 +103,7 @@ end
 ---@param opts? vault.ListOpenOpts
 function M.open(opts)
     opts = opts or {}
-    local grid = require("vault.bases.views.grid")
+    local grid = require("vault.views.grid")
     local base = opts.base
 
     local columns, display_names, formula_cols, visible_columns

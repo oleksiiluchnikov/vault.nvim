@@ -893,7 +893,7 @@ function M.open_classify(opts)
             return build_classify_banner(label, count, settings.field)
         end,
     })
-    require("vault.bases.views.grid").open(grid_opts)
+    require("vault.views.grid").open(grid_opts)
 end
 
 function M.open_audit()
@@ -923,7 +923,7 @@ function M.open_audit()
             return build_audit_banner(settings.field)
         end,
     })
-    require("vault.bases.views.grid").open(grid_opts)
+    require("vault.views.grid").open(grid_opts)
 end
 
 ---@param opts? { paths?: string[], open?: boolean }
