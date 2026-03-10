@@ -5,6 +5,16 @@ local callbacks = {}
 local complete_duplicates_review
 local complete_duplicates_related
 
+local function get_vault_api()
+    local api = require("vault.api")
+    if api.open_picker_promote_tag ~= nil and api.open_picker_merge_note ~= nil and api.open_picker_retarget_note ~= nil then
+        return api
+    end
+
+    package.loaded["vault.api"] = nil
+    return require("vault.api")
+end
+
 local pickers = require("telescope._extensions.vault.pickers")
 
 --- Safe picker launch — handles nil return from empty results.
@@ -109,6 +119,7 @@ local function build_subcommands()
                 local methods = {
                     "new",
                     "rename",
+                    "merge",
                     "delete",
                     "extract",
                     "inlinks",
@@ -150,6 +161,40 @@ local function build_subcommands()
             rename = {
                 run = function(args)
                     callbacks.rename({ fargs = args })
+                end,
+            },
+            merge = {
+                run = function(args)
+                    if #args == 0 then
+                        get_vault_api().open_picker_merge_note(nil, {})
+                        return
+                    end
+
+                    if #args == 1 then
+                        local current = vim.fn.expand("%:p")
+                        if
+                            type(current) == "string"
+                            and current ~= ""
+                            and current:match("%.md$")
+                        then
+                            get_vault_api().merge_note(current, args[1], {})
+                        else
+                            get_vault_api().open_picker_merge_note(args[1], {})
+                        end
+                        return
+                    end
+
+                    get_vault_api().merge_note(args[1], args[2], {})
+                end,
+                complete = function(prefix, line)
+                    line = line or ""
+                    local args_text = line:match("note%s+merge%s*(.*)$") or ""
+                    local ends_with_space = line:match("%s$") ~= nil
+                    local args = vim.split(vim.trim(args_text), " ", { trimempty = true })
+                    if #args == 0 or (#args == 1 and not ends_with_space) then
+                        return completions.note_slugs(prefix, line, nil) or {}
+                    end
+                    return completions.wikilink_slugs(prefix, line, nil) or {}
                 end,
             },
             extract = {
@@ -317,6 +362,14 @@ local function build_subcommands()
                 complete = function(prefix, line)
                     return complete_duplicates_review(prefix, line)
                 end,
+                preset = {
+                    run = function(args)
+                        callbacks.duplicates_review_preset({ fargs = args })
+                    end,
+                    complete = function(prefix)
+                        return require("vault.duplicates").preset_names(prefix)
+                    end,
+                },
             },
             related = {
                 run = function(args)
@@ -449,7 +502,7 @@ local function build_subcommands()
                 safe_find(pickers.tags({ tags_list = args }), "No tags found")
             end,
             complete = function(prefix)
-                local subs = { "rename", "merge", "doc" }
+                local subs = { "rename", "merge", "doc", "promote" }
                 local tag_completions = completions.tags(nil, "Vault tags " .. prefix, nil) or {}
                 for _, s in ipairs(subs) do
                     if s:find(prefix, 1, true) == 1 then
@@ -496,6 +549,69 @@ local function build_subcommands()
                 end,
                 complete = function(prefix)
                     return completions.tags(nil, "Vault tags doc " .. prefix, nil) or {}
+                end,
+            },
+            promote = {
+                run = function(args)
+                    if #args == 0 then
+                        log.warn("Usage: :Vault tags promote <tag> [note-slug] [--frontmatter]")
+                        return
+                    end
+
+                    local keep_frontmatter_tags = true
+                    local parts = {}
+                    for _, arg in ipairs(args) do
+                        if arg == "--frontmatter" then
+                            keep_frontmatter_tags = false
+                        else
+                            parts[#parts + 1] = arg
+                        end
+                    end
+                    if #parts == 0 then
+                        log.warn("Usage: :Vault tags promote <tag> [note-slug] [--frontmatter]")
+                        return
+                    end
+
+                    if #parts == 1 then
+                        get_vault_api().open_picker_promote_tag(parts[1], {
+                            keep_frontmatter_tags = keep_frontmatter_tags,
+                        })
+                        return
+                    end
+
+                    get_vault_api().promote_tag(parts[1], parts[2], {
+                        keep_frontmatter_tags = keep_frontmatter_tags,
+                    })
+                end,
+                complete = function(prefix, line)
+                    line = line or ""
+                    local frontmatter_flag = "--frontmatter"
+                    local args_text = line:match("tags%s+promote%s*(.*)$") or ""
+                    local ends_with_space = line:match("%s$") ~= nil
+                    local args = vim.split(vim.trim(args_text), " ", { trimempty = true })
+
+                    if #args == 0 or (#args == 1 and not ends_with_space) then
+                        return completions.tags(nil, line, nil) or {}
+                    end
+
+                    if #args == 1 and ends_with_space then
+                        local results = completions.wikilink_slugs(nil, line, nil) or {}
+                        if frontmatter_flag:find(prefix, 1, true) == 1 then
+                            results[#results + 1] = frontmatter_flag
+                        end
+                        return results
+                    end
+
+                    if #args == 2 and not ends_with_space then
+                        local results = completions.wikilink_slugs(nil, line, nil) or {}
+                        if frontmatter_flag:find(prefix, 1, true) == 1 then
+                            results[#results + 1] = frontmatter_flag
+                        end
+                        return results
+                    end
+
+                    return frontmatter_flag:find(prefix, 1, true) == 1 and { frontmatter_flag }
+                        or {}
                 end,
             },
         },
@@ -744,7 +860,7 @@ local function build_subcommands()
 
         -- :Vault process [filter] — Grid-backed metadata editing buffer (default)
         -- Supports: base <name>, undo, orphans, leaves, empty, no-frontmatter,
-        --           dir <path>, tag <name>, empty-property <field> [value],
+        --           dir <path>, tag <name>, without-property <field>, empty-property <field> [value],
         --           title,status,tags (inline columns), <slug> (fuzzy filter)
         process = {
             run = function(args)
@@ -876,6 +992,9 @@ local function build_subcommands()
                         args[3]
                     )
                     return
+                elseif filter == "without-property" and args[2] then
+                    notes = require("vault.notes")():without_property(args[2])
+                    desc = "without property:" .. args[2]
                 else
                     notes = require("vault.notes")():filter("slug", filter, "fuzzy")
                     desc = "filter:" .. filter
@@ -900,6 +1019,20 @@ local function build_subcommands()
                         end, names)
                     end
                     return {}
+                end
+                if line and line:match("process%s+without%-property%s+") then
+                    local ok, properties = pcall(function()
+                        return require("vault.scanner").properties()
+                    end)
+                    if not ok or type(properties) ~= "table" then
+                        return {}
+                    end
+                    local query = line:match("process%s+without%-property%s+(.*)$") or ""
+                    local keys = vim.tbl_keys(properties)
+                    table.sort(keys)
+                    return vim.tbl_filter(function(s)
+                        return s:find(query, 1, true) == 1
+                    end, keys)
                 end
                 local col_arg = line and line:match("process%s+([^%s]*,[^%s]*)$")
                 if col_arg then
@@ -981,6 +1114,7 @@ local function build_subcommands()
                     "no-frontmatter",
                     "dir",
                     "tag",
+                    "without-property",
                     "empty-property",
                     "candidates-delete",
                     "group_by=",
@@ -1314,6 +1448,61 @@ local function build_subcommands()
                     columns = { "slug", "title", "tags", "status" },
                 })
             end,
+        },
+
+        -- :Vault classify — safe metadata-only taxonomy classification queue
+        classify = {
+            run = function(args)
+                if args[1] == "all" then
+                    require("vault.taxonomy").open_classify({
+                        dirs = false,
+                        filter_desc = "classify:all",
+                    })
+                    return
+                end
+                if args[1] and args[1] ~= "" then
+                    require("vault.taxonomy").open_classify({
+                        dirs = { args[1] },
+                        filter_desc = "classify:" .. args[1],
+                    })
+                    return
+                end
+                require("vault.taxonomy").open_classify()
+            end,
+            complete = function(prefix)
+                local dirs = completions.dirs(prefix, "Vault classify " .. (prefix or ""), nil) or {}
+                table.insert(dirs, 1, "all")
+                return vim.tbl_filter(function(item)
+                    return item:find(prefix or "", 1, true) == 1
+                end, dirs)
+            end,
+        },
+
+        -- :Vault taxonomy <subcommand> — preview/apply taxonomy-driven renames
+        taxonomy = {
+            run = function()
+                log.info("Subcommands: audit, preview, apply, undo-last")
+            end,
+            audit = {
+                run = function()
+                    require("vault.taxonomy").open_audit()
+                end,
+            },
+            preview = {
+                run = function()
+                    require("vault.taxonomy").preview()
+                end,
+            },
+            apply = {
+                run = function()
+                    require("vault.taxonomy").apply()
+                end,
+            },
+            ["undo-last"] = {
+                run = function()
+                    require("vault.taxonomy").undo_last()
+                end,
+            },
         },
 
         -- :Vault stats — progress dashboard showing vault health metrics
@@ -2122,24 +2311,14 @@ local function parse_duplicates_review_args(args)
         }
 end
 
-local DUPLICATES_CLAUSE_KEYWORDS = { "vault", "root", "dir", "tags", "kind" }
+local DUPLICATES_CLAUSE_KEYWORDS = { "vault", "root", "dir", "tags", "kind", "preset" }
 
 ---@param root string|nil
 ---@param clauses table
 ---@return string
 local function resolve_duplicates_root(root, clauses)
-    local has_filters = not vim.tbl_isempty(clauses.dirs)
-        or not vim.tbl_isempty(clauses.tags)
-        or not vim.tbl_isempty(clauses.kind_tokens)
     if root ~= nil and root ~= "" then
         return root
-    end
-    if has_filters then
-        return require("vault.config").options.root
-    end
-    local current = vim.fn.expand("%:p")
-    if type(current) == "string" and current ~= "" and current:match("%.md$") then
-        return vim.fn.fnamemodify(current, ":h")
     end
     return require("vault.config").options.root
 end
@@ -2198,6 +2377,65 @@ local function build_duplicates_filter_spec(clauses, kinds, related)
         kinds = vim.deepcopy(clauses.kind_tokens),
         related = vim.deepcopy(related),
     }
+end
+
+---@param root string
+---@param clauses table
+---@param kind_tokens string[]
+---@return string, table, table<string, boolean>|nil
+local function build_review_request(root, clauses, kind_tokens)
+    local path_index = require("vault.scanner").paths()
+    local path_filters = build_duplicates_path_filters(clauses, path_index)
+
+    local kinds = nil
+    if not vim.tbl_isempty(kind_tokens) then
+        local kind_err
+        kinds, kind_err = require("vault.duplicates").resolve_kind_filter(kind_tokens)
+        if not kinds then
+            error(kind_err or "Unknown duplicate kind filter")
+        end
+    end
+
+    return root, path_filters, kinds
+end
+
+---@param preset_name string
+---@return boolean
+local function run_duplicate_review_preset(preset_name)
+    local duplicates = require("vault.duplicates")
+    local preset, err = duplicates.resolve_preset(preset_name)
+    if not preset then
+        log.warn("%s", tostring(err or "Unknown duplicate preset"))
+        return false
+    end
+
+    local root = resolve_duplicates_root(preset.root, {
+        dirs = vim.deepcopy(preset.dirs),
+        tags = vim.deepcopy(preset.tags),
+        kind_tokens = vim.deepcopy(preset.kind_tokens),
+    })
+    local ok, resolved_root, path_filters, kinds = pcall(build_review_request, root, {
+        dirs = vim.deepcopy(preset.dirs),
+        tags = vim.deepcopy(preset.tags),
+        kind_tokens = vim.deepcopy(preset.kind_tokens),
+    }, preset.kind_tokens)
+    if not ok then
+        log.warn("%s", tostring(resolved_root))
+        return false
+    end
+
+    duplicates.review(resolved_root, {
+        path_filters = next(path_filters) and path_filters or nil,
+        kinds = kinds,
+        filter_spec = {
+            preset = preset.name,
+            dirs = vim.deepcopy(preset.dirs),
+            tags = vim.deepcopy(preset.tags),
+            kinds = vim.deepcopy(preset.kind_tokens),
+            related = {},
+        },
+    })
+    return true
 end
 
 ---@param values string[]
@@ -2368,20 +2606,14 @@ function callbacks.duplicates_review(args)
     end
     root = resolve_duplicates_root(root, clauses)
 
-    local path_index = require("vault.scanner").paths()
-    local path_filters = build_duplicates_path_filters(clauses, path_index)
-
-    local kinds = nil
-    if not vim.tbl_isempty(clauses.kind_tokens) then
-        local kind_err
-        kinds, kind_err = require("vault.duplicates").resolve_kind_filter(clauses.kind_tokens)
-        if not kinds then
-            log.warn("%s", tostring(kind_err or "Unknown duplicate kind filter"))
-            return
-        end
+    local ok, resolved_root, path_filters, kinds =
+        pcall(build_review_request, root, clauses, clauses.kind_tokens)
+    if not ok then
+        log.warn("%s", tostring(resolved_root))
+        return
     end
 
-    require("vault.duplicates").review(root, {
+    require("vault.duplicates").review(resolved_root, {
         path_filters = next(path_filters) and path_filters or nil,
         kinds = kinds,
         filter_spec = build_duplicates_filter_spec(clauses),
@@ -2389,6 +2621,24 @@ function callbacks.duplicates_review(args)
 end
 
 callbacks.complete_duplicates_review = complete_duplicates_review
+
+--- @param args vim.api.keyset.create_user_command.command_args
+function callbacks.duplicates_review_preset(args)
+    local preset_name = args.fargs and args.fargs[1] or nil
+    if preset_name and preset_name ~= "" then
+        run_duplicate_review_preset(preset_name)
+        return
+    end
+    safe_find(
+        pickers.duplicate_presets({
+            presets = require("vault.duplicates").presets(),
+            on_select = function(entry)
+                run_duplicate_review_preset(entry.name)
+            end,
+        }),
+        "No duplicate review presets configured"
+    )
+end
 
 --- @param args vim.api.keyset.create_user_command.command_args
 function callbacks.duplicates_related(args)

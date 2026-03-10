@@ -182,7 +182,15 @@ local function move_notes(notes, note_map, opts)
         end
 
         if not force and vim.fn.filereadable(new_path) == 1 then
-            table.insert(errors, "target already exists: " .. new_path)
+            -- On case-insensitive FS (macOS), case-only renames report the
+            -- target as existing. Compare inodes to detect this.
+            local uv = vim.uv or vim.loop
+            local old_stat = uv.fs_stat(old_path)
+            local new_stat = uv.fs_stat(new_path)
+            local same_inode = old_stat and new_stat and old_stat.ino == new_stat.ino
+            if not same_inode then
+                table.insert(errors, "target already exists: " .. new_path)
+            end
         end
     end
 
@@ -322,6 +330,8 @@ See also:
 --- @field public with_outlinks_unresolved fun(self: vault.Notes): vault.Notes.Group
 --- Notes with mismatched title and stem
 --- @field public with_title_mismatched fun(self: vault.Notes, lowercase: boolean): vault.Notes.Group
+--- Notes without a specific frontmatter property
+--- @field public without_property fun(self: vault.Notes, property_name: string): vault.Notes.Group
 --- Notes without properties
 --- @field public without_properties fun(self: vault.Notes, properties: table<string, boolean>): vault.Notes.Group
 --- Notes without tags
@@ -995,6 +1005,43 @@ end
 function Notes:reset()
     self.map = self._map
     return self
+end
+
+---@param value any
+---@return boolean
+local function is_missing_frontmatter_value(value)
+    if value == nil or value == vim.NIL then
+        return true
+    end
+    if type(value) == "string" then
+        return vim.trim(value) == ""
+    end
+    if type(value) == "table" then
+        return next(value) == nil
+    end
+    return false
+end
+
+--- Notes without a specific frontmatter property.
+--- @param property_name string
+--- @return vault.Notes
+function Notes:without_property(property_name)
+    if type(property_name) ~= "string" or property_name == "" then
+        error(Error.MISSING_PARAMETER("property_name"))
+    end
+
+    --- @type vault.Notes.map
+    local notes_without_property = {}
+    for slug, note in pairs(self.map) do
+        local fm = note.data.frontmatter
+        local value = type(fm) == "table" and (fm[property_name] or (type(fm.data) == "table" and fm.data[property_name]))
+            or nil
+        if is_missing_frontmatter_value(value) then
+            notes_without_property[slug] = note
+        end
+    end
+    self.map = notes_without_property
+    return self:to_group()
 end
 
 --- Notes without VaultProperties
