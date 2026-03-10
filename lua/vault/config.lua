@@ -47,6 +47,8 @@
 --- @field merge? { ignored_conflict_fields?: string[], field_normalizers?: table<string, fun(value:any, key:string): any>, conflict_biases?: table<string, "a"|"b"|"earliest"|"latest"|fun(conflict: table, key:string): ("a"|"b")?>, conflict_bias_behavior?: "preselect"|"auto_apply", learned_conflict_biases?: { enabled?: boolean, path?: string, behavior?: "preselect"|"auto_apply" } } Merge conflict heuristics
 --- @field duplicates? { preferred_dirs?: string[], ignored_frontmatter_keys?: string[], frontmatter_normalizers?: table<string, fun(value:string, key:string): string>, stem_suffix_patterns?: string[], review_excluded_dirs?: string[], review_excluded_files?: string[], review_excluded_patterns?: string[], related_excluded_dirs?: string[], related_excluded_files?: string[], related_excluded_patterns?: string[], presets?: table<string, { description?: string, root?: string, dirs?: string[], tags?: string[], kind?: string[] }> } Duplicate review heuristics
 --- @field taxonomy? { field?: string, reference_prefix?: string, classify?: { columns?: string[], readonly_columns?: string[], dirs?: string[]|nil }, rename?: { require_preview?: boolean, update_links?: boolean, chunk_size?: integer, skip_collisions?: boolean }, mapping?: table<string, string|{ prefix?: string, dir?: string }> } Taxonomy workflow settings
+--- @field tasks? { dir?: string, fields?: { status?: string, priority?: string, blocked_by?: string }, defaults?: { status?: string, executor?: string, category?: string, priority?: string }, status_order?: string[], priority_order?: string[], completed_statuses?: string[], aliases?: table<string, string>, transitions?: table<string, table<string, true>> } Task-note policy settings
+--- @field views? { grid?: { default_columns?: string[], identity_mode?: "conceal"|"extmark"|"visible", delete_hard_cap?: integer, create_hard_cap?: integer, row_hl?: vault.RowHlRule[]|fun(record: table, row_idx: integer): string|nil } } Shared view settings
 ---
 --- @field telescope? table Telescope configuration. Example:
 ---   ```lua
@@ -247,6 +249,7 @@ local DEFAULT_OPTIONS = {
             "Status - Archived",
         },
     },
+    tasks = {},
     notify = {
         on_write = true,
     },
@@ -315,6 +318,9 @@ local DEFAULT_OPTIONS = {
                 },
             },
         },
+    },
+    views = {
+        grid = {},
     },
     previewer = "glow", -- The previewer to use. Default: "glow"
     telescope = {

@@ -1,4 +1,5 @@
 local config = require("vault.config")
+local taxonomy_config = require("vault.taxonomy.config")
 local log = require("vault.log").scope("taxonomy")
 local utils = require("vault.utils")
 local shared = require("vault.bases.views.shared")
@@ -160,7 +161,7 @@ end
 
 ---@return vault.Taxonomy.Settings
 local function get_settings()
-    local cfg = config.options.taxonomy or {}
+    local cfg = taxonomy_config.get() or {}
     ---@type table<string, vault.Taxonomy.MappingEntry>
     local mapping = {}
     for kind, entry in pairs(cfg.mapping or {}) do
@@ -612,16 +613,18 @@ end
 
 ---@param paths vault.path[]
 ---@param choice string
-function M.apply_choice_to_paths(paths, choice)
+---@param field? string
+function M.apply_choice_to_paths(paths, choice, field)
     local settings = get_settings()
+    field = field or settings.field
     if type(choice) ~= "string" or choice == "" then
         return 0
     end
 
     local written = 0
     for _, path in ipairs(paths) do
-        if settings.field == "categories" then
-            local existing = shared.read_frontmatter_fields(path, { settings.field })[settings.field]
+        if field == "categories" then
+            local existing = shared.read_frontmatter_fields(path, { field })[field]
             local values = as_list(existing)
             local kept = {}
             for _, value in ipairs(values) do
@@ -631,13 +634,41 @@ function M.apply_choice_to_paths(paths, choice)
                 end
             end
             table.insert(kept, format_choice_value(choice, settings)[1])
-            shared.set_frontmatter_fields(path, { [settings.field] = kept })
+            shared.set_frontmatter_fields(path, { [field] = kept })
         else
-            shared.set_frontmatter_fields(path, { [settings.field] = format_choice_value(choice, settings) })
+            shared.set_frontmatter_fields(path, { [field] = format_choice_value(choice, settings) })
         end
         written = written + 1
     end
     return written
+end
+
+---@param field? string
+---@return { taxonomy_field: string, taxonomy_choices: string[], taxonomy_choices_provider: fun(): string[], taxonomy_apply_choice: fun(paths: vault.path[], choice: string): integer, taxonomy_create_choice: fun(query: string): string|nil }
+function M.grid_process_opts(field)
+    local settings = get_settings()
+    field = field or settings.field
+
+    return {
+        taxonomy_field = field,
+        taxonomy_choices = M.kind_choices(),
+        taxonomy_choices_provider = function()
+            return M.kind_choices()
+        end,
+        taxonomy_apply_choice = function(paths, choice)
+            return M.apply_choice_to_paths(paths, choice, field)
+        end,
+        taxonomy_create_choice = function(query)
+            local normalized = normalize_choice_text(query)
+            if normalized == "" then
+                return nil
+            end
+            if field == "categories" and settings.field == "categories" then
+                return M.ensure_category_choice(query)
+            end
+            return normalized:lower()
+        end,
+    }
 end
 
 ---@param opts? { dirs?: string[]|false }
@@ -843,23 +874,12 @@ function M.open_classify(opts)
     end
 
     local label = opts.filter_desc or ("classify:" .. settings.field)
-    require("vault.bases.views.grid").open({
+    local grid_opts = vim.tbl_extend("force", M.grid_process_opts(settings.field), {
         notes = notes,
         filter_desc = label,
         columns = settings.classify.columns,
         readonly_columns = settings.classify.readonly_columns,
         save_mode = "metadata_only",
-        taxonomy_field = settings.field,
-        taxonomy_choices = M.kind_choices(),
-        taxonomy_choices_provider = function()
-            return M.kind_choices()
-        end,
-        taxonomy_apply_choice = function(paths, choice)
-            return M.apply_choice_to_paths(paths, choice)
-        end,
-        taxonomy_create_choice = function(query)
-            return M.ensure_category_choice(query)
-        end,
         reload_notes = function()
             return M.classify_notes({ dirs = opts.dirs })
         end,
@@ -873,6 +893,7 @@ function M.open_classify(opts)
             return build_classify_banner(label, count, settings.field)
         end,
     })
+    require("vault.bases.views.grid").open(grid_opts)
 end
 
 function M.open_audit()
@@ -883,23 +904,12 @@ function M.open_audit()
         return
     end
 
-    require("vault.bases.views.grid").open({
+    local grid_opts = vim.tbl_extend("force", M.grid_process_opts(settings.field), {
         notes = notes,
         filter_desc = "taxonomy-audit",
         columns = settings.classify.columns,
         readonly_columns = settings.classify.readonly_columns,
         save_mode = "metadata_only",
-        taxonomy_field = settings.field,
-        taxonomy_choices = M.kind_choices(),
-        taxonomy_choices_provider = function()
-            return M.kind_choices()
-        end,
-        taxonomy_apply_choice = function(paths, choice)
-            return M.apply_choice_to_paths(paths, choice)
-        end,
-        taxonomy_create_choice = function(query)
-            return M.ensure_category_choice(query)
-        end,
         reload_notes = function()
             return M.audit_notes()
         end,
@@ -913,6 +923,7 @@ function M.open_audit()
             return build_audit_banner(settings.field)
         end,
     })
+    require("vault.bases.views.grid").open(grid_opts)
 end
 
 ---@param opts? { paths?: string[], open?: boolean }

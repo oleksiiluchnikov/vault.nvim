@@ -1,5 +1,6 @@
 local log = require("vault.log").scope("tasks.notes")
 local shared = require("vault.bases.views.shared")
+local tasks_config = require("vault.tasks.config")
 
 local M = {}
 
@@ -11,64 +12,6 @@ local M = {}
 --- @field status string Canonical status string, e.g. `"Status - Todo"`.
 --- @field priority string Canonical priority string, e.g. `"Priority - Medium"`.
 --- @field blocked_by string[] Stems of tasks that must complete before this one can start.
-
---- Allowed status values sorted by workflow order (lower = earlier in workflow).
---- @alias vault.TasksNote.StatusOrder table<string, integer>
-
---- @type vault.TasksNote.StatusOrder
-local STATUS_ORDER = {
-    ["Status - Backlog"] = 1,
-    ["Status - Todo"] = 2,
-    ["Status - In-Progress"] = 3,
-    ["Status - In-Review"] = 4,
-    ["Status - Done"] = 5,
-    ["Status - Failed"] = 6,
-    ["Status - Deprecated"] = 7,
-    ["Status - Archived"] = 8,
-}
-
---- Allowed priority values sorted by urgency (lower = higher priority).
---- @alias vault.TasksNote.PriorityOrder table<string, integer>
-
---- @type vault.TasksNote.PriorityOrder
-local PRIORITY_ORDER = {
-    ["Priority - Critical"] = 1,
-    ["Priority - High"] = 2,
-    ["Priority - Medium"] = 3,
-    ["Priority - Low"] = 4,
-}
-
---- Set of status strings that represent a task that is no longer actionable.
---- @type table<string, true>
-local COMPLETED_STATUS = {
-    ["Status - Done"] = true,
-    ["Status - Failed"] = true,
-    ["Status - Deprecated"] = true,
-    ["Status - Archived"] = true,
-}
-
---- Valid status-transition graph. Each key maps to the statuses it may advance to.
---- @alias vault.TasksNote.TransitionMap table<string, table<string, true>>
-
---- @type vault.TasksNote.TransitionMap
-local VALID_TRANSITIONS = {
-    ["Status - Backlog"] = { ["Status - Todo"] = true, ["Status - Archived"] = true },
-    ["Status - Todo"] = { ["Status - In-Progress"] = true, ["Status - Archived"] = true },
-    ["Status - In-Progress"] = {
-        ["Status - In-Review"] = true,
-        ["Status - Deprecated"] = true,
-        ["Status - Archived"] = true,
-    },
-    ["Status - In-Review"] = {
-        ["Status - Done"] = true,
-        ["Status - Failed"] = true,
-        ["Status - Archived"] = true,
-    },
-    ["Status - Done"] = { ["Status - Archived"] = true },
-    ["Status - Failed"] = { ["Status - Archived"] = true },
-    ["Status - Deprecated"] = { ["Status - Archived"] = true },
-    ["Status - Archived"] = {},
-}
 
 --- Maps lowercase weekday names to the Lua `os.date("%w")` convention + 1  (1=Sun..7=Sat).
 --- @type table<string, integer>
@@ -82,11 +25,38 @@ local WEEKDAY_TO_NUM = {
     saturday = 7,
 }
 
+local function status_order_map()
+    local map = {}
+    for idx, status in ipairs(tasks_config.get().status_order or {}) do
+        map[status] = idx
+    end
+    return map
+end
+
+local function priority_order_map()
+    local map = {}
+    for idx, priority in ipairs(tasks_config.get().priority_order or {}) do
+        map[priority] = idx
+    end
+    return map
+end
+
+local function completed_status_set()
+    local map = {}
+    for _, status in ipairs(tasks_config.get().completed_statuses or {}) do
+        map[status] = true
+    end
+    return map
+end
+
+local function transition_map()
+    return tasks_config.get().transitions or {}
+end
+
 --- Return the plugin-level task_notes config table (or an empty table when absent).
 --- @return table
 local function cfg()
-    local options = require("vault.config").options
-    return options.task_notes or {}
+    return tasks_config.get() or {}
 end
 
 --- Strip leading and trailing whitespace from a string.
@@ -111,23 +81,11 @@ end
 --- @return string
 local function normalize_status(value)
     local candidate = unwrap_link(value)
-    if STATUS_ORDER[candidate] then
+    if status_order_map()[candidate] then
         return candidate
     end
     local lowered = candidate:lower():gsub("_", "-")
-    --- @type table<string, string>
-    local aliases = {
-        backlog = "Status - Backlog",
-        todo = "Status - Todo",
-        ["in-progress"] = "Status - In-Progress",
-        ["inprogress"] = "Status - In-Progress",
-        ["in-review"] = "Status - In-Review",
-        ["inreview"] = "Status - In-Review",
-        done = "Status - Done",
-        failed = "Status - Failed",
-        deprecated = "Status - Deprecated",
-        archived = "Status - Archived",
-    }
+    local aliases = tasks_config.get().aliases or {}
     return aliases[lowered] or candidate
 end
 
@@ -137,7 +95,7 @@ end
 --- @return string
 local function normalize_priority(value)
     local candidate = unwrap_link(value)
-    if PRIORITY_ORDER[candidate] then
+    if priority_order_map()[candidate] then
         return candidate
     end
     return "Priority - Medium"
@@ -346,7 +304,7 @@ end
 --- Return the relative path of the tasks directory inside the vault.
 --- @return string
 function M.tasks_dir_rel()
-    return cfg().dir or "Tasks"
+    return tasks_config.tasks_dir_rel()
 end
 
 --- Return the absolute filesystem path of the tasks directory.
@@ -358,16 +316,7 @@ end
 --- Return the ordered list of all recognised status strings.
 --- @return string[]
 function M.statuses()
-    return {
-        "Status - Backlog",
-        "Status - Todo",
-        "Status - In-Progress",
-        "Status - In-Review",
-        "Status - Done",
-        "Status - Failed",
-        "Status - Deprecated",
-        "Status - Archived",
-    }
+    return vim.deepcopy(tasks_config.get().status_order or {})
 end
 
 --- Return a timestamp string suitable for use in filenames (`"YYYYMMDDHHmmSS"`).
@@ -487,7 +436,7 @@ local function dependency_complete(stem, by_stem)
     if not dep then
         return false
     end
-    return COMPLETED_STATUS[dep.status] == true
+    return completed_status_set()[dep.status] == true
 end
 
 --- Return `true` when `task` has at least one incomplete dependency.
@@ -507,7 +456,7 @@ end
 --- @param task vault.TasksNote
 --- @return boolean
 function M.is_completed(task)
-    return COMPLETED_STATUS[task.status] == true
+    return completed_status_set()[task.status] == true
 end
 
 --- Return all tasks that are neither completed nor blocked, sorted by priority then status then title.
@@ -526,13 +475,15 @@ function M.pick_candidates()
         end
     end
     table.sort(candidates, function(a, b)
-        local pa = PRIORITY_ORDER[a.priority] or 99
-        local pb = PRIORITY_ORDER[b.priority] or 99
+        local priority_order = priority_order_map()
+        local status_order = status_order_map()
+        local pa = priority_order[a.priority] or 99
+        local pb = priority_order[b.priority] or 99
         if pa ~= pb then
             return pa < pb
         end
-        local sa = STATUS_ORDER[a.status] or 99
-        local sb = STATUS_ORDER[b.status] or 99
+        local sa = status_order[a.status] or 99
+        local sb = status_order[b.status] or 99
         if sa ~= sb then
             return sa < sb
         end
@@ -563,13 +514,13 @@ function M.set_status(path, new_status)
     end
     local from_status = normalize_status(task.status)
     local to_status = normalize_status(new_status)
-    if not STATUS_ORDER[to_status] then
+    if not status_order_map()[to_status] then
         return false, "Unknown status: " .. tostring(new_status)
     end
     if from_status == to_status then
         return true, nil
     end
-    local allowed = VALID_TRANSITIONS[from_status] or {}
+    local allowed = transition_map()[from_status] or {}
     if not allowed[to_status] then
         return false, string.format("Invalid transition: %s -> %s", from_status, to_status)
     end
@@ -652,7 +603,7 @@ end
 function M.next_statuses(status)
     local current = normalize_status(status)
     local out = {} ---@type string[]
-    local allowed = VALID_TRANSITIONS[current] or {}
+    local allowed = transition_map()[current] or {}
     for _, candidate in ipairs(M.statuses()) do
         if allowed[candidate] then
             table.insert(out, candidate)
@@ -818,7 +769,7 @@ function M.doctor(args)
             end
         else
             local normalized = normalize_status(raw_status)
-            if not STATUS_ORDER[normalized] then
+            if not status_order_map()[normalized] then
                 add_issue("unknown-status", path, values, normalized)
             else
                 local is_link = trim(raw_status):match("^%[%[.-%]%]$") ~= nil

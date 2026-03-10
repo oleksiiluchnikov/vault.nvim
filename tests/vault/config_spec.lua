@@ -61,6 +61,13 @@ describe("vault.config", function()
             assert.are.equal("category - ", defaults.taxonomy.reference_prefix)
             assert.are.equal("person - ", defaults.taxonomy.mapping.person.prefix)
         end)
+
+        it("should expose task and grid config namespaces", function()
+            local defaults = Config.get_defaults()
+            assert.is_table(defaults.tasks)
+            assert.is_table(defaults.views)
+            assert.is_table(defaults.views.grid)
+        end)
     end)
 
     describe("expand_dirs", function()
