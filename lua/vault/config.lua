@@ -45,7 +45,8 @@
 --- @field check_duplicate_basename? boolean Enable duplicate filename detection. Example: true
 --- @field wikilinks? { confirm_rewrite?: boolean, confirm_merge?: boolean, confirm_create?: boolean } Wikilink action confirmation settings
 --- @field merge? { ignored_conflict_fields?: string[], field_normalizers?: table<string, fun(value:any, key:string): any>, conflict_biases?: table<string, "a"|"b"|"earliest"|"latest"|fun(conflict: table, key:string): ("a"|"b")?>, conflict_bias_behavior?: "preselect"|"auto_apply", learned_conflict_biases?: { enabled?: boolean, path?: string, behavior?: "preselect"|"auto_apply" } } Merge conflict heuristics
---- @field duplicates? { preferred_dirs?: string[], ignored_frontmatter_keys?: string[], frontmatter_normalizers?: table<string, fun(value:string, key:string): string>, review_excluded_dirs?: string[], review_excluded_files?: string[], related_excluded_dirs?: string[], related_excluded_files?: string[] } Duplicate review heuristics
+--- @field duplicates? { preferred_dirs?: string[], ignored_frontmatter_keys?: string[], frontmatter_normalizers?: table<string, fun(value:string, key:string): string>, stem_suffix_patterns?: string[], review_excluded_dirs?: string[], review_excluded_files?: string[], review_excluded_patterns?: string[], related_excluded_dirs?: string[], related_excluded_files?: string[], related_excluded_patterns?: string[], presets?: table<string, { description?: string, root?: string, dirs?: string[], tags?: string[], kind?: string[] }> } Duplicate review heuristics
+--- @field taxonomy? { field?: string, reference_prefix?: string, classify?: { columns?: string[], readonly_columns?: string[], dirs?: string[]|nil }, rename?: { require_preview?: boolean, update_links?: boolean, chunk_size?: integer, skip_collisions?: boolean }, mapping?: table<string, string|{ prefix?: string, dir?: string }> } Taxonomy workflow settings
 ---
 --- @field telescope? table Telescope configuration. Example:
 ---   ```lua
@@ -164,6 +165,34 @@ local DEFAULT_OPTIONS = {
             { match = { status = "done" }, hl = "VaultRowDone" },
             { match = { status = "archived" }, hl = "VaultRowDone" },
             { match = { tags = {} }, hl = "VaultRowUntagged" },
+        },
+    },
+    taxonomy = {
+        field = "categories",
+        reference_prefix = "category - ",
+        classify = {
+            columns = { "slug", "title", "categories", "file.mtime" },
+            readonly_columns = { "slug", "title", "file.mtime" },
+            dirs = nil,
+        },
+        rename = {
+            require_preview = true,
+            update_links = true,
+            chunk_size = 25,
+            skip_collisions = true,
+        },
+        mapping = {
+            person = { prefix = "person - " },
+            software = { prefix = "software - " },
+            platform = { prefix = "platform - " },
+            initiative = { prefix = "initiative - " },
+            status = { prefix = "status - " },
+            device = { prefix = "device - " },
+            location = { prefix = "location - " },
+            meeting = { prefix = "meeting - " },
+            account = { prefix = "account - " },
+            manual = { prefix = "manual - " },
+            clipping = { prefix = "clipping - " },
         },
     },
     kanban = {
@@ -344,10 +373,38 @@ local DEFAULT_OPTIONS = {
         preferred_dirs = { "Inbox", "Daily", "References" },
         ignored_frontmatter_keys = { "modified", "committed" },
         frontmatter_normalizers = {},
+        stem_suffix_patterns = {
+            [[\s\+\d\+$]],
+            [[_\d\+$]],
+        },
         review_excluded_dirs = {},
         review_excluded_files = {},
+        review_excluded_patterns = {},
         related_excluded_dirs = {},
         related_excluded_files = {},
+        related_excluded_patterns = {},
+        presets = {
+            easy = {
+                description = "Metadata and subset duplicates first",
+                kind = { "metadata", "subset" },
+            },
+            metadata = {
+                description = "Metadata-only duplicates",
+                kind = { "metadata" },
+            },
+            body = {
+                description = "Body-different duplicate pairs",
+                kind = { "body" },
+            },
+            divergent = {
+                description = "Conflicting body duplicates",
+                kind = { "divergent" },
+            },
+            inbox = {
+                description = "Pairs touching Inbox",
+                dirs = { "Inbox" },
+            },
+        },
     },
 
     bases = {

@@ -189,6 +189,25 @@ describe("VaultNotes", function()
         end)
     end)
 
+    describe("VaultNotes:without_property()", function()
+        it("should return notes missing a specific frontmatter field", function()
+            local notes = Notes():without_property("categories")
+            assert.are.equal("VaultNotesGroup", notes.class.name)
+            assert.is_true(notes:count() > 0)
+
+            for _, note in pairs(notes.map) do
+                local fm = note.data.frontmatter
+                local value = type(fm) == "table" and (fm.categories or (type(fm.data) == "table" and fm.data.categories))
+                    or nil
+                local missing = value == nil
+                    or value == vim.NIL
+                    or (type(value) == "string" and vim.trim(value) == "")
+                    or (type(value) == "table" and next(value) == nil)
+                assert.is_true(missing)
+            end
+        end)
+    end)
+
     describe("VaultNotes:reset()", function()
         it("should restore original map", function()
             local notes = Notes()

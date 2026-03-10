@@ -54,6 +54,13 @@ describe("vault.config", function()
             assert.are.same(defaults1, defaults2)
             assert.are_not.equal(defaults1, defaults2) -- Should be different tables
         end)
+
+        it("should include taxonomy defaults", function()
+            local defaults = Config.get_defaults()
+            assert.are.equal("categories", defaults.taxonomy.field)
+            assert.are.equal("category - ", defaults.taxonomy.reference_prefix)
+            assert.are.equal("person - ", defaults.taxonomy.mapping.person.prefix)
+        end)
     end)
 
     describe("expand_dirs", function()
