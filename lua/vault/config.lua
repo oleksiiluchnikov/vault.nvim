@@ -160,6 +160,7 @@ local DEFAULT_OPTIONS = {
     search_tool = "rg", -- The search tool to use. Default: "rg"
     process = {
         columns = { "slug", "title", "status", "tags" }, -- Default columns for :Vault process
+        identity_mode = "conceal", -- "conceal" keeps inline hidden identity; "extmark" stores row identity out-of-band
         --- @type vault.RowHlRule[]|fun(record: table, row_idx: integer): string|nil
         --- Row highlight rules applied top-to-bottom; first match wins.
         --- Each rule: { match = { field = value|{} }, hl = "HlGroup" }

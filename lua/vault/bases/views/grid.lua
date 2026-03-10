@@ -1485,6 +1485,9 @@ function M.open(opts)
   ---@type table<string, boolean>
   local readonly_columns = {}
   for _, col in ipairs(opts.readonly_columns or {}) do readonly_columns[normalize_col(col)] = true end
+  local cfg = require("vault.config")
+  local process_identity_mode = (cfg.options.process and cfg.options.process.identity_mode) or "conceal"
+  local grid_identity = slug_hidden and process_identity_mode or "visible"
 
   local session_key = build_session_key({
     filter_desc = filter_desc,
@@ -1494,6 +1497,7 @@ function M.open(opts)
     readonly_columns = sorted_true_keys(readonly_columns),
     group_by = opts.group_by or (base and group_by_from_base(base)) or nil,
     save_mode = opts.save_mode,
+    identity_mode = grid_identity,
     taxonomy_field = opts.taxonomy_field,
     taxonomy_choices = opts.taxonomy_choices,
   })
@@ -1578,7 +1582,7 @@ function M.open(opts)
     records = records,
     id_field = "slug",
     header = "winbar",
-    identity = slug_hidden and "conceal" or "visible",
+    identity = grid_identity,
     separator = "\x1f",
     empty_cell = get_empty_cell(),
     buf_name = buf_name,
