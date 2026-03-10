@@ -202,8 +202,9 @@ end
 
 --- @param col? integer - The column to get the button from.
 function Dialog:get_button(col)
-    -- col = col or vim.api.nvim_win_get_cursor(0)[2]
-    col = vim.fn.getcurpos()[5] + 1
+    if col == nil then
+        col = vim.fn.getcurpos()[5] + 1
+    end
     for _, button in ipairs(self.buttons) do
         for _, pos in ipairs(button.pos) do
             if col >= pos.col_start and col <= pos.col_end then
@@ -237,9 +238,8 @@ function Dialog:render()
     local width = 80
 
     --- render buttons as a row
-    --- @param button vault.Button
     --- @return string[]
-    local function render_as_row(button)
+    local function render_as_row()
         local lines = {}
         while #lines < self.buttons[1].view.height do
             local i = #lines + 1
@@ -259,14 +259,12 @@ function Dialog:render()
     --- @return string[]
     local function render_as_column()
         local lines = {}
-        local line = ""
         for _, btn in ipairs(self.buttons) do
             if btn.view.width > width then
                 width = btn.view.width - 2
             end
             for i = 1, self.buttons[1].view.height do
-                line = btn.lines[i]
-                table.insert(lines, line)
+                table.insert(lines, btn.lines[i])
             end
         end
         --
@@ -276,15 +274,15 @@ function Dialog:render()
         return lines
     end
 
-    local lines = {}
+    local lines
 
     if self.options.layout == "column" then
-        lines = render_as_column(self.buttons[1])
+        lines = render_as_column()
         for i, l in pairs(lines) do
             lines[i] = l .. string.rep(" ", width - vim.api.nvim_strwidth(l))
         end
     else
-        lines = render_as_row(self.buttons[1])
+        lines = render_as_row()
     end
 
     local popup = Popup({

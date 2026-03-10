@@ -56,7 +56,6 @@ end
 function Button:dehighlight(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
     for i = 1, #self.pos do
-        local line = self.pos[i].line
         local col_start = self.pos[i].col_start
         local col_end = self.pos[i].col_end
         vim.api.nvim_buf_clear_namespace(bufnr, ns_id, col_start, col_end)
@@ -74,6 +73,11 @@ function Button:add_padding(orientation)
     -- self.view = self.view or {}
     -- if orientation == "top" then
     --     table.insert(self.view, 1, self.options.padding.top.char)
+    if orientation == nil then
+        return self
+    end
+
+    return self
 end
 
 function Button:blink()

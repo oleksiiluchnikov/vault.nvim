@@ -1,6 +1,4 @@
 local state = require("vault.core.state")
---- @type vault.Config|vault.Config.options
-local config = require("vault.config")
 --- @type vault.Tag.constructor|vault.Tag
 -- local Tag = state.get_global_key("class.vault.Tag") or require("vault.tags.tag")
 
@@ -248,15 +246,6 @@ Data.lists = function(note_data)
     if not body then
         return {}
     end
-    --- @type string
-    local list_pattern = "\n-%s(.*)\n\n"
-    --- @type vault.Note.data.list
-    for list in body:gmatch(list_pattern) do
-        if list ~= nil then
-            -- TODO: implement
-        end
-    end
-
     return {}
 end
 
@@ -392,11 +381,11 @@ Data.keys = function(note_data)
 
     local lines = vim.split(body, "\n")
     for line_number, line in ipairs(lines) do
-        for key, value in line:gmatch(inline_field_pattern) do
-            if key ~= nil then
+        for key_name, value in line:gmatch(inline_field_pattern) do
+            if key_name ~= nil then
                 local start
                 for i = 1, #line do
-                    if line:sub(i, i) == key:sub(1, 1) then
+                    if line:sub(i, i) == key_name:sub(1, 1) then
                         start = i
                         break
                     end
@@ -416,7 +405,7 @@ Data.keys = function(note_data)
                         text = line,
                     },
                     data = {
-                        [key] = value,
+                        [key_name] = value,
                     },
                 }
                 table.insert(keys, key)
@@ -424,17 +413,15 @@ Data.keys = function(note_data)
         end
     end
 
-    local frontmatter = note_data.frontmatter
-
     -- compare result with result_examle
     -- print(vim.inspect(keys))
 end
 
 --- @alias VaultNoteType table
 
---- @param note_Data vault.Note.Data
+--- @param _note_data vault.Note.Data
 --- @return VaultNoteType
-Data.type = function(note_data)
+Data.type = function(_note_data)
     --- local keys = note_data.keys
     --- local type = keys.type
     -- local pattern = config.options.search_pattern.note.type or "%s#class/([A-Za-z0-9_-]+)"

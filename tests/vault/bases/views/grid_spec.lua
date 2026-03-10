@@ -684,6 +684,138 @@ describe("grid (integration)", function()
     end)
   end)
 
+  describe("refresh_current", function()
+    it("rebuilds from current files without calling reload_notes", function()
+      if not check_config() then return pending("needs vault config") end
+
+      local path = fixture_root .. "/test_note.md"
+      local bufnr = vim.api.nvim_create_buf(false, true)
+      local seen_records = nil
+      local reload_calls = 0
+
+      ge._buf_states[bufnr] = {
+        grid = {
+          reload = function(_, records)
+            seen_records = records
+          end,
+        },
+        note_paths = { ["test_note"] = path },
+        note_mtimes = {},
+        base = nil,
+        filter_desc = "grid-refresh-current",
+        columns = { "slug", "title", "status" },
+        visible_columns = { "title", "status" },
+        display_names = {},
+        formula_cols = {},
+        readonly_columns = {},
+        slug_hidden = false,
+        saving = false,
+        reload_notes = function()
+          reload_calls = reload_calls + 1
+          return { map = {} }
+        end,
+        retain_note = function()
+          return false
+        end,
+      }
+
+      ge.refresh_current(bufnr)
+
+      assert.are.equal(0, reload_calls)
+      assert.is_table(seen_records)
+      assert.are.equal(0, #seen_records)
+
+      ge._buf_states[bufnr] = nil
+      pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    end)
+
+    it("reapplies base filters to the current note set", function()
+      if not check_config() then return pending("needs vault config") end
+
+      local Base = require("vault.bases.base")
+      local path = fixture_root .. "/test_note.md"
+      local bufnr = vim.api.nvim_create_buf(false, true)
+      local seen_records = nil
+      local base = Base({
+        name = "active-only",
+        path = "/tmp/active-only.base",
+        filters = { ["and"] = { 'status == "active"' } },
+      })
+
+      ge._buf_states[bufnr] = {
+        grid = {
+          reload = function(_, records)
+            seen_records = records
+          end,
+        },
+        note_paths = { ["test_note"] = path },
+        note_mtimes = {},
+        base = base,
+        filter_desc = "grid-refresh-base-filter",
+        columns = { "slug", "title", "status" },
+        visible_columns = { "title", "status" },
+        display_names = {},
+        formula_cols = {},
+        readonly_columns = {},
+        slug_hidden = false,
+        saving = false,
+      }
+
+      ge._set_frontmatter_field(path, "status", "archived")
+      ge.refresh_current(bufnr)
+
+      assert.is_table(seen_records)
+      assert.are.equal(0, #seen_records)
+
+      ge._buf_states[bufnr] = nil
+      pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    end)
+
+    it("uses reload_notes only for explicit full reload", function()
+      if not check_config() then return pending("needs vault config") end
+
+      local Note = require("vault.notes.note")
+      local path = fixture_root .. "/test_note.md"
+      local note = Note(path)
+      local bufnr = vim.api.nvim_create_buf(false, true)
+      local seen_records = nil
+      local reload_calls = 0
+
+      ge._buf_states[bufnr] = {
+        grid = {
+          reload = function(_, records)
+            seen_records = records
+          end,
+        },
+        note_paths = {},
+        note_mtimes = {},
+        base = nil,
+        filter_desc = "grid-full-reload",
+        columns = { "slug", "title", "status" },
+        visible_columns = { "title", "status" },
+        display_names = {},
+        formula_cols = {},
+        readonly_columns = {},
+        slug_hidden = false,
+        saving = false,
+        reload_notes = function()
+          reload_calls = reload_calls + 1
+          return { map = { [note.data.slug] = note } }
+        end,
+      }
+
+      ge.reload(bufnr)
+
+      assert.are.equal(1, reload_calls)
+      assert.is_table(seen_records)
+      assert.are.equal(1, #seen_records)
+      assert.are.equal(note.data.slug, seen_records[1].slug)
+
+      ge._buf_states[bufnr] = nil
+      pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+    end)
+  end)
+
   -- ── Save with no changes ─────────────────────────────────────────────────
 
   describe("no-op save", function()

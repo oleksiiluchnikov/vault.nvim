@@ -12,6 +12,7 @@ local M = {}
 
 local log = require("vault.log").scope("bases.views.grid")
 local shared = require("vault.bases.views.shared")
+local state = require("vault.core.state")
 
 -- ─── Lazy imports (avoid circular requires at module level) ───────────────────
 
@@ -24,17 +25,36 @@ end
 local DEFAULT_COLUMNS = { "slug", "title", "status", "tags" }
 
 local READONLY_FILE_COLS = shared.READONLY_FILE_COLS
-local FILE_IMPLICIT_PROPS = shared.FILE_IMPLICIT_PROPS
+local uv = vim.uv or vim.loop
 
 local DELETE_HARD_CAP = 100
 local CREATE_HARD_CAP = 100
 
 local get_empty_cell = shared.get_empty_cell
+local get_mtime = shared.get_mtime
+local build_records
+
+local SAVE_DEPTH_KEY = "vault.process_save_depth"
+
+local function enter_process_save()
+  local depth = tonumber(state.get_global_key(SAVE_DEPTH_KEY) or 0) or 0
+  state.set_global_key(SAVE_DEPTH_KEY, depth + 1)
+end
+
+local function leave_process_save()
+  local depth = tonumber(state.get_global_key(SAVE_DEPTH_KEY) or 0) or 0
+  if depth <= 1 then
+    state.set_global_key(SAVE_DEPTH_KEY, nil)
+    return
+  end
+  state.set_global_key(SAVE_DEPTH_KEY, depth - 1)
+end
 
 -- ─── Row highlight defaults ───────────────────────────────────────────────────
 
 --- Define default highlight groups for row coloring (linked, user can override).
 local function ensure_row_hl_groups()
+  ---@type table<string, table>
   local defaults = {
     VaultRowDone     = { link = "Comment" },
     VaultRowUntagged = { link = "DiagnosticVirtualTextInfo" },
@@ -63,6 +83,7 @@ local function build_row_hl()
 
   -- Rule-based matching: first match wins
   --- @param record table
+  --- @param _ integer
   --- @return string|nil
   return function(record, _)
     for _, rule in ipairs(rules) do
@@ -91,9 +112,9 @@ end
 -- ─── Per-buffer state ─────────────────────────────────────────────────────────
 
 ---@class vault.GridEditorState
----@field grid table  Grid instance
----@field note_paths table<string, string>  slug → absolute path
----@field note_mtimes table<string, integer>  slug → mtime at snapshot time
+---@field grid table  Grid instance (vimtable.Grid)
+---@field note_paths table<vault.slug, vault.path>  slug → absolute path
+---@field note_mtimes table<vault.slug, integer>  slug → mtime at snapshot time
 ---@field base? vault.Base
 ---@field filter_desc string
 ---@field columns string[]  ALL internal column names (always includes "slug")
@@ -106,16 +127,19 @@ end
 ---@field save_mode? string
 ---@field taxonomy_field? string
 ---@field taxonomy_choices? string[]
----@field taxonomy_apply_choice? fun(paths: string[], choice: string): integer
+---@field taxonomy_choices_provider? fun(): string[]
+---@field taxonomy_apply_choice? fun(paths: vault.path[], choice: string): integer
+---@field taxonomy_create_choice? fun(query: string): string|nil
 ---@field reload_notes? fun(): vault.Notes
+---@field retain_note? fun(note: vault.Note): boolean
 ---@field statusline_builder? fun(count: integer): string
 ---@field banner_builder? fun(count: integer): string|string[]
 
 local buf_states = {} --- @type table<integer, vault.GridEditorState>
 local vt_undo = require("vimtable.undo")
-local pick_and_set_field
-local pick_set_then
 local apply_taxonomy_choice_range
+local preview_taxonomy_range
+local apply_taxonomy_range
 local banner_ns = vim.api.nvim_create_namespace("vault_grid_banner")
 
 ---@param bufnr integer
@@ -140,7 +164,9 @@ local function update_banner(bufnr, st, count)
   if type(st.banner_builder) ~= "function" then return end
   local ok, value = pcall(st.banner_builder, count)
   if not ok or value == nil then return end
+  ---@type string[]
   local lines = type(value) == "table" and value or { value }
+  ---@type { [1]: string, [2]: string }[][]
   local virt_lines = {}
   for _, line in ipairs(lines) do
     if type(line) == "string" and line ~= "" then
@@ -165,6 +191,95 @@ local function prepare_current_window_for_attach()
   end
 end
 
+---@param st vault.GridEditorState
+---@param notes_map table<string, vault.Note>
+---@return table<string, vault.Note>
+local function apply_base_filter(st, notes_map)
+  if not st.base or not st.base.has_filters or not st.base:has_filters() then
+    return notes_map
+  end
+  return st.base:match_notes(notes_map)
+end
+
+---@param st vault.GridEditorState
+---@param note vault.Note
+---@return boolean
+local function should_keep_note(st, note)
+  if type(st.retain_note) == "function" then
+    local ok, keep = pcall(st.retain_note, note)
+    if ok then
+      return keep == true
+    end
+    log.warn("Retain-note predicate failed for %s; keeping row", note.data.slug or "?")
+  end
+
+  if st.base and st.base.has_filters and st.base:has_filters() then
+    local matched = st.base:match_notes({ [note.data.slug] = note })
+    return matched[note.data.slug] ~= nil
+  end
+
+  return true
+end
+
+---@param st vault.GridEditorState
+---@return table<string, vault.Note>
+local function collect_current_notes_map(st)
+  local Note = require("vault.notes.note")
+  local notes_map = {}
+  local dead_slugs = {}
+
+  for slug, path in pairs(st.note_paths) do
+    if vim.fn.filereadable(path) == 1 then
+      local ok, note = pcall(Note, path)
+      if ok and note and should_keep_note(st, note) then
+        notes_map[note.data.slug] = note
+      end
+    else
+      table.insert(dead_slugs, slug)
+    end
+  end
+
+  for _, slug in ipairs(dead_slugs) do
+    st.note_paths[slug] = nil
+    if st.note_mtimes then st.note_mtimes[slug] = nil end
+  end
+
+  return apply_base_filter(st, notes_map)
+end
+
+---@param st vault.GridEditorState
+---@return table<string, vault.Note>
+local function collect_full_notes_map(st)
+  if type(st.reload_notes) ~= "function" then
+    return collect_current_notes_map(st)
+  end
+
+  local ok, refreshed = pcall(st.reload_notes)
+  if ok and refreshed and refreshed.map then
+    return apply_base_filter(st, refreshed.map)
+  end
+
+  log.warn("Reload filter refresh failed; keeping current note set")
+  return collect_current_notes_map(st)
+end
+
+---@param bufnr integer
+---@param st vault.GridEditorState
+---@param notes_map table<string, vault.Note>
+local function reload_grid_from_notes(bufnr, st, notes_map)
+  local records = build_records(notes_map, st.columns, st.base)
+  st.note_paths = {}
+  st.note_mtimes = {}
+  for _, rec in ipairs(records) do
+    st.note_paths[rec.slug] = rec._path
+    st.note_mtimes[rec.slug] = get_mtime(rec._path)
+  end
+
+  st.grid:reload(records)
+  update_statusline(bufnr, st, #records)
+  update_banner(bufnr, st, #records)
+end
+
 -- ─── Shared helpers (delegated to shared.lua) ─────────────────────────────────
 
 local normalize_col = shared.normalize_col
@@ -173,7 +288,13 @@ local base_key_to_col = shared.base_key_to_col
 ---@param base vault.Base
 ---@return string[], table<string,string>, string[], string[]
 local function columns_from_base(base)
-  local columns, display_names, formula_cols = {}, {}, {}
+  ---@type string[]
+  local columns = {}
+  ---@type table<string, string>
+  local display_names = {}
+  ---@type string[]
+  local formula_cols = {}
+  ---@type string[]|nil
   local order = nil
   if base.data.views and base.data.views[1] and base.data.views[1].order then
     order = base.data.views[1].order
@@ -185,7 +306,9 @@ local function columns_from_base(base)
     return DEFAULT_COLUMNS, {}, {}, DEFAULT_COLUMNS
   end
   local base_display = base:display_names()
-  local seen, has_slug = {}, false
+  ---@type table<string, boolean>
+  local seen = {}
+  local has_slug = false
   for _, key in ipairs(order) do
     local col, is_formula = base_key_to_col(key)
     if col == "slug" then has_slug = true end
@@ -224,7 +347,6 @@ local function group_by_from_base(base)
   return view.group_by
 end
 
-local get_mtime = shared.get_mtime
 local yaml_quote = shared.yaml_quote
 local validate_path_in_vault = shared.validate_path_in_vault
 local atomic_writefile = shared.atomic_writefile
@@ -232,7 +354,6 @@ local atomic_writefile = shared.atomic_writefile
 -- ─── Frontmatter I/O (delegated to shared.lua) ───────────────────────────────
 
 local read_frontmatter_fields = shared.read_frontmatter_fields
-local set_frontmatter_field = shared.set_frontmatter_field
 local set_frontmatter_fields = shared.set_frontmatter_fields
 
 -- ─── Value formatting (delegated to shared.lua) ──────────────────────────────
@@ -242,11 +363,12 @@ local parse_value = shared.parse_value
 
 -- ─── Record building ──────────────────────────────────────────────────────────
 
----@param notes_map table
+---@param notes_map table<vault.slug, vault.Note>
 ---@param columns string[]
 ---@param base? vault.Base
----@return table[]
-local function build_records(notes_map, columns, base)
+---@return table[]  flat record per note
+build_records = function(notes_map, columns, base)
+  ---@type table[]
   local records = {}
   local skipped = 0
   for slug, note in pairs(notes_map) do
@@ -254,7 +376,9 @@ local function build_records(notes_map, columns, base)
       local path = note.data and note.data.path or note.path
       if not path then return nil end
       local fm = read_frontmatter_fields(path, columns)
+      ---@type table<string, any>
       local fields = {}
+      ---@type table<string, any>
       local formula_results = {}
       if base and base:has_formulas() then
         formula_results = base:evaluate_formulas(note)
@@ -333,6 +457,7 @@ local function build_records(notes_map, columns, base)
       end
       -- Grid expects flat records: { slug = "x", title = "y", ... }
       -- Convert from editor.lua's nested { slug, path, fields } format
+      ---@type table<string, any>
       local flat = {}
       for k, v in pairs(fields) do flat[k] = v end
       flat._path = path  -- stash path for save handler
@@ -351,21 +476,28 @@ end
 
 -- ─── Build grid.Column[] from vault column spec ──────────────────────────────
 
+---@class vault.GridColumn
+---@field name string
+---@field header string
+---@field readonly boolean
+---@field format fun(value: any): string
+---@field parse fun(text: string): any
+
 ---@param visible_columns string[]
 ---@param display_names table<string, string>
 ---@param formula_cols string[]
 ---@param extra_readonly? table<string, boolean>
----@return table[]  grid.Column[]
+---@return vault.GridColumn[]
 local function build_grid_columns(visible_columns, display_names, formula_cols, extra_readonly)
   local formula_set = {}
   for _, fc in ipairs(formula_cols) do formula_set[fc] = true end
   extra_readonly = extra_readonly or {}
 
-  --- @type table[]
+  --- @type vault.GridColumn[]
   local grid_cols = {}
   for _, col in ipairs(visible_columns) do
     local is_readonly = formula_set[col] or READONLY_FILE_COLS[col] or extra_readonly[col] or false
-    --- @type table
+    --- @type vault.GridColumn
     local gc = {
       name = col,
       header = display_names[col] or col,
@@ -388,8 +520,8 @@ end
 
 ---@param st vault.GridEditorState
 ---@return fun(id: string, field: string, old: string, new: string): string, table|nil
-local function make_classify(st)
-  return function(id, field, old, new)
+local function make_classify(_)
+  return function(id, field, _, new)
     -- slug or file.slug edit → rename
     if field == "slug" or field == "file.slug" then
       local new_slug = vim.trim(new)
@@ -422,6 +554,7 @@ end
 ---@param st vault.GridEditorState
 ---@param bufnr integer
 local function snapshot_for_undo(diff, st, bufnr)
+  ---@type table<string, string[]>
   local files = {}
   for _, upd in ipairs(diff.updates) do
     local path = st.note_paths[upd.id]
@@ -429,7 +562,8 @@ local function snapshot_for_undo(diff, st, bufnr)
       files[path] = vim.fn.readfile(path)
     end
   end
-  local deleted_paths = {} --- @type table<string, string>  slug → path
+  --- @type table<string, string>  slug → path
+  local deleted_paths = {}
   for _, slug in ipairs(diff.deletes) do
     local path = st.note_paths[slug]
     if path and vim.fn.filereadable(path) == 1 then
@@ -471,7 +605,7 @@ local function snapshot_for_undo(diff, st, bufnr)
       end
     end
   end
-  --- @type vault.ProcessUndoSnapshot
+  ---@type vault.ProcessUndoSnapshot
   local payload = {
     files = files,
     created_paths = {},
@@ -494,6 +628,7 @@ end
 ---@return integer, integer, integer
 local function apply_mutations(diff, st, undo_payload)
   local n_updates, n_deletes, n_creates = 0, 0, 0
+  ---@type string
   local empty = get_empty_cell()
 
   -- Updates
@@ -555,6 +690,7 @@ local function apply_mutations(diff, st, undo_payload)
       end
     end
     -- Other fields (batched frontmatter write)
+    ---@type table<string, any>
     local fm_fields = {}
     for col, new_val in pairs(upd.fields) do
       if col ~= "dir" and col ~= "file.folder" and col ~= "file.body" then
@@ -624,10 +760,12 @@ local function apply_mutations(diff, st, undo_payload)
     if not safe_create then
       log.error("SAFETY: Skipping create — %s", create_err); goto cr_continue
     end
+    ---@type string[]
     local fm = { "---" }
     if create.fields.title then
       table.insert(fm, "title: " .. yaml_quote(create.fields.title))
     end
+    ---@type table<string, boolean>
     local skip_fields = { slug = true, title = true, dir = true, tags = true, ["file.folder"] = true }
     for col, val in pairs(create.fields) do
       if not skip_fields[col] and val ~= nil then
@@ -680,7 +818,9 @@ local function make_on_save(st)
     end
 
     -- Extract renames from diff.custom
+    ---@type { old_slug: string, new_slug: string }[]
     local renames = {}
+    ---@type table[]
     local other_custom = {}
     for _, c in ipairs(diff.custom or {}) do
       if c.type == "rename" and c.extra then
@@ -717,6 +857,8 @@ local function make_on_save(st)
       return
     end
 
+    enter_process_save()
+
     -- ── Snapshot for undo ──
     local undo_payload = snapshot_for_undo(diff, st, bufnr)
 
@@ -739,7 +881,9 @@ local function make_on_save(st)
           if del_slug then
             -- Strip identity/structural fields that should not be written to
             -- frontmatter — they are part of the file identity, not metadata.
+            ---@type table<string, any>
             local safe_fields = {}
+            ---@type table<string, boolean>
             local skip = { slug = true, ["file.slug"] = true, ["file.name"] = true,
                            ["file.folder"] = true, ["file.path"] = true, dir = true }
             for k, v in pairs(cr.fields) do
@@ -760,7 +904,8 @@ local function make_on_save(st)
     end
 
     -- ── Process renames ──
-    local n_renamed, n_patched = 0, 0
+    local n_renamed = 0
+    local n_patched = 0
     if #renames > 0 then
       local Note = require("vault.notes.note")
       local config = require("vault.config")
@@ -816,7 +961,14 @@ local function make_on_save(st)
     end
 
     local function finish_save()
-      local n_u, n_d, n_c = apply_mutations(diff, st, undo_payload)
+      local ok_apply, n_u, n_d, n_c = pcall(apply_mutations, diff, st, undo_payload)
+      if not ok_apply then
+        leave_process_save()
+        st.saving = false
+        done(tostring(n_u))
+        return
+      end
+      ---@type string[]
       local parts = {}
       if n_renamed > 0 then
         local msg = string.format("%d renamed", n_renamed)
@@ -828,17 +980,19 @@ local function make_on_save(st)
       if n_c > 0 then table.insert(parts, string.format("%d created", n_c)) end
       if #parts == 0 then parts = { "no changes" } end
       log.info("Saved: %s", table.concat(parts, ", "))
+      leave_process_save()
       st.saving = false
       done(nil)
       -- Reload the grid to rebuild snapshot from current state.
       -- Without this, incremental saves compare against the stale
       -- snapshot and re-detect already-applied changes.
-      M.reload(bufnr)
+      M.refresh_current(bufnr)
     end
 
     if #diff.deletes > 0 then
       -- Confirmation for deletes
       local confirm_ui = require("vault.ui.confirm")
+      ---@type string[]
       local preview = {}
       for i = 1, math.min(10, #diff.deletes) do
         table.insert(preview, "  - " .. diff.deletes[i])
@@ -859,11 +1013,13 @@ local function make_on_save(st)
             finish_save()
           end },
           { key = "c", label = "Cancel", action = function()
+            leave_process_save()
             st.saving = false
             done(nil)
           end },
         },
         on_cancel = function()
+          leave_process_save()
           st.saving = false
           done(nil)
         end,
@@ -880,45 +1036,17 @@ end
 function M.reload(bufnr)
   local st = buf_states[bufnr]
   if not st then return end
-  EMPTY_CELL = nil; get_empty_cell()
+  shared.reset_empty_cell(); get_empty_cell()
 
-  local notes_map = {}
-  if type(st.reload_notes) == "function" then
-    local ok, refreshed = pcall(st.reload_notes)
-    if ok and refreshed and refreshed.map then
-      notes_map = refreshed.map
-    else
-      log.warn("Reload filter refresh failed; keeping current note set")
-    end
-  else
-    local Note = require("vault.notes.note")
-    local dead_slugs = {}
-    for slug, path in pairs(st.note_paths) do
-      if vim.fn.filereadable(path) == 1 then
-        local ok, note = pcall(Note, path)
-        if ok and note then notes_map[slug] = note end
-      else
-        table.insert(dead_slugs, slug)
-      end
-    end
-    for _, slug in ipairs(dead_slugs) do
-      st.note_paths[slug] = nil
-      if st.note_mtimes then st.note_mtimes[slug] = nil end
-    end
-  end
+  reload_grid_from_notes(bufnr, st, collect_full_notes_map(st))
+end
 
-  local records = build_records(notes_map, st.columns, st.base)
-  -- Rebuild note_paths from records
-  st.note_paths = {}
-  st.note_mtimes = {}
-  for _, rec in ipairs(records) do
-    st.note_paths[rec.slug] = rec._path
-    st.note_mtimes[rec.slug] = get_mtime(rec._path)
-  end
-
-  st.grid:reload(records)
-  update_statusline(bufnr, st, #records)
-  update_banner(bufnr, st, #records)
+---@param bufnr integer
+function M.refresh_current(bufnr)
+  local st = buf_states[bufnr]
+  if not st then return end
+  shared.reset_empty_cell(); get_empty_cell()
+  reload_grid_from_notes(bufnr, st, collect_current_notes_map(st))
 end
 
 -- ─── Undo ─────────────────────────────────────────────────────────────────────
@@ -928,7 +1056,6 @@ end
 ---@param bufnr integer
 ---@param snap vault.ProcessUndoSnapshot
 function M._apply_undo(bufnr, snap)
-  local uv = vim.uv or vim.loop
   local restored, deleted, renames_reversed = 0, 0, 0
   if snap.renames then
     for _, ren in ipairs(snap.renames) do
@@ -961,12 +1088,13 @@ function M._apply_undo(bufnr, snap)
       end
     end
   end
+  ---@type string[]
   local parts = {}
   if restored > 0 then table.insert(parts, string.format("restored %d", restored)) end
   if deleted > 0 then table.insert(parts, string.format("removed %d created", deleted)) end
   if renames_reversed > 0 then table.insert(parts, string.format("reversed %d rename(s)", renames_reversed)) end
   log.info("Undo: %s", #parts > 0 and table.concat(parts, ", ") or "nothing to undo")
-  M.reload(bufnr)
+  M.refresh_current(bufnr)
 end
 
 ---@param bufnr? integer
@@ -997,7 +1125,9 @@ function M.save_range(bufnr, start_row, end_row)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local render = require("vimtable.views.grid.render")
   local vt_id = require("vimtable.identity")
+  ---@type { separator: string }
   local id_opts = { separator = render.SEP_CHAR }
+  ---@type table<string, boolean>
   local selected_ids = {}
   local header_lines = grid:state().header_lines
   for row = start_row, end_row do
@@ -1010,6 +1140,7 @@ function M.save_range(bufnr, start_row, end_row)
     end
   end
 
+  ---@type table[]
   local filtered = {}
   for _, upd in ipairs(diff.updates) do
     if selected_ids[upd.id] then table.insert(filtered, upd) end
@@ -1020,12 +1151,21 @@ function M.save_range(bufnr, start_row, end_row)
     return
   end
 
+  ---@type { updates: table[], deletes: table[], creates: table[], custom: table[], errors: table[] }
   local partial = { updates = filtered, deletes = {}, creates = {}, custom = {}, errors = {} }
+  enter_process_save()
   local undo_payload = snapshot_for_undo(partial, st, bufnr)
-  local n_u = apply_mutations(partial, st, undo_payload)
+  local ok_apply, n_u = pcall(apply_mutations, partial, st, undo_payload)
+  if not ok_apply then
+    leave_process_save()
+    st.saving = false
+    log.error("Partial save failed: %s", tostring(n_u))
+    return
+  end
   log.info("Partial save: %d updated", n_u)
   vim.schedule(function()
-    M.reload(bufnr)
+    leave_process_save()
+    M.refresh_current(bufnr)
     st.saving = false
   end)
 end
@@ -1087,7 +1227,7 @@ end
 
 -- ─── Open ─────────────────────────────────────────────────────────────────────
 
----@param opts? { notes?: vault.Notes, columns?: string[], filter_desc?: string, base?: vault.Base, group_by?: string, readonly_columns?: string[], save_mode?: string, taxonomy_field?: string, taxonomy_choices?: string[], taxonomy_apply_choice?: fun(paths: string[], choice: string): integer, reload_notes?: fun(): vault.Notes, statusline_builder?: fun(count: integer): string, banner_builder?: fun(count: integer): string|string[] }
+---@param opts? { notes?: vault.Notes, columns?: string[], filter_desc?: string, base?: vault.Base, group_by?: string, readonly_columns?: string[], save_mode?: string, taxonomy_field?: string, taxonomy_choices?: string[], taxonomy_choices_provider?: fun(): string[], taxonomy_apply_choice?: fun(paths: string[], choice: string): integer, taxonomy_create_choice?: fun(query: string): string|nil, reload_notes?: fun(): vault.Notes, retain_note?: fun(note: vault.Note): boolean, statusline_builder?: fun(count: integer): string, banner_builder?: fun(count: integer): string|string[] }
 function M.open(opts)
   opts = opts or {}
   get_empty_cell()
@@ -1096,11 +1236,15 @@ function M.open(opts)
   if vim.wo[win].winfixbuf then vim.wo[win].winfixbuf = false end
 
   local base = opts.base
+  ---@type table<string, string>
   local display_names = {}
+  ---@type string[]
   local formula_cols = {}
   local filter_desc = opts.filter_desc or "all notes"
+  ---@type string[]
   local visible_columns
 
+  ---@type string[]
   local columns
   if base then
     local vis
@@ -1156,6 +1300,7 @@ function M.open(opts)
     if c == "slug" then slug_hidden = false; break end
   end
 
+  ---@type table<string, boolean>
   local readonly_columns = {}
   for _, col in ipairs(opts.readonly_columns or {}) do readonly_columns[normalize_col(col)] = true end
 
@@ -1180,8 +1325,11 @@ function M.open(opts)
     save_mode = opts.save_mode,
     taxonomy_field = opts.taxonomy_field,
     taxonomy_choices = opts.taxonomy_choices,
+    taxonomy_choices_provider = opts.taxonomy_choices_provider,
     taxonomy_apply_choice = opts.taxonomy_apply_choice,
+    taxonomy_create_choice = opts.taxonomy_create_choice,
     reload_notes = opts.reload_notes,
+    retain_note = opts.retain_note,
     statusline_builder = opts.statusline_builder,
     banner_builder = opts.banner_builder,
   }
@@ -1192,7 +1340,8 @@ function M.open(opts)
 
   -- Initial sort from base
   local initial_sort = base and sort_from_base(base) or nil
-  local sort_keys --- @type table[]|nil
+  ---@type { col: string, dir: "asc"|"desc" }[]|nil
+  local sort_keys
   if initial_sort then
     sort_keys = { initial_sort }
   end
@@ -1330,7 +1479,7 @@ function M.open(opts)
     if not path_a or not path_b then log.warn("Cannot find note paths for merge"); return end
     require("vault.merge").merge(path_a, path_b, {
       bufnr = bufnr,
-      on_done = function() M.reload(bufnr) end,
+      on_done = function() M.refresh_current(bufnr) end,
     })
   end, vim.tbl_extend("force", kopts, { desc = "Vault: merge next note into current" }))
   vim.keymap.set("n", "gJ", function()
@@ -1346,6 +1495,7 @@ function M.open(opts)
     local scoring = require("vault.scoring")
     local snap = grid:state().snapshot
     local snap_a = snap.data and snap.data[slug_a]
+    ---@type string[]
     local tags_a = {}
     if snap_a and snap_a.tags then
       if type(snap_a.tags) == "string" and snap_a.tags ~= "" and snap_a.tags ~= get_empty_cell() then
@@ -1353,10 +1503,12 @@ function M.open(opts)
         for i, t in ipairs(tags_a) do tags_a[i] = vim.trim(t) end
       end
     end
+    ---@type { slug: string, path: string, tags: string[] }[]
     local candidates = {}
     for slug, path in pairs(st.note_paths) do
       if slug ~= slug_a then
         local snap_c = snap.data and snap.data[slug]
+        ---@type string[]
         local tags = {}
         if snap_c and snap_c.tags then
           if type(snap_c.tags) == "string" and snap_c.tags ~= "" and snap_c.tags ~= get_empty_cell() then
@@ -1399,7 +1551,7 @@ function M.open(opts)
             if not sel then return end
             require("vault.merge").merge(path_a, sel.value.path, {
               bufnr = bufnr,
-              on_done = function() M.reload(bufnr) end,
+              on_done = function() M.refresh_current(bufnr) end,
             })
           end)
           return true
@@ -1470,9 +1622,34 @@ function M.open(opts)
         apply_taxonomy_choice_range(bufnr, sr, er, true)
       end)
     end, vim.tbl_extend("force", kopts, { desc = "Vault: set taxonomy on selection and open preview" }))
+    vim.keymap.set("n", "gV", function()
+      local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+      preview_taxonomy_range(bufnr, row, row)
+    end, vim.tbl_extend("force", kopts, { desc = "Vault: preview taxonomy for current row" }))
+    vim.keymap.set("v", "gV", function()
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+      vim.schedule(function()
+        local sr = vim.fn.line("'<") - 1
+        local er = vim.fn.line("'>") - 1
+        preview_taxonomy_range(bufnr, sr, er)
+      end)
+    end, vim.tbl_extend("force", kopts, { desc = "Vault: preview taxonomy for selection" }))
+    vim.keymap.set("n", "gA", function()
+      local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+      apply_taxonomy_range(bufnr, row, row)
+    end, vim.tbl_extend("force", kopts, { desc = "Vault: apply taxonomy for current row" }))
+    vim.keymap.set("v", "gA", function()
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+      vim.schedule(function()
+        local sr = vim.fn.line("'<") - 1
+        local er = vim.fn.line("'>") - 1
+        apply_taxonomy_range(bufnr, sr, er)
+      end)
+    end, vim.tbl_extend("force", kopts, { desc = "Vault: apply taxonomy for selection" }))
   end
 
   -- Help legend
+  ---@type { group?: string, lhs?: string, desc: string }[]
   local help_items = {
     { group = "Navigation",    lhs = "h / l",       desc = "Column left / right" },
     { lhs = "j / k",          desc = "Row up / down" },
@@ -1497,6 +1674,8 @@ function M.open(opts)
   if st.taxonomy_field and st.taxonomy_choices and #st.taxonomy_choices > 0 then
     table.insert(help_items, 16, { lhs = "gk", desc = "Set taxonomy on row / selection" })
     table.insert(help_items, 17, { lhs = "gP", desc = "Set taxonomy and open preview" })
+    table.insert(help_items, 18, { lhs = "gV", desc = "Preview taxonomy for row / selection" })
+    table.insert(help_items, 19, { lhs = "gA", desc = "Apply taxonomy for row / selection" })
   end
   require("vimtable.help").setup_keymap(bufnr, help_items)
 
@@ -1557,7 +1736,7 @@ local function show_preview(bufnr, st)
   -- Compute float size
   local width = 0
   for _, l in ipairs(file_lines) do
-    local len = vim.fn.strdisplaywidth(l)
+    local len = vim.fn.strdisplaywidth(l) --[[@as integer]]
     if len > width then width = len end
   end
   width = math.min(width + 2, PREVIEW_MAX_WIDTH)
@@ -1664,10 +1843,60 @@ end
 ---@param bufnr integer
 ---@param start_row integer
 ---@param end_row integer
+---@return string[]
+local function collect_row_paths(bufnr, start_row, end_row)
+  local paths = {}
+  for _, target in ipairs(collect_row_identities(bufnr, start_row, end_row)) do
+    table.insert(paths, target.path)
+  end
+  return paths
+end
+
+---@param bufnr integer
+---@param start_row integer
+---@param end_row integer
+preview_taxonomy_range = function(bufnr, start_row, end_row)
+  local paths = collect_row_paths(bufnr, start_row, end_row)
+  if #paths == 0 then
+    log.info("No notes in selection")
+    return
+  end
+  require("vault.taxonomy").preview({ paths = paths })
+end
+
+---@param bufnr integer
+---@param start_row integer
+---@param end_row integer
+apply_taxonomy_range = function(bufnr, start_row, end_row)
+  local paths = collect_row_paths(bufnr, start_row, end_row)
+  if #paths == 0 then
+    log.info("No notes in selection")
+    return
+  end
+  local plan = require("vault.taxonomy").preview({ paths = paths, open = false })
+  local report = require("vault.taxonomy").apply({ plan = plan })
+  if report ~= nil then
+    M.refresh_current(bufnr)
+  end
+end
+
+---@param bufnr integer
+---@param start_row integer
+---@param end_row integer
 ---@param open_preview boolean
 apply_taxonomy_choice_range = function(bufnr, start_row, end_row, open_preview)
   local st = buf_states[bufnr]
-  if not st or not st.taxonomy_field or not st.taxonomy_choices or #st.taxonomy_choices == 0 then
+  if not st or not st.taxonomy_field then
+    log.warn("No taxonomy choices configured")
+    return
+  end
+  if type(st.taxonomy_choices_provider) == "function" then
+    local ok, choices = pcall(st.taxonomy_choices_provider)
+    if ok and type(choices) == "table" then
+      st.taxonomy_choices = choices
+    end
+  end
+  if not st.taxonomy_choices or #st.taxonomy_choices == 0 then
     log.warn("No taxonomy choices configured")
     return
   end
@@ -1676,25 +1905,74 @@ apply_taxonomy_choice_range = function(bufnr, start_row, end_row, open_preview)
     log.info("No notes in selection")
     return
   end
+  ---@type string[]
   local paths = {}
-  for _, target in ipairs(targets) do
-    table.insert(paths, target.path)
-  end
+  for _, target in ipairs(targets) do table.insert(paths, target.path) end
   local prompt = open_preview and "Set taxonomy + preview: " or "Set taxonomy: "
+    local ok_telescope, actions = pcall(require, "telescope.actions")
+    local ok_state, action_state = pcall(require, "telescope.actions.state")
+    local ok_finders, finders = pcall(require, "telescope.finders")
+    local ok_pickers, pickers = pcall(require, "telescope.pickers")
+    local ok_conf, conf_mod = pcall(require, "telescope.config")
+    if ok_telescope and ok_state and ok_finders and ok_pickers and ok_conf then
+      local function commit_choice(choice)
+        if not choice or choice == "" then return end
+        if type(st.taxonomy_apply_choice) == "function" then
+          st.taxonomy_apply_choice(paths, choice)
+        else
+          M.batch_set_field(bufnr, st.taxonomy_field, choice, start_row, end_row)
+        end
+        M.refresh_current(bufnr)
+        if open_preview then
+          require("vault.taxonomy").preview({ paths = paths })
+        end
+      end
+
+    pickers.new({}, {
+      prompt_title = prompt .. "(<C-n> create category)",
+      finder = finders.new_table({ results = st.taxonomy_choices }),
+      sorter = conf_mod.values.generic_sorter({}),
+      sorting_strategy = "ascending",
+      attach_mappings = function(prompt_bufnr, map)
+        actions.select_default:replace(function()
+          local selection = action_state.get_selected_entry()
+          actions.close(prompt_bufnr)
+          commit_choice(selection and selection[1] or action_state.get_current_line())
+        end)
+
+        local function create_from_query()
+          if type(st.taxonomy_create_choice) ~= "function" then return end
+          local query = vim.trim(action_state.get_current_line() or "")
+          if query == "" then return end
+          actions.close(prompt_bufnr)
+          local created = st.taxonomy_create_choice(query)
+          if created and type(st.taxonomy_choices_provider) == "function" then
+            local ok, choices = pcall(st.taxonomy_choices_provider)
+            if ok and type(choices) == "table" then
+              st.taxonomy_choices = choices
+            end
+          end
+          commit_choice(created)
+        end
+
+        map("i", "<C-n>", create_from_query)
+        map("n", "<C-n>", create_from_query)
+        return true
+      end,
+    }):find()
+    return
+  end
+
   vim.ui.select(st.taxonomy_choices, { prompt = prompt }, function(choice)
     if not choice or choice == "" then return end
-    local written = 0
     if type(st.taxonomy_apply_choice) == "function" then
-      written = st.taxonomy_apply_choice(paths, choice) or 0
+      st.taxonomy_apply_choice(paths, choice)
     else
       M.batch_set_field(bufnr, st.taxonomy_field, choice, start_row, end_row)
-      written = #paths
     end
-    if written > 0 then
-      M.reload(bufnr)
-      if open_preview then
-        require("vault.taxonomy").preview()
-      end
+    M.refresh_current(bufnr)
+    if open_preview then
+      require("vault.taxonomy").preview({ paths = paths })
     end
   end)
 end
@@ -1712,7 +1990,7 @@ function M.batch_set_field(bufnr, field, value, start_row, end_row)
     shared.set_frontmatter_fields(t.path, { [field] = value })
   end
   log.info("Set %s=%s on %d notes", field, value, #targets)
-  M.reload(bufnr)
+  M.refresh_current(bufnr)
 end
 
 --- Batch-append a tag to all notes in a visual selection (deduplicates).
@@ -1746,45 +2024,7 @@ function M.batch_append_tag(bufnr, tag, start_row, end_row)
     shared.set_frontmatter_fields(t.path, { tags = tags })
   end
   log.info("Added tag #%s to %d notes", tag, #targets)
-  M.reload(bufnr)
-end
-
----@param bufnr integer
----@param field string
----@param choices string[]
----@param start_row integer
----@param end_row integer
----@param prompt string
-pick_and_set_field = function(bufnr, field, choices, start_row, end_row, prompt)
-  if type(field) ~= "string" or field == "" then return end
-  if type(choices) ~= "table" or #choices == 0 then
-    log.warn("No choices configured for %s", field)
-    return
-  end
-  vim.ui.select(choices, { prompt = prompt }, function(choice)
-    if not choice or choice == "" then return end
-    M.batch_set_field(bufnr, field, choice, start_row, end_row)
-  end)
-end
-
----@param bufnr integer
----@param field string
----@param choices string[]
----@param start_row integer
----@param end_row integer
----@param prompt string
----@param after? fun(choice: string)
-pick_set_then = function(bufnr, field, choices, start_row, end_row, prompt, after)
-  if type(field) ~= "string" or field == "" then return end
-  if type(choices) ~= "table" or #choices == 0 then
-    log.warn("No choices configured for %s", field)
-    return
-  end
-  vim.ui.select(choices, { prompt = prompt }, function(choice)
-    if not choice or choice == "" then return end
-    M.batch_set_field(bufnr, field, choice, start_row, end_row)
-    if after then after(choice) end
-  end)
+  M.refresh_current(bufnr)
 end
 
 -- ─── Debug / test exports ─────────────────────────────────────────────────────

@@ -7,8 +7,9 @@ end
 local Collection = require("vault.core.collection")
 
 -- Aliases
---- @alias vault.Lines.map table<string, vault.Line> - Map of lines.
---- @alias vault.Lines.list table<integer, vault.Line> - Map of lines.
+---@alias vault.Line.content string
+---@alias vault.Lines.map table<vault.Line.content, vault.Line>
+---@alias vault.Lines.list table<integer, vault.Line>
 
 --- @alias VaultMap.lines.sources vault.Sources.map - Map of sources.
 
@@ -26,6 +27,7 @@ local Lines = Collection:extend("VaultLines")
 --- Sets the lines map and registers the lines globally.
 --- @return nil
 function Lines:init()
+    ---@type vault.Lines.map
     self.map = scanner().lines()
     state.set_global_key("lines", self)
 end

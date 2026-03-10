@@ -50,19 +50,19 @@ local function normalize_event_path(root, filename)
 end
 
 ---@class vault.Watcher.RenameSpec
----@field old_path string
----@field new_path string
----@field old_slug string
----@field new_slug string
+---@field old_path vault.path
+---@field new_path vault.path
+---@field old_slug vault.slug
+---@field new_slug vault.slug
 
 ---@class vault.Watcher.RenamePattern
 ---@field match string
 ---@field gsub_pat string
 ---@field replacement string
 
+---@param paths table<vault.slug, table>
 ---@param renames vault.Watcher.RenameSpec[]
----@param stem string
----@param paths table<string, table>
+---@param stem vault.stem
 ---@return integer
 local function count_old_stem_occurrences(paths, renames, stem)
     local count = 0
@@ -118,18 +118,21 @@ local function build_rename_patterns(paths, renames, rename)
     return patterns
 end
 
----@param watcher vault.Watcher
+---@class vault.Watcher.PendingUpdate
+---@field new_content string
+---@field count integer
+
 ---@param paths table<string, table>
 ---@param renames vault.Watcher.RenameSpec[]
----@return table<string, { new_content: string, count: integer }>, integer
-local function collect_pending_updates(watcher, paths, renames)
+---@return table<vault.path, vault.Watcher.PendingUpdate>, integer
+local function collect_pending_updates(paths, renames)
     --- @type table<string, vault.Watcher.RenamePattern[]>
     local patterns_by_old_path = {}
     for _, rename in ipairs(renames) do
         patterns_by_old_path[rename.old_path] = build_rename_patterns(paths, renames, rename)
     end
 
-    --- @type table<string, { new_content: string, count: integer }>
+    --- @type table<vault.path, vault.Watcher.PendingUpdate>
     local pending = {}
     local total = 0
 
@@ -166,8 +169,8 @@ local function collect_pending_updates(watcher, paths, renames)
     return pending, total
 end
 
----@param new_path string
----@param new_slug string
+---@param new_path vault.path
+---@param new_slug vault.slug
 ---@param watcher_conf table<string, any>
 local function update_frontmatter_slug(new_path, new_slug, watcher_conf)
     local fm_key = watcher_conf.frontmatter_key
@@ -390,7 +393,7 @@ end
 --- Handle a filesystem event inside the vault root.
 --- We interpret rename as:
 ---     file disappeared -> (within rename_window_sec) new file appeared
-function Watcher:on_event(filename, events)
+function Watcher:on_event(filename, _events)
     -- Ignore events triggered by our own wikilink patching writes
     if self._writing then
         return
@@ -483,7 +486,7 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silen
         local scanner = require("vault.scanner")
         paths = scanner.paths()
     end
-    local pending, total = collect_pending_updates(self, paths, renames)
+    local pending, total = collect_pending_updates(paths, renames)
 
     local watcher_conf = (config.options and config.options.watcher) or {}
     local prompt = watcher_conf.prompt_on_rename
@@ -521,6 +524,11 @@ end
 --- Invalidates the bases cache so the next access rescans.
 --- @param full_path string absolute path to the changed .base file
 function Watcher:handle_base_change(full_path)
+    self.deleted_paths = self.deleted_paths or {}
+    if full_path == "" then
+        return
+    end
+
     -- Invalidate the scanner cache for base files
     pcall(function()
         state.set_global_key("cache.bases.raw", nil)
@@ -629,7 +637,7 @@ function Watcher:handle_renames(renames, silent, paths)
                 local scanner = require("vault.scanner")
                 deferred_paths = scanner.paths()
             end
-            local pending = select(1, collect_pending_updates(self, deferred_paths, normalized))
+            local pending = select(1, collect_pending_updates(deferred_paths, normalized))
             apply_renames(self, pending, normalized, silent)
         end, 1000)
         return 0
@@ -639,7 +647,7 @@ function Watcher:handle_renames(renames, silent, paths)
         local scanner = require("vault.scanner")
         paths = scanner.paths()
     end
-    local pending, total = collect_pending_updates(self, paths, normalized)
+    local pending, total = collect_pending_updates(paths, normalized)
     local watcher_conf = (config.options and config.options.watcher) or {}
     local prompt = watcher_conf.prompt_on_rename
     if prompt == nil then

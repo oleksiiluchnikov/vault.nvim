@@ -11,6 +11,7 @@ return function(opts)
     local log = require("vault.log").scope("telescope")
     local vault_mappings = require("telescope._extensions.vault.mappings")
     local vault_hl = require("telescope._extensions.vault.highlights")
+    local vault_previewers = require("telescope._extensions.vault.previewers")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
 
     opts = opts or {}
@@ -37,8 +38,12 @@ return function(opts)
         hl_name = hl_name,
         colors = colors,
         steps = steps,
-        get_name = function(p) return p.data.name end,
-        get_count = function(p) return p.data.count end,
+        get_name = function(p)
+            return p.data.name
+        end,
+        get_count = function(p)
+            return p.data.count
+        end,
     })
 
     local finder = finders.new_table({
@@ -70,6 +75,7 @@ return function(opts)
         prompt_title = "Properties",
         finder = finder,
         sorter = sorters.get_fzy_sorter(),
+        previewer = vault_previewers.properties,
         attach_mappings = vault_hl.make_attach_mappings(vault_mappings.properties, hl_name, colors),
         on_input_filter_cb = make_filter(properties_list, entry_maker),
     })

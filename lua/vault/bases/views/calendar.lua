@@ -13,6 +13,26 @@ local M = {}
 local log = require("vault.log").scope("bases.views.calendar")
 local shared = require("vault.bases.views.shared")
 
+---@alias vault.CalendarISODate string
+
+---@class vault.CalendarRecord
+---@field slug vault.slug
+---@field _path vault.path
+---@field title? string
+
+---@class vault.CalendarConfig
+---@field date_field? string
+---@field primary_field? string
+---@field end_date_field? string
+---@field display_fields? string[]
+---@field first_day? integer
+---@field max_cards_per_cell? integer
+---@field hour_start? integer
+---@field hour_end? integer
+---@field empty_cell? string
+---@field keymaps? table<string, string>
+---@field link_date_fields? string[]
+
 -- ─── Lazy imports ─────────────────────────────────────────────────────────────
 
 ---@return Calendar
@@ -22,14 +42,14 @@ end
 
 -- ─── Config ───────────────────────────────────────────────────────────────────
 
----@return table
+---@return vault.CalendarConfig
 local function cal_cfg()
     local ok, cfg = pcall(require, "vault.config")
     return ok and cfg.options and cfg.options.calendar or {}
 end
 
 ---@param value any
----@return string|nil
+---@return vault.CalendarISODate|nil
 local function extract_iso_date(value)
     if value == nil or value == vim.NIL then return nil end
     if type(value) == "table" and value._type == "date" and value.epoch then
@@ -68,7 +88,7 @@ local function should_link_date_field(date_field)
     return false
 end
 
----@param iso_date string
+---@param iso_date vault.CalendarISODate
 ---@return string
 local function daily_wikilink(iso_date)
     local y, m, d = iso_date:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
@@ -79,7 +99,7 @@ local function daily_wikilink(iso_date)
 end
 
 ---@param date_field string
----@param value string|nil
+---@param value vault.CalendarISODate|nil
 ---@return string|nil
 local function format_calendar_date_for_field(date_field, value)
     if value == nil then return nil end
@@ -94,7 +114,7 @@ end
 
 ---@class vault.CalendarState
 ---@field cal Calendar              Calendar instance
----@field note_paths table<string, string>  slug → absolute path
+---@field note_paths table<vault.slug, vault.path>  slug → absolute path
 ---@field note_mtimes table<string, integer>  slug → mtime at snapshot time
 ---@field base? vault.Base
 ---@field date_field string          Frontmatter key used for date placement
@@ -114,12 +134,12 @@ local cal_states = {}
 ---@param notes_map table<string, table>
 ---@param date_field string
 ---@param primary_field string
----@param base? vault.Base
+---@param _base? vault.Base
 ---@param end_date_field? string
----@return table[]  flat records
----@return table<string, string>  slug → path map
+---@return vault.CalendarRecord[]  flat records
+---@return table<vault.slug, vault.path>  slug → path map
 ---@return table<string, integer>  slug → mtime map
-local function flatten_notes(notes_map, date_field, primary_field, base, end_date_field)
+local function flatten_notes(notes_map, date_field, primary_field, _base, end_date_field)
     local records = {}
     local paths = {}
     local mtimes = {}
@@ -134,6 +154,7 @@ local function flatten_notes(notes_map, date_field, primary_field, base, end_dat
             if not path then return nil end
 
             local fm = shared.read_frontmatter_fields(path, all_fields)
+            ---@type vault.CalendarRecord
             local flat = { slug = slug, _path = path }
 
             -- Title / primary field
@@ -259,7 +280,7 @@ local function make_on_save(st)
 end
 
 ---@param st vault.CalendarState
----@return fun(record: table, old_date: string|nil, new_date: string|nil, done: fun(err: string|nil))
+---@return fun(record: vault.CalendarRecord, old_date: vault.CalendarISODate|nil, new_date: vault.CalendarISODate|nil, done: fun(err: string|nil))
 local function make_on_date_move(st)
     return function(record, old_date, new_date, done)
         local slug = record.slug
@@ -352,6 +373,7 @@ end
 ---@field base? vault.Base           Base definition (for filters + calendar config)
 ---@field date_field? string         Frontmatter key for calendar placement (default "due")
 ---@field primary_field? string      Main display field (default "title")
+---@field end_date_field? string     Optional range end field
 ---@field filter_desc? string        Description for logging
 
 ---@param opts? vault.CalendarOpenOpts
@@ -471,26 +493,26 @@ function M.open(opts)
         filetype = "vault_calendar",
         on_save = make_on_save(st),
         on_date_move = make_on_date_move(st),
-        on_refresh = function(_cal)
-            M.reload(_cal:bufnr())
+        on_refresh = function(cal)
+            M.reload(cal:bufnr())
         end,
-        on_filter_request = function(_cal)
-            local s = cal_states[_cal:bufnr()]
+        on_filter_request = function(cal)
+            local s = cal_states[cal:bufnr()]
             if not s then return end
             local picker = require("vault.bases.views.filter_picker")
-            picker.open(_cal, s.display_fields)
+            picker.open(cal, s.display_fields)
         end,
-        on_record_entry = function(record, _cal)
+        on_record_entry = function(record, cal)
             local slug = record.slug
             local path = st.note_paths[slug]
             if path then
-                _cal:close()
+                cal:close()
                 vim.cmd("edit " .. vim.fn.fnameescape(path))
             else
                 log.warn("Cannot find path for note: %s", slug)
             end
         end,
-        on_add_row = function(_cal, date_str)
+        on_add_row = function(cal, date_str)
             local config = require("vault.config")
             local timestamp = os.date("%Y%m%d%H%M%S")
             local slug = "note-" .. timestamp
@@ -512,7 +534,7 @@ function M.open(opts)
                 st.note_paths[slug] = path
                 st.note_mtimes[slug] = shared.get_mtime(path)
                 log.info("Created note: %s (date: %s)", slug, date_str or "none")
-                M.reload(_cal:bufnr())
+                M.reload(cal:bufnr())
             else
                 log.error("Failed to create note: %s", path)
             end

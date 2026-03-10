@@ -1,12 +1,13 @@
 local state = require("vault.core.state")
+---@return { dirs: fun(opts?: { ignore: boolean|string[] }): vault.Dirs.map }
 local function scanner()
     return require("vault.scanner")
 end
 local Collection = require("vault.core.collection")
 
 -- Aliases
---- @alias vault.Dirs.map table<string, vault.Dir> - Map of dirs.
---- @alias vault.Dirs.list table<integer, vault.Dir> - Map of dirs.
+--- @alias vault.Dirs.map table<vault.relpath, vault.Dir> - Map of directories by vault-relative path.
+--- @alias vault.Dirs.list table<integer, vault.Dir> - Ordered list of directories.
 
 --- @alias VaultMap.dirs.sources vault.Sources.map - Map of sources.
 

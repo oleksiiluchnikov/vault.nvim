@@ -8,12 +8,33 @@ local log = require("vault.log").scope("line")
 -- local config = require("vault.config")
 -- local data = require("vault.lines.line.data")
 
+---@alias vault.Line.Data.name vault.Line.content
+---@alias vault.Line.Data.metadata table<string, string>
+---@alias vault.Line.Data.tags vault.Tags.map
+---@alias vault.Line.sources vault.Sources.map
+
+---@class vault.Line.Data.partial
+---@field content vault.Line.content
+---@field sources? vault.Line.sources
+---@field is_nested? boolean
+---@field wikilinks? vault.Wikilinks.map
+---@field metadata? vault.Line.Data.metadata
+---@field tags? vault.Line.Data.tags
+
 --- @class vault.Line.Data: vault.Object
+--- @field content vault.Line.content
+--- @field sources vault.Line.sources
+--- @field is_nested boolean
+--- @field wikilinks vault.Wikilinks.map
+--- @field link string?
+--- @field metadata vault.Line.Data.metadata
+--- @field tags vault.Line.Data.tags
+--- @field count integer
+--- @field occurences integer
 local LineData = Object("VaultLineData")
 
---- @alias vault.Line.Data.partial table - The partial Data of the line.
-
 --- @param this vault.Line.Data.partial
+---@return nil
 function LineData:init(this)
     self.content = this.content
 
@@ -64,11 +85,12 @@ end
 --- @class vault.Line: vault.Object
 --- @field data vault.Line.Data - The Data of the line.
 --- @field init fun(self: vault.Line, this: vault.Line.Data.name|vault.Line.Data.partial): vault.Line
---- @field add_slug fun(self: vault.Line, slug: string): vault.Line - Add a slug to the `self.Data.sources` table.
+--- @field add_slug fun(self: vault.Line, slug: vault.slug): vault.Line - Add a slug to the `self.Data.sources` table.
 local Line = Object("VaultLine")
 
 --- Create a new |vault.Line| instance.
 --- @param this vault.Line.Data.name|vault.Line.Data.partial
+---@return nil
 function Line:init(this)
     if not this then
         error(error_formatter.MISSING_PARAMETER("this"), 2)
@@ -99,7 +121,7 @@ function Line:rename(name, verbose)
     --- @type vault.Note.constructor
     local Note = state.get_global_key("class.vault.Note") or require("vault.notes.note")
 
-    --- @type table<string, vault.source.lnums> - A table of paths to update.
+    --- @type table<vault.path, vault.source.lnums|boolean> - A table of paths to update.
     local paths_to_update = {}
     for slug, lnums in pairs(self.data.sources) do
         local path = utils.slug_to_path(slug)

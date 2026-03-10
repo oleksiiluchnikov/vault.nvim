@@ -4,30 +4,57 @@ local TagDocumentation = require("vault.tags.tag.documentation")
 --- ```
 --- @alias vault.Tag.Data.name string - The name of the tag. e.g., "foo/bar".
 --- @alias vault.Tag.Data.root string - The root tag of the tag. e.g., "foo" from "foo/bar".
+--- @alias vault.Tag.SourceMap vault.Sources.map
 --- @alias vault.Tag.Data.children vault.Tag.children - The children of the tag
---- @alias vault.Tag.Data.sources vault.Notes.Data.slugs - The notes slugs of notes with the tag.
---- @alias vault.Tag.Data.count number - The number of notes with the tag.
+--- @alias vault.Tag.Data.sources vault.Tag.SourceMap - Source note slugs and their occurrence sets.
+--- @alias vault.Tag.Data.count integer - The number of notes with the tag.
+--- @alias vault.Tag.Data.occurences integer - The total number of occurrences across all source notes.
+--- @class vault.Tag.Child
+--- @field raw vault.Tag.Data.name
+--- @field name string
+--- @field root_name vault.Tag.Data.root
+--- @field parent_name string|nil
+--- @field children vault.Tag.children
+--- @alias vault.Tag.children table<string, vault.Tag.Child>
+--- @class vault.Tag.Data.partial
+--- @field name? vault.Tag.Data.name
+--- @field root? vault.Tag.Data.root
+--- @field is_nested? boolean
+--- @field children? vault.Tag.children
+--- @field sources? vault.Tag.SourceMap
+--- @field documentation? vault.Tag.Documentation
+--- @field count? integer
+--- @field occurences? integer
 
 --- @class vault.Tag.Data
 --- @field name vault.Tag.Data.name - The name of the tag. e.g., "foo/bar".
 --- @field root vault.Tag.Data.root - The root tag of the tag. e.g., "foo" from "foo/bar".
 --- @field is_nested boolean - Whether the tag is nested. e.g., "foo/bar" is nested, "foo" is not.
---- @field children vault.Tag.children[]
---- @field sources vault.Sources.map - The notes slugs of notes with the tag.
+--- @field children vault.Tag.children
+--- @field sources vault.Tag.SourceMap - The notes slugs of notes with the tag.
 --- @field documentation vault.Tag.Documentation
---- @field count number - The number of notes with the tag.
+--- @field count integer - The number of notes with the tag.
+--- @field occurences integer - The total number of line-level occurrences across all notes.
 
 --- @class vault.Tag.Data.parser
---- @field sources fun(tag_data: vault.Tag.Data): vault.Notes.Data.slugs - The notes slugs of notes with the tag.
+--- @field sources fun(tag_data: vault.Tag.Data): vault.Tag.SourceMap - The notes slugs of notes with the tag.
 --- @field children fun(tag_Data: vault.Tag.Data): vault.Tag.children - The children of the tag.
+---@type vault.Tag.Data.parser
 local data = {}
 
+--- @param tag_data vault.Tag.Data
+--- @return vault.Tag.Data.name
 data.name = function(tag_data)
     return tag_data.name
 end
 
-data.sources = function(tag_data) end
+--- No-op: sources are populated by the scanner, not lazily computed.
+--- @param _tag_data vault.Tag.Data
+--- @return nil
+data.sources = function(_tag_data) end
 
+--- @param tag_data vault.Tag.Data
+--- @return vault.Tag.Documentation
 data.documentation = function(tag_data)
     return TagDocumentation(tag_data.name)
 end
@@ -45,6 +72,7 @@ data.children = function(tag_data)
         return {}
     end
 
+    --- @type string[]
     local tag_name_parts = {}
     for part in tag_name:gmatch("[^/]+") do
         table.insert(tag_name_parts, part)
@@ -55,7 +83,9 @@ data.children = function(tag_data)
     table.remove(tag_name_parts, 1)
     local depth = #tag_name_parts
 
+    --- @type vault.Tag.children
     local children = {}
+    --- @type vault.Tag.children
     local current_node = children
 
     for i, child_name in ipairs(tag_name_parts) do

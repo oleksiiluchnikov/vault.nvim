@@ -8,9 +8,19 @@ local log = require("vault.log").scope("dir")
 -- local data = require("vault.dirs.dir.data")
 
 --- @class vault.Dir.Data: vault.Object
+--- @field name vault.Dir.Data.name
+--- @field path vault.path
+--- @field relpath vault.relpath
+--- @field sources? vault.Dir.SourceMap
 local DirData = Object("VaultDirData")
 
---- @alias vault.Dir.Data.partial table - The partial Data of the dir.
+--- @alias vault.Dir.Data.name string
+--- @alias vault.Dir.SourceMap table<vault.relpath, vault.source.lnums|boolean>
+--- @class vault.Dir.Data.partial
+--- @field name? vault.Dir.Data.name
+--- @field path? vault.path
+--- @field relpath? vault.relpath
+--- @field sources? vault.Dir.SourceMap
 
 --- @param this vault.Dir.Data.partial
 function DirData:init(this)
@@ -18,12 +28,13 @@ function DirData:init(this)
     self.name = this.name or vim.fn.fnamemodify(this.path, ":t") or this.path
     self.path = this.path
     self.relpath = utils.path_to_relpath(this.path)
+    self.sources = this.sources or {}
 end
 
 --- @class vault.Dir: vault.Object
 --- @field data vault.Dir.Data - The Data of the dir.
 --- @field init fun(self: vault.Dir, this: vault.Dir.Data.name|vault.Dir.Data.partial): vault.Dir
---- @field add_relpath fun(self: vault.Dir, relpath: string): vault.Dir - Add a relpath to the `self.Data.sources` table.
+--- @field add_relpath fun(self: vault.Dir, relpath: vault.relpath): vault.Dir - Add a relpath to the `self.Data.sources` table.
 local Dir = Object("VaultDir")
 
 --- Create a new |vault.Dir| instance.
@@ -58,14 +69,17 @@ function Dir:rename(name, verbose)
     --- @type vault.Note.constructor
     local Note = state.get_global_key("class.vault.Note") or require("vault.notes.note")
 
-    --- @type table<string, vault.source.lnums> - A table of paths to update.
+    --- @type table<vault.path, vault.source.lnums|boolean> - A table of file paths to update.
     local paths_to_update = {}
     for relpath, lnums in pairs(self.data.sources) do
+        --- @type vault.path
         local path = utils.relpath_to_path(relpath)
         paths_to_update[path] = lnums
     end
 
+    --- @type vault.relpath
     local old_name = self.data.relpath
+    --- @type vault.relpath
     local new_name = name
 
     local message = ""

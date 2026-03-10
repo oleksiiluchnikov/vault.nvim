@@ -12,9 +12,16 @@ local log = require("vault.log").scope("ui.stats")
 
 local M = {}
 
+---@class vault.ui.StatsSnapshot
+---@field total integer
+---@field tagged integer
+---@field with_status integer
+---@field orphans integer
+---@field leaves integer
+
 --- Compute vault statistics.
 --- Uses only raw/pre-loaded fields to avoid triggering expensive lazy loading.
----@return table stats
+---@return vault.ui.StatsSnapshot stats
 local function compute_stats()
   local Notes = require("vault.notes")
   local Tags = require("vault.tags")
@@ -91,13 +98,13 @@ function M.open()
 
     local lines = {
       " Vault Stats",
-      string.rep("\u{2500}", 36),
+      string.rep("─", 36),
       string.format(" Total notes:       %8s", fmt_num(stats.total)),
       string.format(" Tagged:            %8s  (%s)", fmt_num(stats.tagged), pct(stats.tagged, stats.total)),
       string.format(" With status:       %8s  (%s)", fmt_num(stats.with_status), pct(stats.with_status, stats.total)),
       string.format(" Orphans:           %8s  (%s)", fmt_num(stats.orphans), pct(stats.orphans, stats.total)),
       string.format(" Leaves:            %8s  (%s)", fmt_num(stats.leaves), pct(stats.leaves, stats.total)),
-      string.rep("\u{2500}", 36),
+      string.rep("─", 36),
       " Press q to close",
     }
 

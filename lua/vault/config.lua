@@ -67,8 +67,11 @@
 ---   }
 ---   ```
 
+--- @class vault.ConfigState : vault.Config
+--- @field is_initialized boolean
+
 --- The configuration for the vault plugin.
---- @type vault.Config
+--- @type vault.ConfigState
 --- @diagnostic disable-next-line: missing-fields
 local Config = {
     --- @diagnostic disable-next-line: missing-fields
@@ -479,7 +482,7 @@ local function expand_dirs(root, dirs)
 
     for key, dir in pairs(dirs) do
         if type(dir) == "string" then
-            local candidate = nil
+            local candidate
 
             if dir:find(root, 1, true) == 1 then
                 -- dir already contains root; resolve the relative part to canonical case

@@ -6,8 +6,11 @@ local function scanner()
     return require("vault.scanner")
 end
 
+---@alias vault.Bases.Map table<string, vault.Base>
+
 --- @class vault.Bases: vault.Collection
---- @field map table<string, vault.Base> Map of base name -> Base object
+--- @field map vault.Bases.Map Map of base name -> Base object
+--- @field _map vault.Bases.Map
 local Bases = Collection:extend("VaultBases")
 
 
@@ -30,6 +33,7 @@ end
 --- Load bases from the filesystem via the Rust scanner.
 --- @return vault.Bases
 function Bases:load()
+    ---@type vault.Base.Data[]
     local raw_bases = scanner().base_files()
 
     for _, raw in ipairs(raw_bases) do

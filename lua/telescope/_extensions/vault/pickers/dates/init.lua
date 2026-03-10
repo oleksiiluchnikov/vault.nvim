@@ -84,8 +84,6 @@ return function(opts)
 
     --- @param entry vault.TelescopeEntry
     local make_display = function(entry)
-        local display_value = {}
-
         local displayer = entry_display.create({
             separator = " ",
             items = {
@@ -93,6 +91,7 @@ return function(opts)
                 { remaining = true },
             },
         })
+        local display_value
         if entry.value.exists == true then
             display_value = {
                 entry.value.value,
@@ -129,7 +128,7 @@ return function(opts)
         previewer = previewers.vim_buffer_cat.new({
             get_buffer_by_name = function(_, entry)
                 local bufnr = vim.api.nvim_create_buf(false, true)
-                local lines = {}
+                local lines
                 if entry.exists then
                     lines = vim.fn.readfile(entry.path)
                 else

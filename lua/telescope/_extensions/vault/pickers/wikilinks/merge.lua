@@ -80,7 +80,6 @@ function M.open(wl, ctx, reopen_picker)
     local tele_conf = require("telescope.config").values
     local conf = get_config()
 
-    local action_label = resolved and "Merge" or "Rewrite"
     local prompt_hint = resolved
         and string.format("Merge [[%s]] into (target absorbs source, source trashed):", slug)
         or string.format("Rewrite [[%s]] -> pick target (rewrites links across vault):", slug)

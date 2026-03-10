@@ -22,6 +22,37 @@
 --- Backend: uses teolog (structured NDJSON) when available, falls back to
 --- built-in vim.notify + io.open when teolog is not on the runtimepath.
 
+---@class vault.Logger
+---@field scope fun(sub: string): vault.Logger
+---@field trace fun(fmt: string, ...: any): nil
+---@field debug fun(fmt: string, ...: any): nil
+---@field info fun(fmt: string, ...: any): nil
+---@field warn fun(fmt: string, ...: any): nil
+---@field error fun(fmt: string, ...: any): nil
+
+---@class vault.TeologEvent
+---@field lvl vault.LogLevel
+---@field msg string
+---@field ctx? vault.TeologContext
+
+---@class vault.TeologContext
+---@field scope? string
+---@field module? string
+
+---@class vault.TeologLogger
+---@field emit fun(self: vault.TeologLogger, level: integer, msg: string, ctx?: table): nil
+---@field set_level fun(self: vault.TeologLogger, level: integer): nil
+
+---@class vault.TeologModule
+---@field Level { TRACE: integer }
+---@field sinks table
+---@field new fun(name: string, sink: any): vault.TeologLogger
+
+---@class vault.LoggerModule: vault.Logger
+---@field get_file_path fun(): string
+---@field open fun(): nil
+
+---@type vault.LoggerModule
 local M = {}
 
 --- @alias vault.LogLevel "trace"|"debug"|"info"|"warn"|"error"
@@ -74,8 +105,9 @@ end
 -------------------------------------------------------------------------------
 
 --- Try to load teolog. Cached after first attempt.
---- @return table|nil teolog module or nil
+--- @return vault.TeologModule|nil teolog module or nil
 local _teolog_checked = false
+---@type vault.TeologModule|nil
 local _teolog = nil
 
 local function get_teolog()
@@ -92,7 +124,7 @@ end
 
 --- Lazily build the teolog Logger instance.
 --- Rebuilt when config changes (file toggle, path, callbacks).
---- @type teolog.Logger|nil
+---@type vault.TeologLogger|nil
 local _logger = nil
 local _logger_config_hash = ""
 
@@ -109,7 +141,7 @@ local function config_hash()
 end
 
 --- Get or create the teolog Logger, rebuilding if config changed.
---- @return teolog.Logger|nil
+--- @return vault.TeologLogger|nil
 local function get_logger()
     local teolog = get_teolog()
     if not teolog then
@@ -122,10 +154,10 @@ local function get_logger()
     end
 
     local cfg = get_config()
+    ---@type any[]
     local sinks = {}
 
     -- Sink 1: vim.notify (filtered by configured level)
-    local notify_min = LEVELS[cfg.level] or LEVELS.info
     table.insert(
         sinks,
         teolog.sinks.NotifySink.new("vault", VIM_LEVELS[cfg.level] or vim.log.levels.INFO)
@@ -154,6 +186,7 @@ local function get_logger()
         table.insert(
             sinks,
             teolog.sinks.CallbackSink.new(function(event)
+                ---@cast event vault.TeologEvent
                 -- Adapt teolog event back to vault callback signature: (level, scope, msg)
                 local scope = (event.ctx and event.ctx.scope) or ""
                 pcall(cb, event.lvl, scope, event.msg)
@@ -254,6 +287,7 @@ end
 -------------------------------------------------------------------------------
 
 --- teolog level map
+--- @type table<vault.LogLevel, integer>
 local TEOLOG_LEVELS = {
     trace = 0,
     debug = 1,
@@ -301,8 +335,9 @@ end
 
 --- Create level methods for a given scope
 --- @param scope string
---- @return table
+--- @return vault.Logger
 local function make_logger(scope)
+    ---@type vault.Logger
     local logger = {}
 
     --- @param fmt string
@@ -337,7 +372,7 @@ local function make_logger(scope)
 
     --- Create a sub-scoped logger
     --- @param sub string
-    --- @return table
+    --- @return vault.Logger
     function logger.scope(sub)
         local new_scope = scope ~= "" and (scope .. "." .. sub) or sub
         return make_logger(new_scope)
@@ -347,6 +382,7 @@ local function make_logger(scope)
 end
 
 -- M is the root logger (scope = "")
+--- @type vault.Logger
 local root = make_logger("")
 M.trace = root.trace
 M.debug = root.debug

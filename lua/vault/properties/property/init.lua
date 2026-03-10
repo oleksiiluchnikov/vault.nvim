@@ -6,12 +6,17 @@ local data = require("vault.properties.property.data")
 local utils = require("vault.utils")
 local log = require("vault.log").scope("property")
 
+--- Partial constructor input accepted by `PropertyData:init`.
+--- @alias VaultPropertyDataPartial { name?: string, values?: table<string, vault.Property.Value>, sources?: vault.Sources.map }
+
 --- @class vault.Property.Data: vault.Object
+--- @field name    vault.Property.Data.name                - The property key name, e.g. `"foo-bar"`.
+--- @field values  table<string, vault.Property.Value>     - Map of value-name → PropertyValue.
+--- @field sources vault.Sources.map                       - Map of note slugs that carry this property.
+--- @field count   number                                  - Number of notes carrying this property.
 local PropertyData = Object("VaultPropertyData")
 
---- Partial data of the property. Used to create a new `VaultProperty` instance.
---- @alias VaultPropertyDataPartial table - The partial Data of the property.
-
+--- Initialise a `VaultPropertyData` instance.
 --- @param this vault.Property.Data.name|VaultPropertyDataPartial
 function PropertyData:init(this)
     if not this then
@@ -26,11 +31,12 @@ function PropertyData:init(this)
     end
 end
 
---- Scann the data if it is not already cached.
---- @param key string -- `VaultProperty.Data` key
+--- Lazy-load a computed field from the `data` parser table.
+--- If the key exists in `data`, the resolver is called and the result is cached.
+--- @param key string Field name to resolve via `vault.Property.Data.parser`
 --- @return any
 function PropertyData:__index(key)
-    --- @type fun(self: vault.Property.data): any
+    --- @type fun(self: vault.Property.Data): any
     local func = data[key]
     if func then
         local value = func(self)
@@ -47,14 +53,17 @@ function PropertyData:__index(key)
     return self[key]
 end
 
---- Properties are used to store metadata about notes.
---- They are used to store information such as the note's name, tags, and sources.
---- Usually, properties are exists in a |vault.Note.data.frontmatter| table.
---- but they can be also stored as inline properties in a note.
+--- A frontmatter / inline property observed in one or more vault notes.
+---
+--- Properties are used to store structured metadata such as tags, dates, and links.
+--- They usually appear in a note's YAML frontmatter but can also be inline properties.
+---
 --- @class vault.Property: vault.Object
---- @field Data vault.Property.Data
---- @field init fun(self: vault.Property, this: vault.Property.Data.name|VaultPropertyDataPartial): vault.Property
---- @field add_slug fun(self: vault.Property, slug: string): vault.Property - Add a slug to the `self.Data.sources` table.
+--- @field data   vault.Property.Data   - Resolved data bag for this property instance.
+--- @field init   fun(self: vault.Property, this: vault.Property.Data.name|VaultPropertyDataPartial): vault.Property
+--- @field add_slug  fun(self: vault.Property, slug: vault.slug): vault.Property      - Register a note slug as a source.
+--- @field add_value fun(self: vault.Property, value: vault.Property.Value): vault.Property
+--- @field rename    fun(self: vault.Property, name: vault.Property.Data.name, verbose?: boolean): vault.Property
 local Property = Object("VaultProperty")
 
 --- Create a new `VaultProperty` instance.
@@ -75,9 +84,9 @@ function Property:init(this)
     self.data = PropertyData(this)
 end
 
---- Rename the |'vault.Property'|. and update all occurences of the |'vault.Property'| in the notes.
---- @param name vault.Property.Data.name
---- @param verbose? boolean
+--- Rename the property and update every occurrence in the connected notes.
+--- @param name vault.Property.Data.name  New property name
+--- @param verbose? boolean               When `true` (default) log a summary message
 --- @return vault.Property
 function Property:rename(name, verbose)
     if name == nil or name == "" then
@@ -90,7 +99,7 @@ function Property:rename(name, verbose)
     --- @type vault.Note.constructor
     local Note = state.get_global_key("class.vault.Note") or require("vault.notes.note")
 
-    --- @type table<string, vault.source.lnums> - A table of paths to update.
+    --- @type table<vault.path, vault.source.lnums> - Map of file paths to update.
     local paths_to_update = {}
     for slug, lnums in pairs(self.data.sources) do
         local path = utils.slug_to_path(slug)
@@ -131,9 +140,9 @@ function Property:rename(name, verbose)
     return self
 end
 
---- Add a slug to the `self.data.sources` `VaultMap`.
+--- Register a note slug as a source for this property in `self.data.sources`.
 ---
---- @param slug string
+--- @param slug vault.slug
 --- @return vault.Property
 function Property:add_slug(slug)
     if not self.data.sources[slug] then
@@ -142,8 +151,8 @@ function Property:add_slug(slug)
     return self
 end
 
---- Add a value to the `self.data.values` `VaultMap`.
---- If the value already exists, it will add the slug to the `self.data.sources` `VaultMap`.
+--- Attach a `vault.Property.Value` to this property.
+--- If the value already exists, merge its source slugs into `self.data.sources`.
 --- @param value vault.Property.Value
 --- @return vault.Property
 function Property:add_value(value)
@@ -152,7 +161,6 @@ function Property:add_value(value)
         return self
     end
 
-    local value_sources = self.data.values[value.data.name].data.sources
     for slug, _ in pairs(value.data.sources) do
         if not self.data.sources[slug] then
             self.data.sources[slug] = true
@@ -162,8 +170,8 @@ function Property:add_value(value)
     return self
 end
 
---- @alias VaultProperty.constructor fun(this: vault.Property|table|string): vault.Property
---- @type VaultProperty.constructor|vault.Property
+--- @alias vault.Property.constructor fun(this: vault.Property|VaultPropertyDataPartial|string): vault.Property
+--- @type vault.Property.constructor|vault.Property
 local VaultProperty = Property
 state.set_global_key("class.vault.Property", VaultProperty)
 

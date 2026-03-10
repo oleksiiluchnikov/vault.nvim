@@ -18,6 +18,7 @@ return function(opts)
     local vault_layouts = require("telescope._extensions.vault.layouts")
     local vault_hl = require("telescope._extensions.vault.highlights")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
+    local note_stats = require("telescope._extensions.vault.pickers.notes.stats")
 
     opts = opts or {}
     opts.notes = opts.notes or require("vault.notes")()
@@ -40,6 +41,10 @@ return function(opts)
     local colors = vault_hl.setup(hl_name, steps, { "Boolean", "Comment", "Normal", "String" })
 
     local col_2_maxwidth = 0
+    local link_counts = note_stats.collect(results)
+    local out_col_width = 0
+    local in_col_width = 0
+    local dang_col_width = 0
     for _, note in ipairs(results) do
         local relpath = note.data.relpath
         local col_2 = ""
@@ -49,6 +54,11 @@ return function(opts)
         if col_2:len() > col_2_maxwidth then
             col_2_maxwidth = col_2:len()
         end
+
+        local out_text, in_text, dang_text = note_stats.columns(link_counts[note.data.slug])
+        out_col_width = math.max(out_col_width, out_text:len())
+        in_col_width = math.max(in_col_width, in_text:len())
+        dang_col_width = math.max(dang_col_width, dang_text:len())
     end
 
     local make_display = function(entry)
@@ -59,17 +69,26 @@ return function(opts)
         if colors then
             local content_chars_count = #content
             local index = math.min(math.floor(content_chars_count / 16), steps)
-            if index == 0 then index = 1 end
+            if index == 0 then
+                index = 1
+            end
             col_1_hl_name = hl_name .. tostring(index)
         end
 
         local col_2 = vim.fn.fnamemodify(note.data.slug, ":h")
         local col_3 = vim.fn.fnamemodify(note.data.path, ":t:r")
+        local counts = link_counts[note.data.slug]
+        local out_text, in_text, dang_text = note_stats.columns(counts)
+        local dang_hl = (counts and counts.dangling or 0) > 0 and "DiagnosticWarn"
+            or "TelescopeResultsComment"
 
         local displayer = entry_display.create({
             separator = " ",
             items = {
                 { width = 2 },
+                { width = out_col_width },
+                { width = in_col_width },
+                { width = dang_col_width },
                 { width = col_2_maxwidth },
                 { remaining = true },
             },
@@ -77,6 +96,9 @@ return function(opts)
 
         return displayer({
             { "██", col_1_hl_name },
+            { out_text, "TelescopeResultsComment" },
+            { in_text, "TelescopeResultsComment" },
+            { dang_text, dang_hl },
             { col_2, "TelescopeResultsComment" },
             { col_3, col_1_hl_name },
         })
@@ -93,15 +115,25 @@ return function(opts)
     end
 
     if opts.sort_by == "title" then
-        table.sort(results, function(a, b) return a.data.title < b.data.title end)
+        table.sort(results, function(a, b)
+            return a.data.title < b.data.title
+        end)
     elseif opts.sort_by == "ctime" then
-        table.sort(results, function(a, b) return vim.fn.getftime(a.data.path) < vim.fn.getftime(b.data.path) end)
+        table.sort(results, function(a, b)
+            return vim.fn.getftime(a.data.path) < vim.fn.getftime(b.data.path)
+        end)
     elseif opts.sort_by == "mtime" then
-        table.sort(results, function(a, b) return vim.fn.getftime(a.data.path) < vim.fn.getftime(b.data.path) end)
+        table.sort(results, function(a, b)
+            return vim.fn.getftime(a.data.path) < vim.fn.getftime(b.data.path)
+        end)
     elseif opts.sort_by == "slug" then
-        table.sort(results, function(a, b) return a.data.slug < b.data.slug end)
+        table.sort(results, function(a, b)
+            return a.data.slug < b.data.slug
+        end)
     elseif opts.sort_by == "path" then
-        table.sort(results, function(a, b) return a.data.path < b.data.path end)
+        table.sort(results, function(a, b)
+            return a.data.path < b.data.path
+        end)
     end
 
     local finder = finders.new_table({
@@ -112,10 +144,14 @@ return function(opts)
     -- Custom sorter: wraps fzy but boosts exact stem/title matches to the top.
     local fzy = sorters.get_fzy_sorter()
     local custom_sorter = sorters.new({
-        scoring_function = function(self, prompt, line, entry)
-            if prompt == "" or prompt == nil then return 1 end
+        scoring_function = function(_, prompt, line, entry)
+            if prompt == "" or prompt == nil then
+                return 1
+            end
             local fzy_score = fzy.scoring_function(fzy, prompt, line, entry)
-            if fzy_score <= 0 then return -1 end
+            if fzy_score <= 0 then
+                return -1
+            end
 
             local note = entry.value
             if note and note.data then

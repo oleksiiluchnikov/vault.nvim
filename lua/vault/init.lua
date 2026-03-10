@@ -1,5 +1,11 @@
 local vault = {}
 
+--- @class vault.WatcherLike
+--- @field start fun(self: vault.WatcherLike): nil
+--- @field cleanup fun(self: vault.WatcherLike): nil
+
+--- @alias vault.HealthReport vault.HealthSummary|vault.HealthIssue[]
+
 --- Setup `vault.nvim` plugin.
 --- @param opts? vault.Config.options
 function vault.setup(opts)
@@ -16,6 +22,7 @@ function vault.setup(opts)
     -- Initialize file watcher if enabled
     if config.options.features.watcher == true then
         local Watcher = require("vault.watcher")
+        --- @type vault.WatcherLike
         local watcher = Watcher()
 
         -- Start watching on VimEnter to avoid startup delays
@@ -42,13 +49,15 @@ end
 
 --- Check the health of the vault plugin.
 --- This function is used by the `:checkhealth` command.
---- @return table
+--- @return vault.HealthReport
 function vault.checkhealth()
+    --- @type string[]
     local dependencies = {
         "telescope",
         -- "cmp",
     }
 
+    --- @type vault.HealthIssue[]
     local results = {}
     local all_ok = true
 
@@ -56,6 +65,7 @@ function vault.checkhealth()
         local has_plugin = pcall(require, plugin_name)
         if not has_plugin then
             all_ok = false
+            --- @type vault.HealthIssue
             table.insert(results, {
                 status = "error",
                 message = string.format("`%s` is required to run vault.nvim", plugin_name),
@@ -64,6 +74,7 @@ function vault.checkhealth()
     end
 
     if all_ok then
+        --- @type vault.HealthSummary
         return {
             status = "ok",
             message = "All dependencies are installed",

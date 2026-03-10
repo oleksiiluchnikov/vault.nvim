@@ -8,9 +8,15 @@ local log = require("vault.log").scope("tag")
 local data = require("vault.tags.tag.data")
 
 --- @class vault.Tag.Data: vault.Object
+--- @field name vault.Tag.Data.name
+--- @field is_nested boolean
+--- @field root vault.Tag.Data.root
+--- @field sources vault.Tag.SourceMap
+--- @field count integer
+--- @field occurences integer
 local TagData = Object("VaultTagData")
 
---- @alias vault.Tag.Data.partial table - The partial Data of the tag.
+--- @alias vault.Tag.PathSources table<vault.path, vault.source.lnums|boolean>
 
 --- @param this vault.Tag.Data.name|vault.Tag.Data.partial
 function TagData:init(this)
@@ -38,7 +44,9 @@ function TagData:init(this)
     self.sources = this.sources or {}
 
     -- Count the number of sources
+    --- @type integer
     self.count = 0
+    --- @type integer
     self.occurences = 0
     for _, occurences in pairs(self.sources) do
         self.count = self.count + 1
@@ -56,7 +64,7 @@ end
 --- @param key string -- `VaultTag.Data` key
 --- @return any
 function TagData:__index(key)
-    --- @type fun(self: vault.Tag.data): any -- A function that scannes the data for the given key.
+    --- @type fun(self: vault.Tag.Data): any -- A function that scans the data for the given key.
     local func = data[key]
     if func then
         local value = func(self)
@@ -76,7 +84,7 @@ end
 --- @class vault.Tag: vault.Object
 --- @field data vault.Tag.Data - The Data of the tag.
 --- @field init fun(self: vault.Tag, this: vault.Tag.Data.name|vault.Tag.Data.partial): vault.Tag
---- @field add_slug fun(self: vault.Tag, slug: string): vault.Tag - Add a slug to the `self.Data.sources` table.
+--- @field add_slug fun(self: vault.Tag, slug: vault.slug): vault.Tag - Add a slug to the `self.Data.sources` table.
 local Tag = Object("VaultTag")
 
 --- Create a new |vault.Tag| instance.
@@ -111,9 +119,10 @@ function Tag:rename(name, verbose)
     --- @type vault.Note.constructor
     local Note = state.get_global_key("class.vault.Note") or require("vault.notes.note")
 
-    --- @type table<string, vault.source.lnums> - A table of paths to update.
+    --- @type vault.Tag.PathSources - A table of file paths to update.
     local paths_to_update = {}
     for slug, lnums in pairs(self.data.sources) do
+        --- @type vault.path
         local path = utils.slug_to_path(slug)
         paths_to_update[path] = lnums
     end

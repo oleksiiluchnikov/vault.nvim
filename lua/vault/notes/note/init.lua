@@ -93,7 +93,9 @@ function Title:init(str)
     self.text = str
 end
 
-function Title:sync(path)
+--- @param path? string
+--- @return nil
+function Title.sync(_, path)
     if path == nil then
         local bufpath = vim.fn.expand("%:p")
         if type(bufpath) ~= "string" then
@@ -672,7 +674,7 @@ function Note:update_content(search_string, replace_string, lnums)
                 local original_sub = line:sub(start_col, end_col)
 
                 -- try to extract captures from the original substring using the search pattern
-                local found_start, found_end, captures = original_sub:find(search_string)
+                local found_start, _, captures = original_sub:find(search_string)
 
                 local replacement_processed = replace_string
 
@@ -705,6 +707,7 @@ function Note:update_content(search_string, replace_string, lnums)
     self:overwrite(new_content)
 
     -- refresh buffer if open so changes show up immediately
+    local refresh_buffers = require("vault.api").refresh_buffers
     if refresh_buffers then
         pcall(refresh_buffers, { self.data.path })
     end
@@ -737,7 +740,7 @@ end
 
 --- Get list of available note methods.
 --- @return string[]
-function Note:get_methods()
+function Note.get_methods(_)
     local methods = {}
     for k, v in pairs(Note) do
         if type(v) == "function" then
@@ -783,9 +786,18 @@ function Note:move(new_path, force, verbose, opts)
         error("Note:move() source does not exist: " .. old_path)
     end
 
-    -- Check target does not already exist (unless force)
+    -- Check target does not already exist (unless force).
+    -- On case-insensitive filesystems (macOS default), a case-only rename
+    -- (e.g. "Foo.md" -> "foo.md") reports filereadable=1 for the new path
+    -- because the FS treats them as the same file. Detect this by comparing
+    -- inodes: same inode means it's a case-only rename, not a collision.
     if not force and vim.fn.filereadable(new_path) == 1 then
-        error("Note:move() target already exists: " .. new_path .. " (use force=true to overwrite)")
+        local old_stat = uv.fs_stat(old_path)
+        local new_stat = uv.fs_stat(new_path)
+        local same_inode = old_stat and new_stat and old_stat.ino == new_stat.ino
+        if not same_inode then
+            error("Note:move() target already exists: " .. new_path .. " (use force=true to overwrite)")
+        end
     end
 
     -- Ensure target directory exists
@@ -861,8 +873,8 @@ function Note:delete(permanent, verbose)
         end
     else
         -- Move to .trash/ (Obsidian-compatible soft delete)
-        local config = require("vault.config")
-        local trash_dir = config.options.root .. "/.trash"
+        local cfg = require("vault.config")
+        local trash_dir = cfg.options.root .. "/.trash"
         if vim.fn.isdirectory(trash_dir) == 0 then
             vim.fn.mkdir(trash_dir, "p")
         end

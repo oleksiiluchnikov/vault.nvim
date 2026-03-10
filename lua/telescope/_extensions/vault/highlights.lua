@@ -9,7 +9,7 @@ local M = {}
 function M.setup(hl_prefix, steps, stops)
     local ok, maybe_colors = pcall(function()
         local Gradient = require("gradient")
-        return Gradient.from_stops(steps, unpack(stops))
+        return Gradient.from_stops(steps, table.unpack(stops))
     end)
     if ok and type(maybe_colors) == "table" then
         for i, color in ipairs(maybe_colors) do

@@ -7,7 +7,7 @@ local M = {}
 function M.attach(name, highlights)
     --- @type vim.api.keyset.highlight[]
     local hl_groups = {}
-    for i, highlight in ipairs(highlights) do
+    for _, highlight in ipairs(highlights) do
         vim.api.nvim_set_hl(0, name, highlight)
         hl_groups[name] = highlight
     end

@@ -9,6 +9,9 @@ M.notes = function(_, map)
     map("i", "<C-r>", vault_actions.note.rename)
     map("n", "<C-r>", vault_actions.note.rename)
 
+    map("i", "<C-j>", vault_actions.note.merge)
+    map("n", "<C-j>", vault_actions.note.merge)
+
     map("i", "<C-s>", vault_actions.resort)
     map("n", "<C-s>", vault_actions.resort)
 
@@ -43,6 +46,9 @@ M.tags = function(_, map)
 
     map("i", "<C-e>", vault_actions.tag.edit_documentation)
     map("n", "<C-e>", vault_actions.tag.edit_documentation)
+
+    map("i", "<C-p>", vault_actions.tag.promote)
+    map("n", "<C-p>", vault_actions.tag.promote)
 
     -- select all entries in the picker
     map("i", "<C-a>", require("telescope.actions").select_all)

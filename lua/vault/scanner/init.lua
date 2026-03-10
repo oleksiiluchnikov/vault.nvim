@@ -12,7 +12,21 @@ local PropertyValue = require("vault.properties.property.value")
 
 local log = require("vault.log").scope("scanner")
 local progress = require("vault.progress")
+local PROCESS_SAVE_DEPTH_KEY = "vault.process_save_depth"
 
+---@class vault.Scanner
+---@field paths fun(opts?: { ignore: boolean|string[] }): table<string, table>
+---@field slugs fun(): table<string, string>
+---@field tags fun(opts?: { ignore: boolean|string[] }): table<string, vault.Tag>
+---@field wikilinks fun(opts?: { ignore: boolean|string[] }): table<string, vault.Wikilink>
+---@field tasks fun(opts?: { ignore: boolean|string[] }): table<string, vault.Task>
+---@field links fun(opts?: { ignore: boolean|string[] }): table
+---@field fields fun(opts?: { ignore: boolean|string[] }): table
+---@field properties fun(opts?: { ignore: boolean|string[] }): table<string, vault.Property>
+---@field dirs fun(opts?: { ignore: boolean|string[] }): table<string, vault.Dir>
+---@field lines fun(opts?: { ignore: boolean|string[] }): table<string, vault.Line>
+
+---@type vault.Scanner
 local Scanner = {}
 
 --- Helper to determine root and ignore patterns based on options
@@ -42,6 +56,15 @@ end
 function Scanner.paths(opts)
     local core = require("vault_core")
     local root, ignores = get_scan_args(opts)
+
+    local save_depth = tonumber(state.get_global_key(PROCESS_SAVE_DEPTH_KEY) or 0) or 0
+    if save_depth > 0 then
+        local cached = state.get_global_key("cache.notes.paths")
+        if type(cached) == "table" then
+            log.debug("Scanning notes: using cached paths during process save")
+            return cached
+        end
+    end
 
     local handle = progress.start("Scanning notes", "Reading vault…")
     local map = core.paths(root, ignores)
@@ -292,7 +315,6 @@ end
 --- @return table<string, vault.Line>
 function Scanner.lines(opts)
     local Line = require("vault.lines.line")
-    local root, ignores = get_scan_args(opts)
     local paths = Scanner.paths(opts)
 
     local handle = progress.start("Scanning lines", "Reading files…")

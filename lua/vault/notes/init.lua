@@ -15,9 +15,13 @@ local VaultNotesStats = require("vault.notes.stats")
 local config = require("vault.config")
 local log = require("vault.log").scope("notes")
 
+---@alias vault.Notes.map table<vault.slug, vault.Note>
+---@alias vault.Notes.path_map table<vault.path, vault.Note>
+---@alias vault.Notes.groups.map table<vault.slug, vault.Notes.Group>
+
 ---@class vault.Notes.MoveSpec
----@field from string
----@field to string
+---@field from vault.path
+---@field to vault.path
 
 ---@class vault.Notes.MoveManyOpts
 ---@field update_links? boolean
@@ -26,8 +30,8 @@ local log = require("vault.log").scope("notes")
 ---@field silent? boolean
 
 ---@class vault.Notes.MoveTreeOpts: vault.Notes.MoveManyOpts
----@field from_dir string
----@field to_dir string
+---@field from_dir vault.path
+---@field to_dir vault.path
 ---@field preserve_subdirs? boolean
 
 ---@class vault.Notes.MoveReport
@@ -36,34 +40,34 @@ local log = require("vault.log").scope("notes")
 ---@field skipped integer
 ---@field renames vault.Watcher.RenameSpec[]
 
----@param path string
----@return string
+---@param path vault.path
+---@return vault.path
 local function normalize_path(path)
     return vim.fs.normalize(vim.fn.fnamemodify(path, ":p"))
 end
 
----@param path string
+---@param path vault.path
 ---@return boolean
 local function is_note_path(path)
     return type(path) == "string" and path:sub(-#config.options.ext) == config.options.ext
 end
 
----@param dir string
----@return string
+---@param dir vault.path
+---@return vault.path
 local function normalize_dir(dir)
     local normalized = normalize_path(dir)
     return normalized:gsub("/+$", "")
 end
 
----@param path string
----@param dir string
+---@param path vault.path
+---@param dir vault.path
 ---@return boolean
 local function path_is_within_dir(path, dir)
     return path == dir or path:sub(1, #dir + 1) == (dir .. "/")
 end
 
----@param path string
----@param dir string
+---@param path vault.path
+---@param dir vault.path
 ---@return string
 local function relative_to_dir(path, dir)
     if path == dir then
@@ -134,7 +138,7 @@ local function patch_wikilinks_after_moves(renames, update_links, silent)
 end
 
 ---@param notes vault.Notes
----@param note_map table<string, vault.Note>
+---@param note_map vault.Notes.path_map
 ---@param opts vault.Notes.MoveManyOpts
 ---@return vault.Notes.MoveReport
 local function move_notes(notes, note_map, opts)
@@ -163,6 +167,7 @@ local function move_notes(notes, note_map, opts)
 
     --- @type string[]
     local errors = {}
+    --- @type table<vault.path, boolean>
     local target_seen = {}
 
     for old_path, note in pairs(note_map) do
@@ -288,7 +293,7 @@ See also:
 --- Dynamic note collection that updates with operations
 --- @field public map vault.Notes.map
 --- Organized note groups
---- @field public groups VaultNotes.groups.map
+--- @field public groups vault.Notes.groups.map
 --- Reference to initial unfiltered notes
 --- @field public all vault.Notes
 --- Tag management system
@@ -376,15 +381,16 @@ function Notes:init()
     state.set_global_key("notes.leaves", nil)
     state.set_global_key("notes.orphans", nil)
 
-    --- @alias vault.Notes.map table<vault.slug, vault.Note> # Map of unique note identifiers to Note objects
+    --- @type vault.Notes.map
     self.map = {}
+    --- @type vault.Notes.map
     self._map = {}
 
     self:load()
 
     self._map = self.map
 
-    --- @alias VaultNotes.groups.map table<vault.slug, vault.Notes.Group> # Map of filtered note groups
+    --- @type vault.Notes.groups.map
     self.groups = {}
 
     state.set_global_key("notes", self)
@@ -408,7 +414,7 @@ end
 --- ```
 --- @return vault.Notes - Returns self for method chaining
 function Notes:load()
-    --- @type table<string, table<string, string>>
+    --- @type vault.EntryInfoMap
     local paths = scanner().paths()
     -- Example of paths structure:
     -- ["Example Note"] = {
@@ -474,6 +480,7 @@ function Notes:wikilinks()
     return Wikilinks(self)
 end
 
+---@return vault.Stats
 function Notes:stats()
     return VaultNotesStats(self)
 end
@@ -562,7 +569,7 @@ function Notes:move_many(moves, opts)
         error(Error.INVALID_VALUE("moves", "table"))
     end
 
-    --- @type table<string, vault.Note>
+    --- @type vault.Notes.path_map
     local note_map = {}
     for _, move in ipairs(moves) do
         if type(move) ~= "table" or type(move.from) ~= "string" or type(move.to) ~= "string" then
@@ -658,6 +665,7 @@ function Notes:delete_note_by_key(key, query, match_opt, case_sensitive)
     end
 
     for slug, note in pairs(self.map) do
+        --- @type vault.Note.Data
         local data = note.data
         if data[key] then
             if query == nil then -- if only key is provided
@@ -732,6 +740,7 @@ function Notes:filter_by_tags(opts)
         end
 
         local tags = Tags():filter(opt)
+        --- @type vault.Sources.map
         local sources = tags:sources() -- where tag exists
 
         for slug, _ in pairs(self.map) do
@@ -766,8 +775,8 @@ function Notes:linked()
     local linked = self:to_group()
 
     for slug, note in pairs(linked.map) do
-        local outlinks = note.data.outlinks
-        local inlinks = note.data.inlinks
+        local outlinks = note.data.outlinks or {}
+        local inlinks = note.data.inlinks or {}
         if next(outlinks) == nil and next(inlinks) == nil then
             linked.map[slug] = nil
         end
@@ -794,7 +803,9 @@ function Notes:internals()
     local internals = self:to_group()
 
     for slug, note in pairs(internals.map) do
-        if next(note.data.outlinks) == nil or next(note.data.inlinks) == nil then
+        local outlinks = note.data.outlinks or {}
+        local inlinks = note.data.inlinks or {}
+        if next(outlinks) == nil or next(inlinks) == nil then
             internals.map[slug] = nil
         end
     end
@@ -830,7 +841,7 @@ function Notes:leaves()
             leaves.map[slug] = nil
             goto continue
         end
-        local outlinks = note.data.outlinks
+        local outlinks = note.data.outlinks or {}
 
         -- if note has outlinks then it is not a leaf
         if outlinks and next(outlinks) then
@@ -867,7 +878,7 @@ function Notes:orphans()
     local orphans = self:to_group()
 
     for slug, note in pairs(self.map) do
-        local outlinks = note.data.outlinks
+        local outlinks = note.data.outlinks or {}
         if outlinks and next(outlinks) then
             orphans.map[slug] = nil
             goto continue
@@ -902,7 +913,7 @@ function Notes:with_outlinks_resolved_only()
 
     for slug, note in pairs(resolved.map) do
         -- Should have outlinks
-        local outlinks = note.data.outlinks
+        local outlinks = note.data.outlinks or {}
         if not outlinks or next(outlinks) == nil then
             resolved.map[slug] = nil
             goto continue
@@ -975,7 +986,12 @@ function Notes:with_title_mismatched(lowercase)
             self.map[slug] = nil
             goto continue
         end
-        local title = note.data.title.text
+        local title_data = note.data.title
+        if type(title_data) ~= "table" or type(title_data.text) ~= "string" then
+            self.map[slug] = nil
+            goto continue
+        end
+        local title = title_data.text
         local stem = note.data.stem
         if lowercase then
             title = title:lower()

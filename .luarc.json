@@ -1,0 +1,63 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime": {
+    "version": "LuaJIT",
+    "pathStrict": true,
+    "path": [
+      "lua/?.lua",
+      "lua/?/init.lua",
+      "tests/?.lua",
+      "tests/?/init.lua"
+    ]
+  },
+  "workspace": {
+    "library": [
+      "$VIMRUNTIME",
+      "${3rd}/luv/library",
+      "${3rd}/busted/library",
+      "lua",
+      "tests"
+    ],
+    "checkThirdParty": false
+  },
+  "diagnostics": {
+    "globals": ["vim", "describe", "it", "before_each", "after_each", "assert"],
+    "groupSeverity": {
+      "strong": "Warning",
+      "strict": "Warning"
+    },
+    "groupFileStatus": {
+      "ambiguity": "Opened",
+      "await": "Opened",
+      "codestyle": "None",
+      "duplicate": "Opened",
+      "global": "Opened",
+      "luadoc": "Opened",
+      "redefined": "Opened",
+      "strict": "Opened",
+      "strong": "Opened",
+      "type-check": "Opened",
+      "unbalanced": "Opened",
+      "unused": "Opened"
+    },
+    "disable": [
+      "lowercase-global"
+    ]
+  },
+  "format": {
+    "enable": false
+  },
+  "hint": {
+    "enable": true,
+    "arrayIndex": "Disable",
+    "await": true,
+    "paramName": "All",
+    "paramType": true,
+    "setType": true
+  },
+  "type": {
+    "castNumberToInteger": true,
+    "weakNilCheck": false,
+    "weakUnionCheck": false
+  }
+}

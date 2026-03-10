@@ -68,7 +68,7 @@ local function register_date_source()
 
     ---@param params cmp.SourceCompletionApiParams
     ---@param callback fun(response: lsp.CompletionResponse|nil)
-    function source:complete(params, callback)
+    function source.complete(_, params, callback)
         --- @type cmp.Context
         --- @type string
         local cursor_before_line = params.context.cursor_before_line
@@ -202,7 +202,7 @@ local function register_tags_source()
 
     ---@param params cmp.SourceCompletionApiParams
     ---@param callback fun(response: lsp.CompletionResponse|nil)
-    function source:complete(params, callback)
+    function source.complete(_, params, callback)
         local offset = params.offset
 
         local cursor_before_line = params.context.cursor_before_line
@@ -330,7 +330,7 @@ local function register_properties_sources()
 
     ---@param params cmp.SourceCompletionApiParams
     ---@param callback fun(response: lsp.CompletionResponse|nil)
-    function source:complete(params, callback)
+    function source.complete(_, params, callback)
         if is_in_frontmatter(params.context.cursor.row) == false then
             return
         end
@@ -406,7 +406,7 @@ local function register_property_values_source()
 
     ---@param params cmp.SourceCompletionApiParams
     ---@param callback fun(response: lsp.CompletionResponse|nil)
-    function source:complete(params, callback)
+    function source.complete(_, params, callback)
         --- @type vault.Properties
         local properties = state.get_global_key("properties") or require("vault.properties")()
         if is_in_frontmatter(params.context.cursor.row) == false then

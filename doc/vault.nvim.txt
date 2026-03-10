@@ -1,0 +1,184 @@
+*vault.nvim.txt*    vault.nvim help    Last change: 2026-03-10
+
+==============================================================================
+CONTENTS                                                     *vault.nvim-contents*
+
+1. Overview .................................................. |vault.nvim|
+2. Note Merge ............................................... |vault-note-merge|
+3. Note Retarget ............................................ |vault-note-retarget|
+4. Tag Promote .............................................. |vault-tags-promote|
+5. Picker Keymaps ........................................... |vault-picker-keymaps|
+
+==============================================================================
+OVERVIEW                                                            *vault.nvim*
+
+These help topics cover the interactive note-retarget, note-merge, and
+tag-promotion workflows.
+
+The shared idea is a combined target picker that can resolve to:
+
+- any existing note slug
+- a resolved wikilink target
+- an unresolved wikilink slug
+
+When a bare unresolved slug uniquely matches an existing note by basename,
+vault.nvim canonicalizes it to that existing note before executing the action.
+
+Example:
+
+>
+    Initiative - mytt
+<
+
+will resolve to:
+
+>
+    References/Initiative - mytt
+<
+
+when that is the unique existing note with the same basename.
+
+==============================================================================
+NOTE MERGE                                                *vault-note-merge*
+
+Command:
+
+>
+    :Vault note merge [source-slug] [target-slug]
+<
+
+Use this to absorb one note into another.
+
+Behavior:
+
+- target note survives
+- source note is moved to `.trash/`
+- wikilinks to the source are rewritten to the target
+- metadata conflicts open the merge conflict picker
+- if the target does not exist yet, it is created first
+
+Invocation modes:
+
+>
+    :Vault note merge
+<
+
+Uses the current note as the source and opens the combined target picker.
+
+>
+    :Vault note merge target-slug
+<
+
+If a current note exists, uses it as the source and merges into `target-slug`.
+Otherwise treats the argument as the source and opens the target picker.
+
+>
+    :Vault note merge source-slug target-slug
+<
+
+Merges directly with no target picker.
+
+==============================================================================
+NOTE RETARGET                                            *vault-note-retarget*
+
+Notes picker keymap:
+
+>
+    <C-r>
+<
+
+For a single selected note, this opens the combined resolve UI and behaves as a
+smart retarget flow.
+
+If you pick an existing target:
+
+- the selected note is merged into that target
+
+If you choose the create row:
+
+- the selected note is renamed to the current query text
+
+If all picker results are filtered out and you press `<CR>`:
+
+- vault.nvim treats the current query as a create target
+- this lets you rename/retarget directly to what you typed without clearing the filter
+
+You can also force creation explicitly with:
+
+>
+    <C-n>
+<
+
+This uses the current query as the create target even when matching results still
+exist in the picker.
+
+If the query is empty:
+
+- nothing changes
+
+For multiple selected notes, `<C-r>` keeps the existing batch rename popup.
+
+This is useful when you are unsure whether you want to rename a note to a new
+slug or merge it into something that already exists.
+
+==============================================================================
+TAG PROMOTE                                              *vault-tags-promote*
+
+Command:
+
+>
+    :Vault tags promote <tag> [note-slug] [--frontmatter]
+<
+
+Promote a hashtag into a canonical note link.
+
+Default behavior:
+
+- inline body `#tag` occurrences are rewritten to `[[note]]`
+- frontmatter `tags:` entries are left unchanged
+
+With `--frontmatter`:
+
+- frontmatter tag occurrences are rewritten too
+
+If `[note-slug]` is omitted:
+
+- the combined resolve picker opens
+- you can choose an existing note, resolved wikilink, or unresolved wikilink
+- if all results are filtered out, pressing `<CR>` creates/promotes to the typed query
+- pressing `<C-n>` forces creation/promote to the typed query even if results still exist
+
+If `[note-slug]` is given:
+
+- the command promotes directly to that slug
+
+If the chosen target note does not exist yet:
+
+- vault.nvim creates it first
+
+Tags picker keymap:
+
+>
+    <C-p>
+<
+
+Promotes the selected tag using the same combined target picker.
+
+==============================================================================
+PICKER KEYMAPS                                        *vault-picker-keymaps*
+
+Notes picker:
+
+- `<CR>` edit selected note
+- `<C-j>` merge selected note into another target chosen from notes and wikilinks
+- `<C-r>` smart retarget for one note; batch rename for multiple notes
+- row suffix shows link counts: `out` = outgoing wikilinks, `in` = backlinks,
+  `dang` = unresolved outgoing wikilinks
+
+Tags picker:
+
+- `<CR>` drill into notes with this tag
+- `<C-p>` promote selected tag into a canonical target chosen from notes and wikilinks
+
+==============================================================================
+vim:tw=78:ts=8:noet:ft=help:norl:

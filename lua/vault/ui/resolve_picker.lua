@@ -29,8 +29,10 @@ local M = {}
 --- @class vault.ui.ResolvePickerOpts
 --- @field wikilink vault.Wikilink The wikilink to resolve
 --- @field wikilinks? table<string, vault.Wikilink> All wikilinks (for wikilink source entries)
+--- @field prompt_slug? string Override slug shown in the prompt title
+--- @field include_create? boolean Whether to include the create-new-note special entry
 --- @field prompt_prefix? string Prefix for the prompt title (e.g. "(1/6) ")
---- @field on_resolve fun(result: { action: string, slug: string? }) Called with the chosen action
+--- @field on_resolve fun(result: { action: string, slug: string?, prompt?: string }) Called with the chosen action
 --- @field on_cancel? fun() Called when the user cancels
 
 --- @class ResolveEntry
@@ -47,16 +49,63 @@ local M = {}
 --- Source type icons and highlight groups
 local SOURCE_ICONS = {
     suggestion = "★",
-    note       = "◆",
-    wikilink   = "◇",
-    special    = "·",
+    note = "◆",
+    wikilink = "◇",
+    special = "·",
 }
+
+---@param selection table|nil
+---@param prompt string|nil
+---@param include_create boolean|nil
+---@return table|nil
+local function submit_result(selection, prompt, include_create)
+    local typed = vim.trim(prompt or "")
+    if not selection or not selection.value then
+        if include_create ~= false and typed ~= "" then
+            return {
+                action = "create",
+                slug = typed,
+                prompt = typed,
+            }
+        end
+        return nil
+    end
+
+    if selection.value.action == "create" and typed ~= "" then
+        return {
+            action = "create",
+            slug = typed,
+            prompt = typed,
+        }
+    end
+
+    return {
+        action = selection.value.action,
+        slug = selection.value.slug,
+        prompt = typed,
+    }
+end
+
+---@param prompt string|nil
+---@param include_create boolean|nil
+---@return table|nil
+local function force_create_result(prompt, include_create)
+    local typed = vim.trim(prompt or "")
+    if include_create == false or typed == "" then
+        return nil
+    end
+    return {
+        action = "create",
+        slug = typed,
+        prompt = typed,
+    }
+end
 
 --- Build entries for the resolve picker.
 --- @param wl vault.Wikilink
 --- @param wikilinks? table<string, vault.Wikilink>
 --- @return ResolveEntry[]
-local function build_entries(wl, wikilinks)
+local function build_entries(wl, wikilinks, include_create)
     local entries = {}
     local seen = {}
     local slug = wl.data and wl.data.slug or ""
@@ -137,13 +186,15 @@ local function build_entries(wl, wikilinks)
     end
 
     -- 4. Special entries
-    entries[#entries + 1] = {
-        slug = slug,
-        action = "create",
-        ordinal = "create " .. slug,
-        sort_priority = 90000,
-        source = "special",
-    }
+    if include_create ~= false then
+        entries[#entries + 1] = {
+            slug = slug,
+            action = "create",
+            ordinal = "create " .. slug,
+            sort_priority = 90000,
+            source = "special",
+        }
+    end
     entries[#entries + 1] = {
         slug = nil,
         action = "skip",
@@ -153,7 +204,9 @@ local function build_entries(wl, wikilinks)
     }
 
     -- Sort by priority (suggestions first, then notes, wikilinks, specials)
-    table.sort(entries, function(a, b) return a.sort_priority < b.sort_priority end)
+    table.sort(entries, function(a, b)
+        return a.sort_priority < b.sort_priority
+    end)
 
     return entries
 end
@@ -172,18 +225,20 @@ function M.open(opts)
     local utils = require("vault.utils")
 
     local wl = opts.wikilink
-    local slug = wl.data and wl.data.slug or "?"
+    local slug = opts.prompt_slug or (wl.data and wl.data.slug) or "?"
     local prefix = opts.prompt_prefix or ""
     local on_resolve = opts.on_resolve
     local on_cancel = opts.on_cancel or function() end
 
-    local entries = build_entries(wl, opts.wikilinks)
+    local entries = build_entries(wl, opts.wikilinks, opts.include_create)
 
     -- Compute column widths
     local slug_max = 0
     for _, e in ipairs(entries) do
         local s = e.slug or ""
-        if #s > slug_max then slug_max = #s end
+        if #s > slug_max then
+            slug_max = #s
+        end
     end
     slug_max = math.min(slug_max, 60) -- cap for very long slugs
 
@@ -200,10 +255,10 @@ function M.open(opts)
     local displayer = entry_display.create({
         separator = " ",
         items = {
-            { width = 2 },                  -- source icon
-            { width = 6 },                  -- score/info
-            { width = slug_max + 2 },       -- slug
-            { remaining = true },            -- context
+            { width = 2 }, -- source icon
+            { width = 6 }, -- score/info
+            { width = slug_max + 2 }, -- slug
+            { remaining = true }, -- context
         },
     })
 
@@ -230,7 +285,9 @@ function M.open(opts)
             icon_hl = "TelescopeResultsDiffAdd"
             local pct = math.floor((e.score or 0) * 100 + 0.5)
             info = pct .. "%"
-            info_hl = pct >= 80 and "DiagnosticOk" or pct >= 50 and "DiagnosticWarn" or "DiagnosticError"
+            info_hl = pct >= 80 and "DiagnosticOk"
+                or pct >= 50 and "DiagnosticWarn"
+                or "DiagnosticError"
             context = e.strategy or ""
             slug_hl = "TelescopeResultsDiffAdd"
         elseif e.source == "note" then
@@ -342,12 +399,14 @@ function M.open(opts)
                 }
                 if e.source == "suggestion" then
                     local pct = math.floor((e.score or 0) * 100 + 0.5)
-                    lines[#lines + 1] = string.format("Suggestion match: %d%% (%s)", pct, e.strategy or "")
+                    lines[#lines + 1] =
+                        string.format("Suggestion match: %d%% (%s)", pct, e.strategy or "")
                     lines[#lines + 1] = ""
                 end
                 if e.source == "wikilink" then
                     lines[#lines + 1] = e.resolved and "Resolved wikilink" or "Unresolved wikilink"
-                    lines[#lines + 1] = string.format("Referenced in %d source(s)", e.sources_n or 0)
+                    lines[#lines + 1] =
+                        string.format("Referenced in %d source(s)", e.sources_n or 0)
                     lines[#lines + 1] = ""
                 end
                 lines[#lines + 1] = "_No file found at expected path._"
@@ -367,16 +426,26 @@ function M.open(opts)
         attach_mappings = function(prompt_bufnr, map)
             actions.select_default:replace(function()
                 local selection = action_state.get_selected_entry()
+                local result =
+                    submit_result(selection, action_state.get_current_line(), opts.include_create)
                 actions.close(prompt_bufnr)
-                if not selection or not selection.value then
+                if not result then
                     on_cancel()
                     return
                 end
-                on_resolve({
-                    action = selection.value.action,
-                    slug = selection.value.slug,
-                })
+                on_resolve(result)
             end)
+
+            local function force_create()
+                local result =
+                    force_create_result(action_state.get_current_line(), opts.include_create)
+                actions.close(prompt_bufnr)
+                if not result then
+                    on_cancel()
+                    return
+                end
+                on_resolve(result)
+            end
 
             -- Handle <Esc> / close as cancel
             local function cancel_close()
@@ -386,6 +455,8 @@ function M.open(opts)
             map("i", "<Esc>", cancel_close)
             map("n", "<Esc>", cancel_close)
             map("n", "q", cancel_close)
+            map("i", "<C-n>", force_create)
+            map("n", "<C-n>", force_create)
 
             -- Cleanup gradient highlights on close
             if colors then
@@ -404,5 +475,8 @@ function M.open(opts)
 
     picker:find()
 end
+
+M._submit_result = submit_result
+M._force_create_result = force_create_result
 
 return M

@@ -10,7 +10,7 @@ local M = {}
 
 --- Context-aware completion for :Vault subcommands.
 --- Walks the subcommand tree to offer completions at the correct depth.
-function M.api(_, line, _)
+function M.api(arg_lead, line, pos)
     line = line or ""
     local parts = vim.split(line, "%s+", { trimempty = true })
 
@@ -40,12 +40,11 @@ function M.api(_, line, _)
             else
                 -- No deeper match — try node's own complete function
                 if node.complete then
-                    return node.complete(part)
+                    return node.complete(part, line, pos)
                 end
                 return {}
             end
         end
-        prefix = ""
     else
         -- Last token is the prefix being completed
         for i = 1, #parts - 1 do
@@ -54,7 +53,7 @@ function M.api(_, line, _)
                 node = child
             else
                 if node.complete then
-                    return node.complete(parts[i] or "")
+                    return node.complete(parts[i] or "", line, pos)
                 end
                 return {}
             end
@@ -64,7 +63,7 @@ function M.api(_, line, _)
 
     -- If node has a `complete` function, defer to it
     if node.complete then
-        return node.complete(prefix)
+        return node.complete(arg_lead or prefix, line, pos)
     end
 
     -- Otherwise, list child subcommand names matching prefix
@@ -87,6 +86,28 @@ function M.note_slugs(_, _, _)
     local notes_slugs = require("vault.core.state").get_global_key("cache.notes.slugs")
         or require("vault.scanner").slugs()
     return vim.tbl_keys(notes_slugs)
+end
+
+--- Returns unique wikilink targets/slugs from the vault wikilink set.
+--- Includes all note slugs plus resolved/unresolved wikilink slugs.
+---@return string[]
+function M.wikilink_slugs(_, _, _)
+    local note_slugs = require("vault.scanner").slugs() or {}
+    local combined = vim.tbl_keys(note_slugs)
+    local seen = {}
+    for _, slug in ipairs(combined) do
+        seen[slug] = true
+    end
+
+    local wikilinks = require("vault.wikilinks")()
+    for _, wl in pairs(wikilinks.map or {}) do
+        local slug = (wl.data and (wl.data.target or wl.data.slug)) or nil
+        if type(slug) == "string" and slug ~= "" and not seen[slug] then
+            seen[slug] = true
+            combined[#combined + 1] = slug
+        end
+    end
+    return combined
 end
 
 --- Returns the list of note available data keys
@@ -187,15 +208,12 @@ function M.note_tags(_, line, _)
         return {}
     end
 
-    local tags = {}
-
     if not current_path:match(config.options.ext .. "$") then
         return M.tags()
     end
 
     local note = require("vault.notes.note")(vim.fn.expand("%:p"))
-    tags = vim.tbl_keys(note.data.tags)
-    return tags
+    return vim.tbl_keys(note.data.tags)
 end
 
 --- Returns the list of vault notes presets
@@ -241,9 +259,8 @@ function M.note(_, line, _)
         -- TODO: Decide what to return
         -- return args for the method?
         return M.note_slugs()
-    elseif #fargs > 3 then
-        -- TODO: Decide what to return
     end
+    return {}
 end
 
 return M

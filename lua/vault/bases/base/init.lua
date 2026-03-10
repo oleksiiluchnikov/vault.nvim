@@ -1,15 +1,33 @@
 local Object = require("vault.core.object")
 local state = require("vault.core.state")
 
+---@alias vault.Base.FilterTree table<string, unknown>
+---@alias vault.Base.Formulas table<string, string>
+
+---@class vault.Base.PropertyConfig
+---@field displayName? string
+
+---@class vault.Base.ViewConfig
+---@field type string
+---@field name? string
+---@field order? integer
+---@field group_by? string
+---@field group_values? string[]
+---@field display_fields? string[]
+---@field render_mode? string
+---@field date_field? string
+---@field end_date_field? string
+---@field primary_field? string
+
 --- @class vault.Base.Data
---- @field path string Absolute path to the .base file
---- @field relpath string Relative path from vault root
+--- @field path vault.path Absolute path to the .base file
+--- @field relpath vault.relpath Relative path from vault root
 --- @field name string Base name (file stem without extension)
 --- @field slug string Unique identifier (same as name for bases)
---- @field filters? table The parsed filter tree (and:/or:/not: structure)
---- @field formulas? table<string, string> Named formula expressions
---- @field properties? table<string, table> Property display configuration
---- @field views? table[] Array of view definitions (type, name, order, group_by, etc.)
+--- @field filters? vault.Base.FilterTree The parsed filter tree (and:/or:/not: structure)
+--- @field formulas? vault.Base.Formulas Named formula expressions
+--- @field properties? table<string, vault.Base.PropertyConfig> Property display configuration
+--- @field views? vault.Base.ViewConfig[] Array of view definitions
 
 --- @class vault.Base: vault.Object
 --- @field data vault.Base.Data
@@ -18,7 +36,7 @@ local Base = Object("VaultBase")
 
 --- Initialize a Base object from raw scanner data.
 ---
---- @param this vault.Base.Data|table Raw data from the Rust scanner or manual construction
+--- @param this vault.Base.Data|table<string, unknown> Raw data from the Rust scanner or manual construction
 function Base:init(this)
     if type(this) ~= "table" then
         error("Base:init() expects a table, got " .. type(this))
@@ -128,7 +146,7 @@ end
 --- Evaluate formulas for a single note, returning computed values.
 ---
 --- @param note vault.Note The note to evaluate formulas against
---- @return table<string, any> formula_name -> computed_value
+--- @return table<string, unknown> formula_name -> computed_value
 function Base:evaluate_formulas(note)
     if not self:has_formulas() then
         return {}

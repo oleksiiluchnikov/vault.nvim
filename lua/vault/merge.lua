@@ -3,6 +3,16 @@
 --- rewrites all [[B]] wikilinks to [[A]], and trashes B.
 --- Works standalone or from the process buffer (J keymap).
 
+---@class vault.merge.Module
+---@field plan fun(target_path: string, source_path: string, opts?: vault.merge.Options): vault.merge.Plan|nil, string|nil
+---@field absorb fun(path_a: string, path_b: string, resolved?: table<string, vault.merge.ConflictChoice>, opts?: vault.merge.AbsorbOptions): nil
+---@field merge fun(target_path: string, source_path: string, opts?: vault.merge.MergeOptions): nil
+---@field safe_absorb_many fun(specs: vault.merge.BatchSafeAbsorbSpec[], opts?: vault.merge.SafeAbsorbManyOptions): vault.merge.BatchSafeAbsorbResult
+---@field absorb_many fun(specs: vault.merge.BatchAbsorbSpec[], opts?: vault.merge.AbsorbManyOptions): vault.merge.BatchSafeAbsorbResult
+---@field resolve_conflicts_with_biases fun(conflicts: vault.merge.FieldConflict[]): table<string, vault.merge.ConflictChoice>, vault.merge.FieldConflict[]
+---@field open_conflict_picker fun(target_slug: string, source_slug: string, conflicts: vault.merge.FieldConflict[], on_done: fun(resolved: table<string, vault.merge.ConflictChoice>)): nil
+
+---@type vault.merge.Module
 local M = {}
 
 local config = require("vault.config")
@@ -10,7 +20,9 @@ local log = require("vault.log").scope("merge")
 
 ---@return table<string, boolean>
 local function ignored_conflict_fields()
+    ---@type string[]
     local configured = config.options.merge and config.options.merge.ignored_conflict_fields or {}
+    ---@type table<string, boolean>
     local result = {}
     for _, key in ipairs(configured) do
         result[key] = true
@@ -22,6 +34,24 @@ end
 ---@field field string
 ---@field val_a any
 ---@field val_b any
+
+---@class vault.merge.Options
+---@field resolved? table<string, vault.merge.ConflictChoice>
+---@field body_strategy? string
+---@field paths? table<string, table>
+---@field on_done? fun()
+---@field silent? boolean
+
+---@class vault.merge.AbsorbOptions
+---@field bufnr? integer
+---@field on_done? fun()
+---@field body_strategy? string
+---@field paths? table<string, table>
+
+---@class vault.merge.MergeOptions : vault.merge.AbsorbOptions
+
+---@class vault.merge.SafeAbsorbManyOptions
+---@field silent? boolean
 
 ---@alias vault.merge.ConflictChoice "a"|"b"
 ---@alias vault.merge.ConflictBiasPreset "a"|"b"|"earliest"|"latest"
@@ -69,25 +99,34 @@ end
 ---@field source_path string
 ---@field merged_lines string[]
 
+---@class vault.merge.AbsorbManyOptions
+---@field silent? boolean
+---@field paths? table<string, table>
+
 ---@class vault.merge.BatchSafeAbsorbResult
 ---@field applied integer
 ---@field patched integer
 ---@field trashed integer
 ---@field skipped integer
 
+--- Frontmatter fields parsed from a note file.
+---@alias vault.merge.FrontmatterFields table<string, string|string[]>
+
 --- Read the full content of a file, split into frontmatter fields, body lines.
----@param path string
----@return table|nil fields, string[]|nil body_lines, string[]|nil raw_lines
+---@param path vault.path
+---@return vault.merge.FrontmatterFields|nil fields, string[]|nil body_lines, string[]|nil raw_lines
 local function parse_note(path)
     local ok, lines = pcall(vim.fn.readfile, path)
     if not ok or #lines == 0 then
         return nil, nil, nil
     end
 
+    ---@type vault.merge.FrontmatterFields
     local fields = {}
     local body_start = 1
 
     if lines[1] and lines[1]:match("^%-%-%-$") then
+        ---@type integer|nil
         local fm_end = nil
         for i = 2, math.min(#lines, 200) do
             if lines[i]:match("^%-%-%-$") then
@@ -98,7 +137,10 @@ local function parse_note(path)
         if fm_end then
             body_start = fm_end + 1
             -- Parse frontmatter
-            local current_key, current_list = nil, nil
+            ---@type string|nil
+            local current_key
+            ---@type string[]|nil
+            local current_list
             for i = 2, fm_end - 1 do
                 local l = lines[i]
                 local list_item = l:match("^%s+%-%s+(.+)")
@@ -130,6 +172,7 @@ local function parse_note(path)
         end
     end
 
+    ---@type string[]
     local body = {}
     for i = body_start, #lines do
         table.insert(body, lines[i])
@@ -138,7 +181,7 @@ local function parse_note(path)
     return fields, body, lines
 end
 
----@param key string
+---@param key string  frontmatter field key
 ---@return boolean
 local function is_noisy_field(key)
     return ignored_conflict_fields()[key] == true
@@ -163,8 +206,8 @@ end
 ---@param value any
 ---@return string
 local function normalize_value_for_compare(value)
-    value = value
     if type(value) == "table" then
+        ---@type string[]
         local items = {}
         for _, item in ipairs(value) do
             items[#items + 1] = tostring(item)
@@ -195,7 +238,7 @@ end
 
 ---@return vault.merge.ConflictBiasBehavior
 local function configured_conflict_bias_behavior()
-    local behavior = config.options.merge and config.options.merge.conflict_bias_behavior or nil
+    local behavior = config.options.merge and config.options.merge.conflict_bias_behavior
     if behavior == "preselect" then
         return "preselect"
     end
@@ -367,7 +410,9 @@ end
 ---@param conflicts vault.merge.FieldConflict[]
 ---@return table<string, any>, vault.merge.FieldConflict[]
 local function resolve_conflicts_with_biases(conflicts)
+    ---@type table<string, any>
     local resolved = {}
+    ---@type vault.merge.FieldConflict[]
     local unresolved = {}
 
     for _, conflict in ipairs(conflicts or {}) do
@@ -392,16 +437,21 @@ local function default_conflict_choice(conflict)
     return resolve_conflict_bias(conflict) or "a"
 end
 
----@param fields_a table
----@param fields_b table
+---@param fields_a vault.merge.FrontmatterFields
+---@param fields_b vault.merge.FrontmatterFields
 ---@param resolved? table<string, any>
 ---@return vault.merge.FieldPlan
 local function plan_field_merge(fields_a, fields_b, resolved)
     resolved = resolved or {}
+    ---@type vault.merge.FrontmatterFields
     local merged = vim.deepcopy(fields_a)
+    ---@type string[]
     local added_fields = {}
+    ---@type string[]
     local extended_fields = {}
+    ---@type vault.merge.FieldConflict[]
     local conflicts = {}
+    ---@type string[]
     local ignored_fields = {}
 
     for key, val_b in pairs(fields_b) do
@@ -420,6 +470,7 @@ local function plan_field_merge(fields_a, fields_b, resolved)
             merged[key] = clone_value(val_b)
             added_fields[#added_fields + 1] = key
         elseif type(val_a) == "table" and type(val_b) == "table" then
+            ---@type table<string, boolean>
             local seen = {}
             for _, v in ipairs(val_a) do
                 seen[tostring(v)] = true
@@ -461,28 +512,30 @@ local function plan_field_merge(fields_a, fields_b, resolved)
 end
 
 --- Detect field conflicts between two notes.
----@param fields_a table
----@param fields_b table
----@return { field: string, val_a: any, val_b: any }[]
+---@param fields_a vault.merge.FrontmatterFields
+---@param fields_b vault.merge.FrontmatterFields
+---@return vault.merge.FieldConflict[]
 local function detect_conflicts(fields_a, fields_b)
     return plan_field_merge(fields_a, fields_b, {}).conflicts
 end
 
 --- Merge fields: A wins by default, resolved overrides apply, arrays are unioned.
----@param fields_a table
----@param fields_b table
+---@param fields_a vault.merge.FrontmatterFields
+---@param fields_b vault.merge.FrontmatterFields
 ---@param resolved? table<string, any>  field → chosen value (from picker)
----@return table merged
+---@return vault.merge.FrontmatterFields merged
 local function merge_fields(fields_a, fields_b, resolved)
     return plan_field_merge(fields_a, fields_b, resolved).merged_fields
 end
 
 --- Build frontmatter YAML lines from a fields table.
----@param fields table
+---@param fields vault.merge.FrontmatterFields
 ---@return string[]
 local function build_frontmatter(fields)
+    ---@type string[]
     local lines = { "---" }
     -- Sort keys for deterministic output
+    ---@type string[]
     local keys = vim.tbl_keys(fields)
     table.sort(keys)
     for _, key in ipairs(keys) do
@@ -530,6 +583,7 @@ end
 ---@param body_strategy? string
 ---@return string[]
 local function build_merged_note_lines(merged_fields, body_a, body_b, source_slug, body_strategy)
+    ---@type string[]
     local merged_lines = build_frontmatter(merged_fields)
 
     if body_a then
@@ -565,6 +619,7 @@ end
 ---@param body_lines string[]|nil
 ---@return string
 local function normalize_body_for_compare(path, body_lines)
+    ---@type string[]
     local normalized_lines = {}
     for _, line in ipairs(body_lines or {}) do
         local normalized_line = (line or ""):gsub("\r$", "")
@@ -591,6 +646,7 @@ end
 ---@param conflicts { field: string, val_a: any, val_b: any }[]
 ---@param on_resolve fun(resolved: table<string, any>)
 function M.open_conflict_picker(slug_a, slug_b, conflicts, on_resolve)
+    ---@type vault.merge.ConflictChoice[]
     local choices = {} -- index → "a" or "b"
     for i, conflict in ipairs(conflicts) do
         choices[i] = default_conflict_choice(conflict)
@@ -598,9 +654,14 @@ function M.open_conflict_picker(slug_a, slug_b, conflicts, on_resolve)
 
     -- Pre-compute column widths for alignment
     local MAX_VAL = 38 -- max display width for each value column
+    ---@param v any
+    ---@return string
     local function val_str(v)
         return type(v) == "table" and table.concat(v, ", ") or tostring(v)
     end
+    ---@param s string
+    ---@param max integer
+    ---@return string
     local function truncate(s, max)
         if #s <= max then
             return s
@@ -628,9 +689,11 @@ function M.open_conflict_picker(slug_a, slug_b, conflicts, on_resolve)
     local total_w = 1 + field_w + 2 + 2 + val_a_w + 5 + 2 + val_b_w
     local width = math.max(total_w, 60)
 
+    ---@return string[]
     local function render_lines()
         local header = string.format(" Merge: %s ← %s", slug_a, slug_b)
         local sep_line = " " .. string.rep("─", width - 2)
+        ---@type string[]
         local lines = { header, sep_line }
         for i, c in ipairs(conflicts) do
             local a_str = truncate(val_str(c.val_a), MAX_VAL)
@@ -694,11 +757,13 @@ function M.open_conflict_picker(slug_a, slug_b, conflicts, on_resolve)
         end
     end
 
+    ---@type { buffer: integer, nowait: boolean, silent: boolean }
     local kopts = { buffer = buf, nowait = true, silent = true }
 
     ---@param remember boolean
     local function confirm_choices(remember)
         close()
+        ---@type table<string, any>
         local resolved = {}
         for i, c in ipairs(conflicts) do
             resolved[c.field] = choices[i] == "a" and c.val_a or c.val_b
@@ -752,7 +817,7 @@ end
 
 ---@param path_a string
 ---@param path_b string
----@param opts? { resolved?: table<string, any>, body_strategy?: string }
+---@param opts? vault.merge.Options
 ---@return vault.merge.Plan|nil, string|nil
 function M.plan(path_a, path_b, opts)
     opts = opts or {}
@@ -763,6 +828,7 @@ function M.plan(path_a, path_b, opts)
     local fields_a, body_a, raw_a = parse_note(path_a)
     local fields_b, body_b, raw_b = parse_note(path_b)
     if not fields_a or not fields_b or not raw_a or not raw_b then
+        ---@type string[]
         local missing = {}
         if not fields_a then
             table.insert(missing, slug_a .. " (" .. path_a .. ")")
@@ -803,8 +869,8 @@ end
 --- Absorb note B into note A.
 ---@param path_a string
 ---@param path_b string
----@param resolved? table<string, any>  resolved conflict fields
----@param opts? { bufnr?: integer, on_done?: fun(), body_strategy?: string, paths?: table<string, table> }
+---@param resolved? table<string, vault.merge.ConflictChoice>  resolved conflict fields
+---@param opts? vault.merge.AbsorbOptions
 function M.absorb(path_a, path_b, resolved, opts)
     opts = opts or {}
     local utils = require("vault.utils")
@@ -821,6 +887,7 @@ function M.absorb(path_a, path_b, resolved, opts)
         return
     end
 
+    ---@type table<string, string[]>
     local snapshot_files = {}
     snapshot_files[path_a] = plan.raw_a
     snapshot_files[path_b] = plan.raw_b
@@ -907,7 +974,7 @@ end
 --- If conflicts exist, opens a picker. Otherwise absorbs silently.
 ---@param path_a string  path of the surviving note
 ---@param path_b string  path of the absorbed note
----@param opts? { bufnr?: integer, on_done?: fun(), body_strategy?: string, paths?: table<string, table> }
+---@param opts? vault.merge.MergeOptions
 function M.merge(path_a, path_b, opts)
     opts = opts or {}
     local plan, err = M.plan(path_a, path_b, {
@@ -936,7 +1003,7 @@ end
 --- This is for cases where target body should stay as-is and source is only
 --- used for metadata enrichment plus link rewrite + trash.
 ---@param specs vault.merge.BatchSafeAbsorbSpec[]
----@param opts? { silent?: boolean }
+---@param opts? vault.merge.SafeAbsorbManyOptions
 ---@return vault.merge.BatchSafeAbsorbResult
 function M.safe_absorb_many(specs, opts)
     opts = opts or {}
@@ -949,6 +1016,7 @@ function M.safe_absorb_many(specs, opts)
     local watcher = Watcher()
     watcher:disable_oil_guard()
 
+    ---@type { old_path: string, new_path: string }[]
     local renames = {}
     local applied = 0
     local trashed = 0
@@ -1019,7 +1087,7 @@ end
 
 --- Batch-apply arbitrary absorbs with a single rename rewrite pass.
 ---@param specs vault.merge.BatchAbsorbSpec[]
----@param opts? { silent?: boolean, paths?: table<string, table> }
+---@param opts? vault.merge.AbsorbManyOptions
 ---@return vault.merge.BatchSafeAbsorbResult
 function M.absorb_many(specs, opts)
     opts = opts or {}
@@ -1032,6 +1100,7 @@ function M.absorb_many(specs, opts)
     local watcher = Watcher()
     watcher:disable_oil_guard()
 
+    ---@type { old_path: string, new_path: string }[]
     local renames = {}
     local applied = 0
     local trashed = 0

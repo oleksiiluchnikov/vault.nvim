@@ -123,7 +123,6 @@ end
 
 function Parser.wikilinks_from_line(line)
     local wikilinks = {}
-    local seen = {} -- Track seen wikilinks to avoid duplicates
     local wikilink_pattern = "%[%[([^%[%]]+)%]%]"
     for wikilink in line:gmatch(wikilink_pattern) do
         table.insert(wikilinks, wikilink)

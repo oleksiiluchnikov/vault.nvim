@@ -86,8 +86,7 @@ end
 --- @param content? string - The content for the note (optional).
 --- @param opts? vault.ui.Popup.FleetingNote.options - The options for the popup (optional).
 --- @return nil
-function PopupFleetingNote:init(content, opts)
-    content = content or ""
+function PopupFleetingNote.init(_, _, opts)
     if not opts or next(opts) == nil then
         opts = (config.options.ui and config.options.ui.popups and config.options.ui.popups.fleeting_note)
             or (config.options.popups and config.options.popups.fleeting_note)

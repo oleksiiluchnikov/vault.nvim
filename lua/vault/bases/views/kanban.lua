@@ -387,15 +387,12 @@ local function apply_group_change(st, slug, field_key, new_value)
   elseif st.group_mode == "tag_prefix" then
     -- Remove old tag with prefix, add new tag with prefix
     local prefix = st.tag_prefix or ""
-    local old_tag = nil
     local fm = shared.read_frontmatter_fields(path, { "tags" })
     local tags = fm.tags or {}
     if type(tags) == "table" then
       local new_tags = {}
       for _, t in ipairs(tags) do
-        if type(t) == "string" and t:sub(1, #prefix + 1) == prefix .. "/" then
-          old_tag = t
-        else
+        if not (type(t) == "string" and t:sub(1, #prefix + 1) == prefix .. "/") then
           table.insert(new_tags, t)
         end
       end
@@ -732,7 +729,6 @@ end
 local function make_on_refresh(st)
   return function(done)
     -- Rescan notes
-    local notes
     if st.base then
       local all_notes = require("vault.notes")()
       local notes_map = all_notes.map or {}

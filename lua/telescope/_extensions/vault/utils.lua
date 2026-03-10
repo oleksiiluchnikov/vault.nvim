@@ -1,12 +1,8 @@
 local utils = {}
-local action_state = require("telescope.actions.state")
 local actions_state = require("telescope.actions.state")
 local vault_state = require("vault.core.state")
 
-function utils.get_selected_files(prompt_bufnr, smart)
-    local selected = {}
-    local current_picker = action_state.get_current_picker(prompt_bufnr)
-    local selections = current_picker:get_multi_selection()
+function utils.get_selected_files(_prompt_bufnr, _smart)
     -- TODO: implement get_selected_files
     -- if smart and vim.tbl_isempty(selections) then
     --     table.insert(selected, action_state.get_selected_entry())
