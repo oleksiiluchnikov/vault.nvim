@@ -524,6 +524,47 @@ describe("grid (integration)", function()
 
       assert.are_not.equal(bufnr1, bufnr2)
     end)
+
+    it("passes process.identity_mode to vimtable grid when slug is hidden", function()
+      if not check_config() then return pending("needs vault config") end
+      local cfg = require("vault.config")
+      local Notes = require("vault.notes")
+      local notes = Notes()
+      local old_mode = cfg.options.process.identity_mode
+      local old_mod = package.loaded["vimtable.views.grid"]
+      local captured
+
+      package.loaded["vimtable.views.grid"] = {
+        Grid = {
+          new = function(opts)
+            captured = opts.identity
+            local bufnr = vim.api.nvim_create_buf(false, true)
+            return {
+              bufnr = function() return bufnr end,
+              attach = function() vim.api.nvim_set_current_buf(bufnr) end,
+              state = function() return { snapshot = { data = {} } } end,
+              diff = function() return { updates = {}, deletes = {}, creates = {}, custom = {}, errors = {} } end,
+              reload = function() end,
+              cycle_sort = function() end,
+              sort_by_cursor = function() end,
+              resize_column = function() end,
+              resize_cursor_column = function() end,
+              move_column = function() end,
+              move_cursor_column = function() end,
+              records = function() return {} end,
+            }
+          end,
+        },
+      }
+
+      cfg.options.process.identity_mode = "extmark"
+      ge.open({ notes = notes, filter_desc = "grid-extmark-mode-prop", columns = { "title", "status" } })
+
+      cfg.options.process.identity_mode = old_mode
+      package.loaded["vimtable.views.grid"] = old_mod
+
+      assert.are.equal("extmark", captured)
+    end)
   end)
 
   -- ── Base-driven open ─────────────────────────────────────────────────────
