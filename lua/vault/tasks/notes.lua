@@ -1,6 +1,9 @@
 local log = require("vault.log").scope("tasks.notes")
-local shared = require("vault.bases.views.shared")
+local shared = require("vault.views.shared")
 local tasks_config = require("vault.tasks.config")
+local task_paths = require("vault.tasks.paths")
+local task_policy = require("vault.tasks.policy")
+local task_create = require("vault.tasks.create")
 
 local M = {}
 
@@ -25,80 +28,10 @@ local WEEKDAY_TO_NUM = {
     saturday = 7,
 }
 
-local function status_order_map()
-    local map = {}
-    for idx, status in ipairs(tasks_config.get().status_order or {}) do
-        map[status] = idx
-    end
-    return map
-end
-
-local function priority_order_map()
-    local map = {}
-    for idx, priority in ipairs(tasks_config.get().priority_order or {}) do
-        map[priority] = idx
-    end
-    return map
-end
-
-local function completed_status_set()
-    local map = {}
-    for _, status in ipairs(tasks_config.get().completed_statuses or {}) do
-        map[status] = true
-    end
-    return map
-end
-
-local function transition_map()
-    return tasks_config.get().transitions or {}
-end
-
 --- Return the plugin-level task_notes config table (or an empty table when absent).
 --- @return table
 local function cfg()
     return tasks_config.get() or {}
-end
-
---- Strip leading and trailing whitespace from a string.
---- @param value string
---- @return string
-local function trim(value)
-    return (value or ""):gsub("^%s+", ""):gsub("%s+$", "")
-end
-
---- Remove wikilink brackets from a value, e.g. `"[[foo]]"` → `"foo"`.
---- @param value string
---- @return string
-local function unwrap_link(value)
-    local out = trim(value)
-    out = out:gsub("^%[%[(.-)%]%]$", "%1")
-    return trim(out)
-end
-
---- Normalise a raw status string (possibly a wikilink or alias) to its canonical form.
---- Falls back to the unwrapped candidate if no alias matches.
---- @param value string
---- @return string
-local function normalize_status(value)
-    local candidate = unwrap_link(value)
-    if status_order_map()[candidate] then
-        return candidate
-    end
-    local lowered = candidate:lower():gsub("_", "-")
-    local aliases = tasks_config.get().aliases or {}
-    return aliases[lowered] or candidate
-end
-
---- Normalise a raw priority string to its canonical form.
---- Returns `"Priority - Medium"` when the value is unknown.
---- @param value string
---- @return string
-local function normalize_priority(value)
-    local candidate = unwrap_link(value)
-    if priority_order_map()[candidate] then
-        return candidate
-    end
-    return "Priority - Medium"
 end
 
 --- Return today's date formatted as an ISO 8601 string (`"YYYY-MM-DD"`).
@@ -114,7 +47,7 @@ end
 --- @return string|nil
 local function parse_iso_date(value)
     if type(value) ~= "string" then return nil end
-    local v = unwrap_link(value)
+    local v = task_policy.unwrap_link(value)
     local y, m, d = v:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)")
     if y then return string.format("%s-%s-%s", y, m, d) end
     y, m, d = v:match("^(%d%d%d%d)(%d%d)(%d%d)")
@@ -190,7 +123,7 @@ end
 --- @return string|nil
 local function normalize_repeat(value)
     if type(value) ~= "string" then return nil end
-    local v = trim(value):lower():gsub("%s+", " ")
+    local v = task_policy.trim(value):lower():gsub("%s+", " ")
     if v == "" then return nil end
     return v
 end
@@ -259,7 +192,7 @@ local function next_due_iso(task_values, completed_iso)
         return add_days_iso(base_done, 1)
     end
     if rule == "every week" then
-        local explicit = trim(task_values.repeat_weekday or ""):lower()
+        local explicit = task_policy.trim(task_values.repeat_weekday or ""):lower()
         local target = WEEKDAY_TO_NUM[explicit]
         if not target then
             target = weekday_num_from_iso(due_iso or base_done)
@@ -294,35 +227,28 @@ local function next_due_iso(task_values, completed_iso)
     return nil
 end
 
---- Return the absolute path to the vault root (with symlinks resolved).
---- @return string
-local function vault_root()
-    local root = require("vault.config").options.root
-    return vim.fn.resolve(vim.fn.expand(root))
-end
-
 --- Return the relative path of the tasks directory inside the vault.
 --- @return string
 function M.tasks_dir_rel()
-    return tasks_config.tasks_dir_rel()
+    return task_paths.tasks_dir_rel()
 end
 
 --- Return the absolute filesystem path of the tasks directory.
 --- @return string
 function M.tasks_dir_abs()
-    return vault_root() .. "/" .. M.tasks_dir_rel()
+    return task_paths.tasks_dir_abs()
 end
 
 --- Return the ordered list of all recognised status strings.
 --- @return string[]
 function M.statuses()
-    return vim.deepcopy(tasks_config.get().status_order or {})
+    return task_policy.statuses()
 end
 
 --- Return a timestamp string suitable for use in filenames (`"YYYYMMDDHHmmSS"`).
 --- @return string
 function M.timestamp()
-    return os.date("%Y%m%d%H%M%S")
+    return task_create.timestamp()
 end
 
 --- Sanitise a user-supplied task name for use as a filename component.
@@ -330,11 +256,7 @@ end
 --- @param name string Raw task name.
 --- @return string
 function M.sanitize_name(name)
-    local out = trim(name)
-    out = out:gsub("[\r\n\t]", " ")
-    out = out:gsub("[/\\:]", "-")
-    out = out:gsub("%s+", " ")
-    return trim(out)
+    return task_create.sanitize_name(name)
 end
 
 --- Build the filename stem for a new task file.
@@ -343,14 +265,14 @@ end
 --- @param ts string Timestamp string from `M.timestamp()`.
 --- @return string
 function M.filename(name, ts)
-    return string.format("T-%s %s", ts, M.sanitize_name(name))
+    return task_create.filename(name, ts)
 end
 
 --- Extract the filename stem (no directory, no extension) from an absolute path.
 --- @param path string Absolute filesystem path.
 --- @return string
 local function stem_from_path(path)
-    return vim.fn.fnamemodify(path, ":t:r")
+    return task_paths.stem_from_path(path)
 end
 
 --- Read frontmatter fields from a task file and return a structured note representation.
@@ -365,8 +287,8 @@ function M.read_task(path)
         "blocked_by",
     })
     local stem = stem_from_path(path)
-    local status = normalize_status(values.status or "Status - Backlog")
-    local priority = normalize_priority(values.priority or "Priority - Medium")
+    local status = task_policy.normalize_status(values.status or "Status - Backlog")
+    local priority = task_policy.normalize_priority(values.priority or "Priority - Medium")
     local blocked = values.blocked_by
     if type(blocked) ~= "table" then
         blocked = {}
@@ -375,7 +297,7 @@ function M.read_task(path)
     local blocked_by = {}
     for _, item in ipairs(blocked) do
         if type(item) == "string" and item ~= "" then
-            blocked_by[#blocked_by + 1] = unwrap_link(item)
+            blocked_by[#blocked_by + 1] = task_policy.unwrap_link(item)
         end
     end
     return {
@@ -432,11 +354,11 @@ end
 --- @param by_stem table<string, vault.TasksNote> Index of all tasks keyed by stem.
 --- @return boolean
 local function dependency_complete(stem, by_stem)
-    local dep = by_stem[unwrap_link(stem)]
+    local dep = by_stem[task_policy.unwrap_link(stem)]
     if not dep then
         return false
     end
-    return completed_status_set()[dep.status] == true
+    return task_policy.completed_status_set()[dep.status] == true
 end
 
 --- Return `true` when `task` has at least one incomplete dependency.
@@ -456,7 +378,7 @@ end
 --- @param task vault.TasksNote
 --- @return boolean
 function M.is_completed(task)
-    return completed_status_set()[task.status] == true
+    return task_policy.completed_status_set()[task.status] == true
 end
 
 --- Return all tasks that are neither completed nor blocked, sorted by priority then status then title.
@@ -475,8 +397,8 @@ function M.pick_candidates()
         end
     end
     table.sort(candidates, function(a, b)
-        local priority_order = priority_order_map()
-        local status_order = status_order_map()
+        local priority_order = task_policy.priority_order_map()
+        local status_order = task_policy.status_order_map()
         local pa = priority_order[a.priority] or 99
         local pb = priority_order[b.priority] or 99
         if pa ~= pb then
@@ -492,13 +414,6 @@ function M.pick_candidates()
     return candidates
 end
 
---- Wrap a status string in wikilink brackets.
---- @param status string Canonical status string.
---- @return string
-local function status_link(status)
-    return string.format("[[%s]]", status)
-end
-
 --- Transition the task at `path` to `new_status`, enforcing the allowed transition graph.
 --- When the task transitions to `"Status - Done"` and has an active repeat rule, a new
 --- recurring child task is automatically created with the next computed due date.
@@ -512,20 +427,20 @@ function M.set_status(path, new_status)
     if not task then
         return false, "Task not found"
     end
-    local from_status = normalize_status(task.status)
-    local to_status = normalize_status(new_status)
-    if not status_order_map()[to_status] then
+    local from_status = task_policy.normalize_status(task.status)
+    local to_status = task_policy.normalize_status(new_status)
+    if not task_policy.status_order_map()[to_status] then
         return false, "Unknown status: " .. tostring(new_status)
     end
     if from_status == to_status then
         return true, nil
     end
-    local allowed = transition_map()[from_status] or {}
+    local allowed = task_policy.transition_map()[from_status] or {}
     if not allowed[to_status] then
         return false, string.format("Invalid transition: %s -> %s", from_status, to_status)
     end
     shared.set_frontmatter_fields(path, {
-        status = status_link(to_status),
+        status = task_policy.status_link(to_status),
         modified = M.timestamp(),
     })
 
@@ -551,7 +466,7 @@ function M.set_status(path, new_status)
         })
 
         local repeat_rule = normalize_repeat(values["repeat"])
-        if repeat_rule and trim(values.last_recur_spawned or "") == "" then
+        if repeat_rule and task_policy.trim(values.last_recur_spawned or "") == "" then
             local done_iso = today_iso()
             local next_iso = next_due_iso(values, done_iso)
             if next_iso then
@@ -565,7 +480,7 @@ function M.set_status(path, new_status)
                 if created then
                     local new_stem = stem_from_path(created)
                     local old_stem = stem_from_path(path)
-                    local series_id = trim(values.series_id or "")
+                    local series_id = task_policy.trim(values.series_id or "")
                     if series_id == "" then
                         series_id = old_stem
                     end
@@ -601,9 +516,9 @@ end
 --- @param status string Current status (raw or canonical form).
 --- @return string[]
 function M.next_statuses(status)
-    local current = normalize_status(status)
+    local current = task_policy.normalize_status(status)
     local out = {} ---@type string[]
-    local allowed = transition_map()[current] or {}
+    local allowed = task_policy.transition_map()[current] or {}
     for _, candidate in ipairs(M.statuses()) do
         if allowed[candidate] then
             table.insert(out, candidate)
@@ -638,74 +553,7 @@ end
 --- @param opts table|nil Optional overrides for frontmatter fields (`status`, `executor`, `category`, `priority`, `title`).
 --- @return string|nil
 function M.create(name, opts)
-    opts = opts or {}
-    local options = cfg()
-    local clean_name = M.sanitize_name(name)
-    if clean_name == "" then
-        log.warn("Usage: :Vault tasks new <name>")
-        return nil
-    end
-    local ts = M.timestamp()
-    local stem = M.filename(clean_name, ts)
-    local ext = require("vault.config").options.ext or ".md"
-    local dir = M.tasks_dir_abs()
-    if vim.fn.isdirectory(dir) == 0 then
-        vim.fn.mkdir(dir, "p")
-    end
-    local path = string.format("%s/%s%s", dir, stem, ext)
-    if vim.fn.filereadable(path) == 1 then
-        log.warn("Task already exists: %s", stem)
-        return path
-    end
-    local title = opts.title or clean_name
-    local status = opts.status or options.default_status or "[[Status - Backlog]]"
-    local executor = opts.executor or options.default_executor or "[[Executor - Human]]"
-    local category = opts.category or options.default_category or "[[Category - Green Task]]"
-    local priority = opts.priority or options.default_priority or "[[Priority - Medium]]"
-
-    --- @type string[]
-    local lines = {
-        "---",
-        'categories:',
-        '  - "[[Tasks]]"',
-        'type: "task"',
-        'uuid: ""',
-        'icon: ""',
-        string.format('status: "%s"', status),
-        string.format('executor: "%s"', executor),
-        string.format('category: "%s"', category),
-        string.format('priority: "%s"', priority),
-        'feature: ""',
-        'project: ""',
-        'initiative: ""',
-        'blocked_by: []',
-        'due: ""',
-        'estimation: ""',
-        string.format('title: "%s"', title:gsub('"', '\\"')),
-        string.format("created: %s", ts),
-        string.format("modified: %s", ts),
-        "---",
-        "",
-        string.format("# %s", title),
-        "",
-        "## Context",
-        "",
-        "- ",
-        "",
-        "## Acceptance Criteria",
-        "",
-        "- [ ] ",
-        "",
-        "## Notes",
-        "",
-        "- ",
-    }
-    local ok, err = shared.atomic_writefile(path, lines)
-    if not ok then
-        log.error("Failed to create task: %s", tostring(err))
-        return nil
-    end
-    return path
+    return task_create.create(name, opts)
 end
 
 --- A single issue found by the doctor scan.
@@ -758,7 +606,7 @@ function M.doctor(args)
         local values = shared.read_frontmatter_fields(path, { "title", "status" })
         local raw_status = values.status
 
-        if type(raw_status) ~= "string" or trim(raw_status) == "" then
+        if type(raw_status) ~= "string" or task_policy.trim(raw_status) == "" then
             add_issue("missing-status", path, values, nil)
             if fix then
                 shared.set_frontmatter_fields(path, {
@@ -768,16 +616,16 @@ function M.doctor(args)
                 report.fixed = report.fixed + 1
             end
         else
-            local normalized = normalize_status(raw_status)
-            if not status_order_map()[normalized] then
+            local normalized = task_policy.normalize_status(raw_status)
+            if not task_policy.status_order_map()[normalized] then
                 add_issue("unknown-status", path, values, normalized)
             else
-                local is_link = trim(raw_status):match("^%[%[.-%]%]$") ~= nil
+                local is_link = task_policy.trim(raw_status):match("^%[%[.-%]%]$") ~= nil
                 if not is_link then
                     add_issue("non-wikilink-status", path, values, normalized)
                     if fix then
                         shared.set_frontmatter_fields(path, {
-                            status = status_link(normalized),
+                            status = task_policy.status_link(normalized),
                             modified = M.timestamp(),
                         })
                         report.fixed = report.fixed + 1
@@ -822,7 +670,7 @@ function M.recur_spawn(path, force)
     if not repeat_rule then
         return nil, "Task has no repeat rule"
     end
-    if not force and trim(values.last_recur_spawned or "") ~= "" then
+    if not force and task_policy.trim(values.last_recur_spawned or "") ~= "" then
         return nil, "Recurring instance already spawned"
     end
 
@@ -844,7 +692,7 @@ function M.recur_spawn(path, force)
 
     local new_stem = stem_from_path(created)
     local old_stem = stem_from_path(path)
-    local series_id = trim(values.series_id or "")
+    local series_id = task_policy.trim(values.series_id or "")
     if series_id == "" then series_id = old_stem end
 
     shared.set_frontmatter_fields(created, {
