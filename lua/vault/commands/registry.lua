@@ -32,6 +32,10 @@ end
 
 function M.build(extra_tree)
     local tree = {}
+    deep_merge_tree(tree, load_tree_from("vault.notes.commands"))
+    deep_merge_tree(tree, load_tree_from("vault.tags.commands"))
+    deep_merge_tree(tree, load_tree_from("vault.properties.commands"))
+    deep_merge_tree(tree, load_tree_from("vault.bases.commands"))
     deep_merge_tree(tree, load_tree_from("vault.taxonomy.commands"))
     deep_merge_tree(tree, extra_tree or {})
     return tree

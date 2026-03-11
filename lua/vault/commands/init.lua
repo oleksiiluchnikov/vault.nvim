@@ -6,10 +6,6 @@ local callbacks = {}
 local complete_duplicates_review
 local complete_duplicates_related
 
-local function workflow_api()
-    return require("vault.api")
-end
-
 local pickers = require("telescope._extensions.vault.pickers")
 
 --- Safe picker launch — handles nil return from empty results.
@@ -161,7 +157,7 @@ local function build_subcommands()
             merge = {
                 run = function(args)
                     if #args == 0 then
-                        workflow_api().open_picker_merge_note(nil, {})
+                        require("vault.api").open_picker_merge_note(nil, {})
                         return
                     end
 
@@ -172,14 +168,14 @@ local function build_subcommands()
                             and current ~= ""
                             and current:match("%.md$")
                         then
-                            workflow_api().merge_note(current, args[1], {})
+                            require("vault.api").merge_note(current, args[1], {})
                         else
-                            workflow_api().open_picker_merge_note(args[1], {})
+                            require("vault.api").open_picker_merge_note(args[1], {})
                         end
                         return
                     end
 
-                    workflow_api().merge_note(args[1], args[2], {})
+                    require("vault.api").merge_note(args[1], args[2], {})
                 end,
                 complete = function(prefix, line)
                     line = line or ""
@@ -461,21 +457,11 @@ local function build_subcommands()
                     return completions.dirs(nil, "Vault notes dir " .. prefix, nil) or {}
                 end,
             },
-            empty = {
-                run = function()
-                    workflow_api().open_picker_notes_with_empty_content()
-                end,
-            },
-            ["no-frontmatter"] = {
-                run = function()
-                    workflow_api().open_picker_notes_without_frontmatter()
-                end,
-            },
             ["empty-property"] = {
                 run = function(args)
                     local prop = args[1]
                     local val = args[2]
-                    workflow_api().open_picker_notes_with_empty_property_value(prop, val)
+                    require("vault.properties.actions").open_picker_notes_with_empty_value(prop, val)
                 end,
                 complete = function(prefix)
                     local ok, props = pcall(function()
@@ -506,46 +492,6 @@ local function build_subcommands()
                 end
                 return tag_completions
             end,
-            rename = {
-                run = function(args)
-                    if #args < 2 then
-                        log.warn("Usage: :Vault tags rename <old> <new>")
-                        return
-                    end
-                    workflow_api().rename_tag(args[1], args[2])
-                end,
-                complete = function(prefix)
-                    return completions.tags(nil, "Vault tags rename " .. prefix, nil) or {}
-                end,
-            },
-            merge = {
-                run = function(args)
-                    if #args < 2 then
-                        log.warn("Usage: :Vault tags merge <target> <source1> [source2 ...]")
-                        return
-                    end
-                    local target = args[1]
-                    for i = 2, #args do
-                        workflow_api().rename_tag(args[i], target)
-                    end
-                    log.info("Merged %d tags into '%s'", #args - 1, target)
-                end,
-                complete = function(prefix)
-                    return completions.tags(nil, "Vault tags merge " .. prefix, nil) or {}
-                end,
-            },
-            doc = {
-                run = function(args)
-                    if #args == 0 then
-                        log.warn("Usage: :Vault tags doc <tag_name>")
-                        return
-                    end
-                    workflow_api().edit_tag_documentation(args[1])
-                end,
-                complete = function(prefix)
-                    return completions.tags(nil, "Vault tags doc " .. prefix, nil) or {}
-                end,
-            },
             promote = {
                 run = function(args)
                     if #args == 0 then
@@ -568,13 +514,13 @@ local function build_subcommands()
                     end
 
                     if #parts == 1 then
-                        workflow_api().open_picker_promote_tag(parts[1], {
+                        require("vault.api").open_picker_promote_tag(parts[1], {
                             keep_frontmatter_tags = keep_frontmatter_tags,
                         })
                         return
                     end
 
-                    workflow_api().promote_tag(parts[1], parts[2], {
+                    require("vault.api").promote_tag(parts[1], parts[2], {
                         keep_frontmatter_tags = keep_frontmatter_tags,
                     })
                 end,
@@ -614,15 +560,7 @@ local function build_subcommands()
         -- :Vault properties [name] [value] — vault properties picker / drill-down
         properties = {
             run = function(args)
-                if #args == 0 then
-                    safe_find(pickers.properties(), "No properties found")
-                elseif #args == 1 then
-                    -- Drill into property values
-                    workflow_api().open_picker_property_values(args[1])
-                else
-                    -- Show notes with specific property value
-                    workflow_api().open_picker_notes_with_property_value(args[1], args[2])
-                end
+                return require("vault.properties.commands").spec().properties.run(args)
             end,
             complete = function(prefix)
                 local ok, props = pcall(function()
@@ -837,21 +775,7 @@ local function build_subcommands()
         },
 
         -- :Vault bases [name] — bases picker
-        bases = {
-            run = function(args)
-                if #args == 0 then
-                    safe_find(pickers.bases(), "No bases found")
-                else
-                    workflow_api().open_picker_base_notes(table.concat(args, " "))
-                end
-            end,
-            complete = function()
-                local ok, bases = pcall(function()
-                    return require("vault.bases")()
-                end)
-                return (ok and bases) and bases:names() or {}
-            end,
-        },
+        bases = require("vault.bases.commands").spec().bases,
 
         -- :Vault process [filter] — Grid-backed metadata editing buffer (default)
         -- Supports: base <name>, undo, orphans, leaves, empty, no-frontmatter,
@@ -996,7 +920,7 @@ local function build_subcommands()
                     notes.map = candidates
                     desc = "delete candidates"
                 elseif filter == "empty-property" then
-                    workflow_api().open_picker_notes_with_empty_property_value(
+                    require("vault.properties.actions").open_picker_notes_with_empty_value(
                         args[2],
                         args[3]
                     )

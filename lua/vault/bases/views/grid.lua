@@ -11,7 +11,7 @@
 local M = {}
 
 local log = require("vault.log").scope("bases.views.grid")
-local shared = require("vault.bases.views.shared")
+local shared = require("vault.views.shared")
 local state = require("vault.core.state")
 local grid_config = require("vault.views.grid_config")
 

@@ -2,7 +2,7 @@ local config = require("vault.config")
 local taxonomy_config = require("vault.taxonomy.config")
 local log = require("vault.log").scope("taxonomy")
 local utils = require("vault.utils")
-local shared = require("vault.bases.views.shared")
+local shared = require("vault.views.shared")
 
 local M = {}
 

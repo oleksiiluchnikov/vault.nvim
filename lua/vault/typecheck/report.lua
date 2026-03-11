@@ -191,7 +191,7 @@ end
 ---@return vault.typecheck.DoctorReport -- report after fixes applied
 function M.doctor_fix()
     local root = vault_root()
-    local shared = require("vault.bases.views.shared")
+    local shared = require("vault.views.shared")
     local all_md = vim.fn.glob(root .. "/**/*.md", false, true)
     local fixed = 0
 
