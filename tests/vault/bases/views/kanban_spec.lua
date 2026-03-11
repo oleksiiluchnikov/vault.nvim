@@ -19,9 +19,9 @@ describe("kanban (unit)", function()
   local gk
 
   before_each(function()
-    package.loaded["vault.bases.views.kanban"] = nil
-    package.loaded["vault.bases.views.shared"] = nil
-    gk = require("vault.bases.views.kanban")
+    package.loaded["vault.views.kanban"] = nil
+    package.loaded["vault.views.shared"] = nil
+    gk = require("vault.views.kanban")
   end)
 
   -- ── get_value_hl ──────────────────────────────────────────────────────────
@@ -234,9 +234,9 @@ describe("kanban (integration)", function()
   local gk
 
   before_each(function()
-    package.loaded["vault.bases.views.kanban"] = nil
-    package.loaded["vault.bases.views.shared"] = nil
-    gk = require("vault.bases.views.kanban")
+    package.loaded["vault.views.kanban"] = nil
+    package.loaded["vault.views.shared"] = nil
+    gk = require("vault.views.kanban")
   end)
 
   after_each(function()

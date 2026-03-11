@@ -23,8 +23,8 @@ describe("grid (unit)", function()
   local ge
 
   before_each(function()
-    package.loaded["vault.bases.views.grid"] = nil
-    ge = require("vault.bases.views.grid")
+    package.loaded["vault.views.grid"] = nil
+    ge = require("vault.views.grid")
   end)
 
   -- ── normalize_col ────────────────────────────────────────────────────────
@@ -453,8 +453,8 @@ describe("grid (integration)", function()
     -- Check if vault config is loaded (requires minimal_init.lua)
     local ok, config = pcall(require, "vault.config")
     config_loaded = ok and config.options and config.options.root and config.options.root ~= ""
-    package.loaded["vault.bases.views.grid"] = nil
-    ge = require("vault.bases.views.grid")
+    package.loaded["vault.views.grid"] = nil
+    ge = require("vault.views.grid")
   end)
 
   after_each(function()

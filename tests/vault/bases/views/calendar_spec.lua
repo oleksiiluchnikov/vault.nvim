@@ -4,8 +4,8 @@ describe("calendar view adapter (unit)", function()
   local tmp_root
 
   local function clear_modules()
-    package.loaded["vault.bases.views.calendar"] = nil
-    package.loaded["vault.bases.views.shared"] = nil
+    package.loaded["vault.views.calendar"] = nil
+    package.loaded["vault.views.shared"] = nil
     package.loaded["vault.config"] = nil
   end
 
@@ -29,7 +29,7 @@ describe("calendar view adapter (unit)", function()
         watcher = false,
       },
     })
-    cal = require("vault.bases.views.calendar")
+    cal = require("vault.views.calendar")
   end)
 
   after_each(function()

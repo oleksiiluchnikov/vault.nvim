@@ -620,6 +620,8 @@ Recent cleanup after the main migration:
 - removed the stale `vault.api.refresh_buffers` dependency from note writes
 - added package-local command specs for `notes`, `tags`, `properties`, and `bases`
 - made `vault.views.shared` the canonical shared view implementation
+- moved merge/promote/retarget workflow bodies into noun-owned workflow modules
+- removed the old `bases/views/*` shim namespace so `vault.views.*` is canonical
 
 ---
 

@@ -566,18 +566,18 @@ describe("Vault process taxonomy mode", function()
         setup_vault()
         clear_state()
         commands = require("vault.commands")
-        original_grid = package.loaded["vault.bases.views.grid"]
+        original_grid = package.loaded["vault.views.grid"]
         original_taxonomy = package.loaded["vault.taxonomy"]
     end)
 
     after_each(function()
-        package.loaded["vault.bases.views.grid"] = original_grid
+        package.loaded["vault.views.grid"] = original_grid
         package.loaded["vault.taxonomy"] = original_taxonomy
     end)
 
     it("enables taxonomy actions from :Vault process taxonomy=<field>", function()
         local captured = nil
-        package.loaded["vault.bases.views.grid"] = {
+        package.loaded["vault.views.grid"] = {
             open = function(opts)
                 captured = opts
             end,
@@ -605,7 +605,7 @@ describe("Vault process taxonomy mode", function()
 
     it("appends the taxonomy field to custom process columns", function()
         local captured = nil
-        package.loaded["vault.bases.views.grid"] = {
+        package.loaded["vault.views.grid"] = {
             open = function(opts)
                 captured = opts
             end,
@@ -955,7 +955,7 @@ describe("Vault note retarget", function()
         setup_vault()
         clear_state()
 
-        local original_api = package.loaded["vault.api"]
+        local original_workflows = package.loaded["vault.notes.workflows"]
         local original_picker = package.loaded["vault.ui.resolve_picker"]
         local captured = nil
         local merged = nil
@@ -965,10 +965,9 @@ describe("Vault note retarget", function()
                 captured = opts
             end,
         }
-        package.loaded["vault.api"] = nil
-
         local api = require("vault.api")
-        api.merge_note = function(source, target)
+        local workflows = require("vault.notes.workflows")
+        workflows.merge = function(source, target)
             merged = { source = source, target = target }
         end
         api.open_picker_retarget_note("test_note")
@@ -976,7 +975,7 @@ describe("Vault note retarget", function()
         captured.on_resolve({ action = "rewrite", slug = "Project/My new masterpeace" })
 
         package.loaded["vault.ui.resolve_picker"] = original_picker
-        package.loaded["vault.api"] = original_api
+        package.loaded["vault.notes.workflows"] = original_workflows
         assert.is_not_nil(merged)
         assert.are.equal(fixture_root .. "/test_note.md", merged.source)
         assert.are.equal("Project/My new masterpeace", merged.target)
@@ -986,7 +985,7 @@ describe("Vault note retarget", function()
         setup_vault()
         clear_state()
 
-        local original_api = package.loaded["vault.api"]
+        local original_workflows = package.loaded["vault.notes.workflows"]
         local original_picker = package.loaded["vault.ui.resolve_picker"]
         local captured = nil
         local merged = nil
@@ -996,10 +995,9 @@ describe("Vault note retarget", function()
                 captured = opts
             end,
         }
-        package.loaded["vault.api"] = nil
-
         local api = require("vault.api")
-        api.merge_note = function(source, target)
+        local workflows = require("vault.notes.workflows")
+        workflows.merge = function(source, target)
             merged = { source = source, target = target }
         end
         api.open_picker_retarget_note("test_note")
@@ -1007,7 +1005,7 @@ describe("Vault note retarget", function()
         captured.on_resolve({ action = "rewrite", slug = "lua-patterns" })
 
         package.loaded["vault.ui.resolve_picker"] = original_picker
-        package.loaded["vault.api"] = original_api
+        package.loaded["vault.notes.workflows"] = original_workflows
         assert.is_not_nil(merged)
         assert.are.equal(fixture_root .. "/test_note.md", merged.source)
         assert.are.equal("Reference/lua-patterns", merged.target)

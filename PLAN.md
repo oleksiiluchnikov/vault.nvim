@@ -272,6 +272,8 @@ Useful follow-up work now lives in cleanup / convergence rather than core restru
 - Kept `vault.api` itself as a workflow facade because several orchestration call sites still legitimately use it.
 - Added package-local command specs for `notes`, `tags`, `properties`, and `bases`.
 - Moved `vault.views.shared` to the real owner implementation and kept `bases/views/shared.lua` as the shim.
+- Moved merge/promote/retarget workflow bodies out of `vault.api` into noun-owned workflow modules.
+- Removed the remaining `bases/views/{grid,list,kanban,calendar,shared}.lua` shims entirely; `vault.views.*` is now the only owner namespace.
 
 ## First recommended implementation order
 
