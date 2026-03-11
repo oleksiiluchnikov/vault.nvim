@@ -1854,10 +1854,7 @@ function callbacks.create_new_note(args)
         existing:edit()
         return
     end
-    local path = require("vault.utils").slug_to_path(new_slug)
-    local note = require("vault.notes.note")(path)
-    note:write(path)
-    note:edit()
+    require("vault.notes.create").create(new_slug)
 end
 
 --- @param args vim.api.keyset.create_user_command.command_args
@@ -1948,7 +1945,7 @@ function callbacks.today()
         log.error("Journal daily directory not configured (dirs.journal.daily)")
         return
     end
-    local path = string.format("%s/%s%s", daily_dir, today, config.options.ext)
+    local path = require("vault.notes.paths").daily(today)
     if vim.fn.filereadable(path) == 0 then
         log.info("Initializing today's journal note")
     end
@@ -1969,7 +1966,7 @@ function callbacks.daily_append(text)
         log.error("Journal daily directory not configured (dirs.journal.daily)")
         return
     end
-    local path = string.format("%s/%s%s", daily_dir, today, config.options.ext)
+    local path = require("vault.notes.paths").daily(today)
     local Note = require("vault.notes.note")
     local note = Note(path)
     note:append("- " .. text)
@@ -1994,7 +1991,7 @@ function callbacks.today_dictate()
         log.error("Journal daily directory not configured")
         return
     end
-    local path = string.format("%s/%s%s", daily_dir, today, config.options.ext)
+    local path = require("vault.notes.paths").daily(today)
     local ctx = vim.fn.filereadable(path) == 1 and table.concat(vim.fn.readfile(path), "\n") or ""
     local Note = require("vault.notes.note")
     -- Pass context via stdin ("--context -") to avoid argument-length limits
@@ -2118,7 +2115,7 @@ function callbacks.yesterday()
         log.error("Journal daily directory not configured (dirs.journal.daily)")
         return
     end
-    local path = string.format("%s/%s%s", daily_dir, yesterday, config.options.ext)
+    local path = require("vault.notes.paths").daily(yesterday)
     if vim.fn.filereadable(path) == 0 then
         log.info("Initializing yesterday's journal note")
     end

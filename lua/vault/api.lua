@@ -91,19 +91,12 @@ end
 ---@return vault.path path
 ---@return boolean created
 local function ensure_note_for_slug(note_slug)
-    local utils = require("vault.utils")
-    local path = utils.slug_to_path(note_slug)
+    local path = require("vault.notes.paths").for_slug(note_slug)
     if vim.fn.filereadable(path) == 1 then
         return path, false
     end
 
-    local Note = require("vault.notes.note")
-    local title = vim.fn.fnamemodify(path, ":t:r")
-    local note = Note({
-        path = path,
-        content = "# " .. title .. "\n",
-    })
-    note:write(path)
+    require("vault.notes.create").create(note_slug, { open = false })
     return path, true
 end
 
