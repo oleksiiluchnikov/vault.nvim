@@ -1,18 +1,16 @@
 --- @module "telescope"
---- Compatibility facade for legacy workflow-style entrypoints.
+--- Workflow facade for cross-noun picker and orchestration helpers.
 ---
---- Prefer noun-owned modules for new code:
+--- Prefer noun-owned modules when a direct owner exists:
 --- - `vault.notes.*`
 --- - `vault.tags.*`
 --- - `vault.taxonomy.*`
 --- - `vault.tasks.*`
 ---
---- `vault.api` remains for backward compatibility and command dispatch.
+--- This module remains as a lightweight orchestration surface.
 local pickers = require("telescope._extensions.vault.pickers")
 local log = require("vault.log").scope("api")
 local M = {}
-
-M._compat = true
 
 ---@class vault.ApiOccurrence
 ---@field lnum integer

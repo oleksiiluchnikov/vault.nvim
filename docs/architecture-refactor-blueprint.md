@@ -589,6 +589,38 @@ This should be staged, not a big-bang rewrite.
 
 ---
 
+### Execution status
+
+Completed in code:
+
+- command registry scaffolding
+- taxonomy pilot command specs
+- package-owned config readers for taxonomy, tasks, and grid views
+- shared `vault.views.*` namespace with compatibility shims
+- task policy / create / paths extraction
+- taxonomy split into classify / audit / plan / rename modules
+- note create / paths helpers
+- compat command extraction and `vault.api` de-emphasis
+
+Key commits:
+
+- `aff7668` - chunks 0-2
+- `90c4e2f` - chunk 3
+- `869c75c` - chunk 4
+- `c8e5c7d` - chunk 5
+- `21afdba` - chunk 6
+- `4b4970b` - chunk 7
+
+What remains is mostly convergence work, not foundational architecture surgery.
+
+Recent cleanup after the main migration:
+
+- removed the temporary `commands/compat.lua` compatibility layer
+- collapsed command-layer API access to a direct workflow helper
+- removed the stale `vault.api.refresh_buffers` dependency from note writes
+
+---
+
 ### Anti-rot guardrails
 
 - no new public feature ships without an owning noun package

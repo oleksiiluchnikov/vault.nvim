@@ -22,7 +22,7 @@ function M.api(arg_lead, line, pos)
     -- Get the subcommand tree from the commands module
     local ok, cmds = pcall(require, "vault.commands")
     if not ok or not cmds or not cmds._get_subcommands then
-        return vim.tbl_keys(require("vault.api"))
+        return {}
     end
     local tree = cmds._get_subcommands()
 

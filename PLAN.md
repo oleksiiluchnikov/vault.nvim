@@ -194,48 +194,82 @@ Reference: `docs/architecture-refactor-blueprint.md`
 - Define the command registry shape and command spec format
 - Define package-owned config reader pattern
 - Commit target: contract-only, no behavior change
+- Status: done (`aff7668`)
 
 ### Chunk 1: Introduce command registry
 - Add `lua/vault/commands/registry.lua`
 - Add package-local `commands.lua` for one pilot noun, preferably `taxonomy`
 - Keep old `:Vault` forms working through aliases
 - Remove no behavior yet from the central dispatcher beyond routing
+- Status: done (`aff7668`)
 
 ### Chunk 2: Introduce package-owned config readers
 - Add readers for `taxonomy`, `tasks`, and `views.grid`
 - Move hardcoded defaults into normalized config shape without behavior changes
 - Resolve duplicated toggles like watcher enablement precedence
 - Commit target: config extraction, no UX breakage
+- Status: done (`aff7668`)
 
 ### Chunk 3: Extract shared views
 - Move genuinely generic code from `bases/views/*` into `views/*`
 - Start with `grid` and `shared`
 - Keep compatibility require shims during migration
 - Commit target: generic views no longer owned by `bases`
+- Status: done (`90c4e2f`)
 
 ### Chunk 4: Split task policy from task workflows
 - Extract `tasks/policy.lua` from `tasks/notes.lua`
 - Move statuses, aliases, transitions, recurrence grammar, and defaults behind policy/config helpers
 - Add `tasks/create.lua` and `tasks/paths.lua`
 - Commit target: `tasks/notes.lua` stops being the junk-drawer module
+- Status: done (`869c75c`)
 
 ### Chunk 5: Split taxonomy by verb while preserving noun ownership
 - Create `taxonomy/classify.lua`, `taxonomy/audit.lua`, `taxonomy/plan.lua`, `taxonomy/rename.lua`
 - Add `taxonomy/commands.lua`
 - Keep `taxonomy/init.lua` as the noun facade
 - Commit target: taxonomy owns taxonomy, not a mixed mega-module
+- Status: done (`c8e5c7d`)
 
 ### Chunk 6: Centralize note creation and path policy
 - Add `notes/paths.lua` and `notes/create.lua`
 - Replace duplicated `root .. "/" .. slug .. ext` logic with helpers
 - Export journal naming and generated slug policy into config
 - Commit target: commands/views stop inventing paths independently
+- Status: done (`21afdba`)
 
 ### Chunk 7: Shrink the old central surfaces
 - Make `commands/init.lua` registration + dispatch only
 - Keep `vault.api` as compatibility shim only
 - Stop adding features to the shim
 - Commit target: architecture no longer depends on stale global facades
+- Status: done (`4b4970b`)
+
+## Verification summary
+
+- Chunks 0 through 7 have been executed.
+- The command suite passes after each structural chunk.
+- `vault.api` still exists, but it is now explicitly compatibility-first rather than the architectural center.
+- `notes.data` remains intact as the payload boundary.
+- Shared views now live behind `vault.views.*` with compatibility shims.
+- Task policy, taxonomy verbs, note creation, and note path policy have all been extracted into owning modules.
+
+## Remaining frontier
+
+The original great-refactor plan is materially complete through Chunk 7.
+
+Useful follow-up work now lives in cleanup / convergence rather than core restructuring:
+
+1. Add package-local command specs for more nouns (`notes`, `tags`, `tasks`, `bases`) so the registry owns more of the tree.
+2. Export remaining note/journal naming preferences into config if they should be user-tunable.
+3. Remove or archive stale planning sections once the new structure is considered stable.
+
+## Post-migration cleanup
+
+- Removed `lua/vault/commands/compat.lua` after the migration proved stable.
+- Collapsed command-layer API access to a direct workflow helper instead of compatibility indirection.
+- Removed the stale `vault.api.refresh_buffers` dependency from `notes/note/init.lua`.
+- Kept `vault.api` itself as a workflow facade because several orchestration call sites still legitimately use it.
 
 ## First recommended implementation order
 

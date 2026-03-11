@@ -706,12 +706,6 @@ function Note:update_content(search_string, replace_string, lnums)
     local new_content = table.concat(lines, "\n")
     self:overwrite(new_content)
 
-    -- refresh buffer if open so changes show up immediately
-    local refresh_buffers = require("vault.api").refresh_buffers
-    if refresh_buffers then
-        pcall(refresh_buffers, { self.data.path })
-    end
-
     return self
 end
 
