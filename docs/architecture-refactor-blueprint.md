@@ -618,6 +618,8 @@ Recent cleanup after the main migration:
 - removed the temporary `commands/compat.lua` compatibility layer
 - collapsed command-layer API access to a direct workflow helper
 - removed the stale `vault.api.refresh_buffers` dependency from note writes
+- added package-local command specs for `notes`, `tags`, `properties`, and `bases`
+- made `vault.views.shared` the canonical shared view implementation
 
 ---
 

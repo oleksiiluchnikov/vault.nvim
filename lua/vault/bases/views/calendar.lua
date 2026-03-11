@@ -11,7 +11,7 @@
 local M = {}
 
 local log = require("vault.log").scope("bases.views.calendar")
-local shared = require("vault.bases.views.shared")
+local shared = require("vault.views.shared")
 
 ---@alias vault.CalendarISODate string
 

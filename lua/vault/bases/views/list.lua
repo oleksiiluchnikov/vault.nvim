@@ -1,7 +1,7 @@
 local M = {}
 
 local log = require("vault.log").scope("bases.views.list")
-local shared = require("vault.bases.views.shared")
+local shared = require("vault.views.shared")
 
 ---@class vault.ListRecord
 ---@field slug vault.slug

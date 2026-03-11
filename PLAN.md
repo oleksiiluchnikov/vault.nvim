@@ -270,6 +270,8 @@ Useful follow-up work now lives in cleanup / convergence rather than core restru
 - Collapsed command-layer API access to a direct workflow helper instead of compatibility indirection.
 - Removed the stale `vault.api.refresh_buffers` dependency from `notes/note/init.lua`.
 - Kept `vault.api` itself as a workflow facade because several orchestration call sites still legitimately use it.
+- Added package-local command specs for `notes`, `tags`, `properties`, and `bases`.
+- Moved `vault.views.shared` to the real owner implementation and kept `bases/views/shared.lua` as the shim.
 
 ## First recommended implementation order
 
