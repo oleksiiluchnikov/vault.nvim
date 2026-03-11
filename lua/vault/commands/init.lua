@@ -7,13 +7,7 @@ local complete_duplicates_review
 local complete_duplicates_related
 
 local function get_vault_api()
-    local api = require("vault.api")
-    if api.open_picker_promote_tag ~= nil and api.open_picker_merge_note ~= nil and api.open_picker_retarget_note ~= nil then
-        return api
-    end
-
-    package.loaded["vault.api"] = nil
-    return require("vault.api")
+    return require("vault.commands.compat").get_vault_api()
 end
 
 local pickers = require("telescope._extensions.vault.pickers")
@@ -1696,13 +1690,6 @@ local function build_subcommands()
             end,
         },
 
-        -- :Vault lines — lines picker (dash-prefixed lines across vault)
-        lines = {
-            run = function()
-                require("vault.api").open_picker_lines_starting_with_dash()
-            end,
-        },
-
         -- :Vault move [note] — move note to a different directory
         move = {
             run = function(args)
@@ -1721,26 +1708,6 @@ local function build_subcommands()
             end,
             complete = function(prefix)
                 return completions.note_slugs(nil, "Vault move " .. prefix, nil) or {}
-            end,
-        },
-
-        -- :Vault api <func> [args] — raw API dispatch (backward compat)
-        api = {
-            run = function(args)
-                local func_name = args[1]
-                if not func_name then
-                    log.info("Usage: :Vault api <function> [args...]")
-                    return
-                end
-                local api_func = require("vault.api")[func_name]
-                if not api_func then
-                    log.warn("Unknown API function: %s", func_name)
-                    return
-                end
-                api_func(table.unpack(args, 2))
-            end,
-            complete = function()
-                return vim.tbl_keys(require("vault.api"))
             end,
         },
 
