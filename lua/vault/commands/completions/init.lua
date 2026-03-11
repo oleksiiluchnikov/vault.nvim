@@ -10,7 +10,7 @@ local M = {}
 
 --- Context-aware completion for :Vault subcommands.
 --- Walks the subcommand tree to offer completions at the correct depth.
-function M.api(arg_lead, line, pos)
+function M.vault(arg_lead, line, pos)
     line = line or ""
     local parts = vim.split(line, "%s+", { trimempty = true })
 
@@ -78,6 +78,8 @@ function M.api(arg_lead, line, pos)
     table.sort(results)
     return results
 end
+
+M.api = M.vault
 
 --- Returns the list of notes slugs
 --- @return vault.slug[]
