@@ -249,106 +249,14 @@ end
 ---@param opts? vault.ApiPromoteOpts
 ---@return vault.path|nil note_path
 function M.promote_tag(tag_name, note_slug, opts)
-    local canonical = canonical_tag(tag_name)
-    if canonical == "" then
-        error("No tag name provided")
-    end
-
-    note_slug = canonical_target_slug(note_slug or canonical)
-    if note_slug == "" then
-        error("No note slug provided")
-    end
-
-    opts = opts or {}
-    local keep_frontmatter_tags = opts.keep_frontmatter_tags ~= false
-    local note_path, created = ensure_note_for_slug(note_slug)
-
-    local tag = require("vault.tags")():filter("name", canonical, "exact"):get_random()
-    if not tag then
-        if created then
-            log.info("Created %s (no occurrences found for #%s)", note_slug, canonical)
-        else
-            log.info("No occurrences found for #%s", canonical)
-        end
-        return note_path
-    end
-
-    local old_name = hashtag_literal(canonical)
-    local new_link = make_wikilink(canonical, note_slug)
-    local Note = require("vault.notes.note")
-    local updated_notes = 0
-    local updated_occurrences = 0
-    for slug, occurrences in pairs(tag.data.sources or {}) do
-        local path = require("vault.utils").slug_to_path(slug)
-        local filtered = filtered_occurrences(path, occurrences, keep_frontmatter_tags)
-        if filtered and #filtered > 0 then
-            local note = Note(path)
-            note:update_content(old_name, new_link, filtered)
-            updated_notes = updated_notes + 1
-            updated_occurrences = updated_occurrences + #filtered
-        end
-    end
-
-    clear_state_keys({
-        "cache.notes.paths",
-        "cache.notes.slugs",
-        "cache.notes.basename_index",
-        "notes",
-        "tags",
-        "wikilinks",
-    })
-
-    if updated_notes == 0 then
-        log.info(
-            "Prepared %s for #%s (kept frontmatter tags unchanged; no inline occurrences rewritten)",
-            note_slug,
-            canonical
-        )
-    else
-        log.info(
-            "Promoted #%s -> %s across %d notes (%d occurrences)%s",
-            canonical,
-            new_link,
-            updated_notes,
-            updated_occurrences,
-            created and "; created canonical note" or ""
-        )
-    end
-
-    return note_path
+    return require("vault.tags.workflows").promote(tag_name, note_slug, opts)
 end
 
 --- Open the wikilinks picker to choose a canonical note target for a tag promotion.
 ---@param tag_name string
 ---@param opts? vault.ApiPromoteOpts
 function M.open_picker_promote_tag(tag_name, opts)
-    local canonical = canonical_tag(tag_name)
-    if canonical == "" then
-        error("No tag name provided")
-    end
-
-    require("vault.ui.resolve_picker").open({
-        wikilink = {
-            data = {
-                slug = canonical,
-                suggestions = {},
-            },
-        },
-        wikilinks = require("vault.wikilinks")().map,
-        on_resolve = function(result)
-            ---@cast result vault.ApiResolveResult|nil
-            if not result or result.action == "skip" then
-                return
-            end
-            local note_slug = result.slug or canonical
-            if not note_slug or note_slug == "" then
-                log.warn("Selected target has no usable slug")
-                return
-            end
-            M.promote_tag(canonical, note_slug, opts)
-        end,
-        on_cancel = function() end,
-    })
+    return require("vault.tags.workflows").open_promote_picker(tag_name, opts)
 end
 
 --- Merge one note into another note target.
@@ -357,60 +265,14 @@ end
 ---@param target_slug string slug of the surviving note
 ---@param opts? vault.ApiMergeOpts
 function M.merge_note(source_note, target_slug, opts)
-    local source_path = resolve_note_path(source_note)
-    if not source_path then
-        error("Source note not found")
-    end
-    if not target_slug or vim.trim(target_slug) == "" then
-        error("No target note slug provided")
-    end
-
-    local utils = require("vault.utils")
-    local source_slug = utils.path_to_slug(source_path)
-    target_slug = canonical_target_slug(target_slug)
-    if target_slug == source_slug then
-        log.warn("Source and target note are the same: %s", source_slug)
-        return
-    end
-
-    local target_path = ensure_note_for_slug(target_slug)
-    require("vault.merge").merge(target_path, source_path, opts or {})
+    return require("vault.notes.workflows").merge(source_note, target_slug, opts)
 end
 
 --- Open the combined target picker to merge a source note into another note or wikilink target.
 ---@param source_note string|nil slug or path of the note being absorbed; defaults to current note
 ---@param opts? vault.ApiMergeOpts
 function M.open_picker_merge_note(source_note, opts)
-    local source_path = resolve_note_path(source_note)
-    if not source_path then
-        error("Source note not found")
-    end
-
-    local source_slug = require("vault.utils").path_to_slug(source_path)
-    require("vault.ui.resolve_picker").open({
-        wikilink = {
-            data = {
-                slug = source_slug,
-                suggestions = {},
-            },
-        },
-        prompt_slug = source_slug,
-        include_create = false,
-        wikilinks = require("vault.wikilinks")().map,
-        on_resolve = function(result)
-            ---@cast result vault.ApiResolveResult|nil
-            if not result or result.action == "skip" then
-                return
-            end
-            local target_slug = result.slug
-            if not target_slug or target_slug == "" then
-                log.warn("Selected target has no usable slug")
-                return
-            end
-            M.merge_note(source_path, canonical_target_slug(target_slug), opts)
-        end,
-        on_cancel = function() end,
-    })
+    return require("vault.notes.workflows").open_merge_picker(source_note, opts)
 end
 
 --- Smart retarget flow for a source note.
@@ -418,54 +280,7 @@ end
 ---@param source_note string|nil slug or path of the source note; defaults to current note
 ---@param opts? vault.ApiMergeOpts
 function M.open_picker_retarget_note(source_note, opts)
-    local source_path = resolve_note_path(source_note)
-    if not source_path then
-        error("Source note not found")
-    end
-
-    local utils = require("vault.utils")
-    local source_slug = utils.path_to_slug(source_path)
-    local Note = require("vault.notes.note")
-    require("vault.ui.resolve_picker").open({
-        wikilink = {
-            data = {
-                slug = source_slug,
-                suggestions = {},
-            },
-        },
-        prompt_slug = source_slug,
-        include_create = true,
-        wikilinks = require("vault.wikilinks")().map,
-        on_resolve = function(result)
-            ---@cast result vault.ApiResolveResult|nil
-            if not result or result.action == "skip" then
-                return
-            end
-
-            if result.action == "create" then
-                local target_slug = vim.trim(result.prompt or "")
-                if target_slug == "" then
-                    target_slug = source_slug
-                end
-                if target_slug == source_slug then
-                    return
-                end
-                Note(source_path):rename(target_slug)
-                if opts and opts.on_done then
-                    opts.on_done()
-                end
-                return
-            end
-
-            local target_slug = result.slug
-            if not target_slug or target_slug == "" then
-                log.warn("Selected target has no usable slug")
-                return
-            end
-            M.merge_note(source_path, canonical_target_slug(target_slug), opts)
-        end,
-        on_cancel = function() end,
-    })
+    return require("vault.notes.workflows").open_retarget_picker(source_note, opts)
 end
 
 --- Move note

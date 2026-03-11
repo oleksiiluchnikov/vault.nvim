@@ -6,7 +6,7 @@ describe("vault.tasks.notes", function()
     local function clear_modules()
         package.loaded["vault.tasks.notes"] = nil
         package.loaded["vault.config"] = nil
-        package.loaded["vault.bases.views.shared"] = nil
+        package.loaded["vault.views.shared"] = nil
     end
 
     local function setup_root()
