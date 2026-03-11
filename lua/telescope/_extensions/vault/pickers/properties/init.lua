@@ -67,9 +67,9 @@ return function(opts)
 
     if vim.tbl_count(opts.properties.map) == 1 then
         local property_name = vim.tbl_keys(opts.properties.map)[1]
-        require("vault.api").open_picker_property_values(property_name)
-        return nil
-    end
+            require("vault.properties.actions").open_picker_values(property_name)
+            return nil
+        end
 
     local picker = pickers.new(opts, {
         prompt_title = "Properties",

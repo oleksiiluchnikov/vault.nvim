@@ -869,35 +869,33 @@ end)
 describe("Vault note merge", function()
     it("opens the combined target picker when no merge target is given", function()
         local original_commands = package.loaded["vault.commands"]
-        local original_api = package.loaded["vault.api"]
+        local original_workflows = package.loaded["vault.notes.workflows"]
         local called = nil
-        package.loaded["vault.api"] = {
-            open_picker_promote_tag = function() end,
-            open_picker_merge_note = function(source, opts)
+        package.loaded["vault.notes.workflows"] = {
+            open_merge_picker = function(source, opts)
                 called = { source = source, opts = opts }
             end,
-            open_picker_retarget_note = function() end,
-            merge_note = function() end,
+            merge = function() end,
+            open_retarget_picker = function() end,
         }
         package.loaded["vault.commands"] = nil
 
         require("vault.commands")._get_subcommands().note.merge.run({ "test_note" })
 
         package.loaded["vault.commands"] = original_commands
-        package.loaded["vault.api"] = original_api
+        package.loaded["vault.notes.workflows"] = original_workflows
         assert.is_not_nil(called)
         assert.are.equal("test_note", called.source)
     end)
 
     it("merges directly when source and target are both provided", function()
         local original_commands = package.loaded["vault.commands"]
-        local original_api = package.loaded["vault.api"]
+        local original_workflows = package.loaded["vault.notes.workflows"]
         local called = nil
-        package.loaded["vault.api"] = {
-            open_picker_promote_tag = function() end,
-            open_picker_merge_note = function() end,
-            open_picker_retarget_note = function() end,
-            merge_note = function(source, target, opts)
+        package.loaded["vault.notes.workflows"] = {
+            open_merge_picker = function() end,
+            open_retarget_picker = function() end,
+            merge = function(source, target, opts)
                 called = { source = source, target = target, opts = opts }
             end,
         }
@@ -908,7 +906,7 @@ describe("Vault note merge", function()
             .run({ "test_note", "Project/My new masterpeace" })
 
         package.loaded["vault.commands"] = original_commands
-        package.loaded["vault.api"] = original_api
+        package.loaded["vault.notes.workflows"] = original_workflows
         assert.is_not_nil(called)
         assert.are.equal("test_note", called.source)
         assert.are.equal("Project/My new masterpeace", called.target)
@@ -920,7 +918,7 @@ describe("Vault note retarget", function()
         setup_vault()
         clear_state()
 
-        local original_api = package.loaded["vault.api"]
+        local original_workflows = package.loaded["vault.notes.workflows"]
         local original_picker = package.loaded["vault.ui.resolve_picker"]
         local original_note = package.loaded["vault.notes.note"]
         local captured = nil
@@ -938,16 +936,14 @@ describe("Vault note retarget", function()
                 end,
             }
         end
-        package.loaded["vault.api"] = nil
-
-        local api = require("vault.api")
-        api.open_picker_retarget_note("test_note")
+        local workflows = require("vault.notes.workflows")
+        workflows.open_retarget_picker("test_note")
         assert.is_not_nil(captured)
         captured.on_resolve({ action = "create", prompt = "Retargeted note" })
 
         package.loaded["vault.ui.resolve_picker"] = original_picker
         package.loaded["vault.notes.note"] = original_note
-        package.loaded["vault.api"] = original_api
+        package.loaded["vault.notes.workflows"] = original_workflows
         assert.are.equal("Retargeted note", renamed_to)
     end)
 
@@ -965,12 +961,11 @@ describe("Vault note retarget", function()
                 captured = opts
             end,
         }
-        local api = require("vault.api")
         local workflows = require("vault.notes.workflows")
         workflows.merge = function(source, target)
             merged = { source = source, target = target }
         end
-        api.open_picker_retarget_note("test_note")
+        workflows.open_retarget_picker("test_note")
         assert.is_not_nil(captured)
         captured.on_resolve({ action = "rewrite", slug = "Project/My new masterpeace" })
 
@@ -995,12 +990,11 @@ describe("Vault note retarget", function()
                 captured = opts
             end,
         }
-        local api = require("vault.api")
         local workflows = require("vault.notes.workflows")
         workflows.merge = function(source, target)
             merged = { source = source, target = target }
         end
-        api.open_picker_retarget_note("test_note")
+        workflows.open_retarget_picker("test_note")
         assert.is_not_nil(captured)
         captured.on_resolve({ action = "rewrite", slug = "lua-patterns" })
 
@@ -1023,66 +1017,11 @@ describe("Vault command completions", function()
 
     local completions = require("vault.commands.completions")
 
-    describe("api()", function()
-        it("should return a list of API function names", function()
-            -- vault.api requires telescope pickers at module scope.
-            -- In headless tests this may fail if telescope state is broken.
-            -- Use pcall to test gracefully.
-            local ok, api_mod = pcall(require, "vault.api")
-            if not ok then
-                -- telescope pickers module cannot load in headless —
-                -- verify the completions function itself returns a table
-                -- by mocking at the package.loaded level
-                package.loaded["vault.api"] = {
-                    open_picker_bases = function() end,
-                    open_picker_base_notes = function() end,
-                    open_picker_notes_with_tag = function() end,
-                }
-            end
-
-            local result = completions.api()
-            assert.is_table(result)
-            assert.is_true(#result > 0, "api completions should not be empty")
-
-            -- Clean up mock if we installed one
-            if not ok then
-                package.loaded["vault.api"] = nil
-            end
-        end)
-
-        it("includes tasks and actions at top level", function()
-            local result = completions.api(nil, "Vault ", nil)
-            assert.is_table(result)
-            assert.is_true(vim.tbl_contains(result, "tasks"))
-            assert.is_true(vim.tbl_contains(result, "actions"))
-        end)
-
-        it("completes tasks subcommands", function()
-            local result = completions.api(nil, "Vault tasks ", nil)
-            assert.is_table(result)
-            assert.is_true(vim.tbl_contains(result, "new"))
-            assert.is_true(vim.tbl_contains(result, "status"))
-            assert.is_true(vim.tbl_contains(result, "pick-next"))
-            assert.is_true(vim.tbl_contains(result, "promote"))
-            assert.is_true(vim.tbl_contains(result, "list"))
-            assert.is_true(vim.tbl_contains(result, "kanban"))
-            assert.is_true(vim.tbl_contains(result, "backlog"))
-            assert.is_true(vim.tbl_contains(result, "doctor"))
-            assert.is_true(vim.tbl_contains(result, "recur"))
-        end)
-
-        it("completes tasks status values", function()
-            local result = completions.api(nil, "Vault tasks status ", nil)
-            assert.is_table(result)
-            assert.is_true(#result >= 1)
-            assert.is_true(vim.tbl_contains(result, "Status - Backlog"))
-        end)
-    end)
-
     describe("note_slugs()", function()
         it("should return note slugs from the fixture vault", function()
             -- Ensure scanner has data by requiring Notes first
             clear_state()
+            package.loaded["vault.notes.note"] = nil
             local Notes = require("vault.notes")
             Notes() -- Trigger scan
 
@@ -1249,6 +1188,7 @@ describe("Vault command completions", function()
 
         it("passes tag filters to duplicate review", function()
             local captured = nil
+            clear_state()
             package.loaded["vault.duplicates"] = {
                 review = function(root, opts)
                     captured = { root = root, opts = opts }

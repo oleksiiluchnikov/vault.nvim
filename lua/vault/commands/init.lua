@@ -157,7 +157,7 @@ local function build_subcommands()
             merge = {
                 run = function(args)
                     if #args == 0 then
-                        require("vault.api").open_picker_merge_note(nil, {})
+                        require("vault.notes.workflows").open_merge_picker(nil, {})
                         return
                     end
 
@@ -168,14 +168,14 @@ local function build_subcommands()
                             and current ~= ""
                             and current:match("%.md$")
                         then
-                            require("vault.api").merge_note(current, args[1], {})
+                            require("vault.notes.workflows").merge(current, args[1], {})
                         else
-                            require("vault.api").open_picker_merge_note(args[1], {})
+                            require("vault.notes.workflows").open_merge_picker(args[1], {})
                         end
                         return
                     end
 
-                    require("vault.api").merge_note(args[1], args[2], {})
+                    require("vault.notes.workflows").merge(args[1], args[2], {})
                 end,
                 complete = function(prefix, line)
                     line = line or ""
@@ -514,13 +514,13 @@ local function build_subcommands()
                     end
 
                     if #parts == 1 then
-                        require("vault.api").open_picker_promote_tag(parts[1], {
+                        require("vault.tags.workflows").open_promote_picker(parts[1], {
                             keep_frontmatter_tags = keep_frontmatter_tags,
                         })
                         return
                     end
 
-                    require("vault.api").promote_tag(parts[1], parts[2], {
+                    require("vault.tags.workflows").promote(parts[1], parts[2], {
                         keep_frontmatter_tags = keep_frontmatter_tags,
                     })
                 end,
@@ -664,109 +664,7 @@ local function build_subcommands()
         },
 
         -- :Vault tasks — tasks picker
-        tasks = {
-            run = function()
-                callbacks.tasks_list()
-            end,
-            complete = function(prefix)
-                local subs = {
-                    "new",
-                    "status",
-                    "pick-next",
-                    "promote",
-                    "list",
-                    "kanban",
-                    "backlog",
-                    "doctor",
-                    "recur",
-                }
-                return vim.tbl_filter(function(s)
-                    return s:find(prefix, 1, true) == 1
-                end, subs)
-            end,
-            new = {
-                run = function(args)
-                    callbacks.tasks_new(args)
-                end,
-            },
-            status = {
-                run = function(args)
-                    callbacks.tasks_status(args)
-                end,
-                complete = function(prefix)
-                    local notes = require("vault.tasks.notes")
-                    local path = notes.current_task_path()
-                    if not path then
-                        return vim.tbl_filter(function(s)
-                            return s:find(prefix, 1, true) == 1
-                        end, notes.statuses())
-                    end
-                    local task = notes.read_task(path)
-                    if not task then
-                        return {}
-                    end
-                    return vim.tbl_filter(function(s)
-                        return s:find(prefix, 1, true) == 1
-                    end, notes.next_statuses(task.status))
-                end,
-            },
-            ["pick-next"] = {
-                run = function()
-                    callbacks.tasks_pick_next()
-                end,
-            },
-            promote = {
-                run = function(args)
-                    callbacks.tasks_promote(args)
-                end,
-            },
-            list = {
-                run = function()
-                    callbacks.tasks_list()
-                end,
-            },
-            kanban = {
-                run = function()
-                    callbacks.tasks_kanban()
-                end,
-            },
-            backlog = {
-                run = function()
-                    callbacks.tasks_backlog()
-                end,
-            },
-            doctor = {
-                run = function(args)
-                    callbacks.tasks_doctor(args)
-                end,
-            },
-            recur = {
-                run = function()
-                    callbacks.tasks_recur_preview()
-                end,
-                complete = function(prefix)
-                    local subs = { "preview", "now", "sweep" }
-                    return vim.tbl_filter(function(s)
-                        return s:find(prefix, 1, true) == 1
-                    end, subs)
-                end,
-                preview = {
-                    run = function()
-                        callbacks.tasks_recur_preview()
-                    end,
-                },
-                now = {
-                    run = function()
-                        callbacks.tasks_recur_now()
-                    end,
-                },
-                sweep = {
-                    run = function()
-                        callbacks.tasks_recur_sweep()
-                    end,
-                },
-            },
-        },
+        tasks = require("vault.tasks.commands").spec().tasks,
 
         actions = {
             run = function()

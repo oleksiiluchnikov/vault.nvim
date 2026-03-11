@@ -7,21 +7,6 @@ local log = require("vault.log").scope("telescope")
 local Popup = require("nui.popup")
 local event = require("nui.utils.autocmd").event
 
-local function get_vault_api()
-    local api = require("vault.api")
-    if
-        api.open_picker_promote_tag ~= nil
-        and api.open_picker_merge_note ~= nil
-        and api.open_picker_retarget_note ~= nil
-    then
-        return api
-    end
-
-    package.loaded["vault.api"] = nil
-    api = require("vault.api")
-    return api
-end
-
 --- @class vault.Picker.actions.note
 
 --- @alias vault.Picker.action fun(bufnr?: number, selections?: table<vault.TelescopeEntry>): nil
@@ -75,7 +60,7 @@ function vault_actions.note.merge(bufnr)
     local _, selection, _ = utils.get_picker_selection(bufnr)
     local note = selection.value
     vault_actions.close(bufnr)
-    get_vault_api().open_picker_merge_note(note.data.path, {})
+    require("vault.notes.workflows").open_merge_picker(note.data.path, {})
 end
 
 --- Rename notes
@@ -435,7 +420,7 @@ function vault_actions.tag.edit_documentation(bufnr)
     local _, selection, _ = utils.get_picker_selection(bufnr)
     vault_actions.close(bufnr)
     local tag = selection.value
-    require("vault.api").edit_tag_documentation(tag.data.name)
+    require("vault.tags.actions").edit_documentation(tag.data.name)
 end
 
 --- Promote selected tag into a canonical wikilink target.
@@ -443,7 +428,7 @@ function vault_actions.tag.promote(bufnr)
     local _, selection, _ = utils.get_picker_selection(bufnr)
     vault_actions.close(bufnr)
     local tag = selection.value
-    get_vault_api().open_picker_promote_tag(tag.data.name, {
+    require("vault.tags.workflows").open_promote_picker(tag.data.name, {
         keep_frontmatter_tags = true,
     })
 end
@@ -454,7 +439,19 @@ function vault_actions.tag.enter(bufnr)
     vault_actions.close(bufnr)
     --- @type vault.Tag
     local tag = selection.value
-    require("vault.api").open_picker_notes_with_tag(tag.data.name)
+    safe_find(
+        require("telescope._extensions.vault.pickers").notes({
+            notes = require("vault.notes")():filter({
+                search_term = "tags",
+                include = { tag.data.name },
+                exclude = {},
+                match_opt = "exact",
+                mode = "all",
+                case_sensitive = false,
+            }),
+        }),
+        "No notes found with tag: " .. tag.data.name
+    )
 end
 
 vault_actions.property = {}
@@ -465,7 +462,7 @@ function vault_actions.property.enter(bufnr)
     vault_actions.close(bufnr)
     --- @type vault.Property
     local property = selection.value
-    require("vault.api").open_picker_property_values(property.data.name)
+    require("vault.properties.actions").open_picker_values(property.data.name)
 end
 
 --- Rename properties
@@ -483,7 +480,7 @@ function vault_actions.property_value.enter(bufnr)
     --- @type vault.Property.Value
     local value = selection.value
     local prompt_title = picker.prompt_title
-    require("vault.api").open_picker_notes_with_property_value(prompt_title, value.data.name)
+    require("vault.properties.actions").open_picker_notes_with_value(prompt_title, value.data.name)
 end
 
 function vault_actions.property_value.rename(bufnr)
@@ -567,7 +564,12 @@ function vault_actions.directory.enter(bufnr)
     vault_actions.close(bufnr)
     --- @type vault.Dir
     local dir = selection.value
-    require("vault.api").open_picker_notes_in_directory(dir)
+    safe_find(
+        require("telescope._extensions.vault.pickers").notes({
+            notes = require("vault.notes")():filter("relpath", dir, "startswith", false),
+        }),
+        "No notes found in directory: " .. tostring(dir)
+    )
 end
 
 vault_actions.directory.rename = function(bufnr)
@@ -600,7 +602,7 @@ function vault_actions.base.notes(bufnr)
     vault_actions.close(bufnr)
     --- @type vault.Base
     local base = selection.value
-    require("vault.api").open_picker_base_notes(base.data.name)
+    require("vault.bases.actions").open_picker_base_notes(base.data.name)
 end
 
 --- Open the .base file for editing
