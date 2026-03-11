@@ -249,20 +249,16 @@ Reference: `docs/architecture-refactor-blueprint.md`
 
 - Chunks 0 through 7 have been executed.
 - The command suite passes after each structural chunk.
-- `vault.api` still exists, but it is now explicitly compatibility-first rather than the architectural center.
+- `vault.api` still exists, but it is now a thin orchestration facade rather than an architectural owner.
 - `notes.data` remains intact as the payload boundary.
-- Shared views now live behind `vault.views.*` with compatibility shims.
+- Shared views now live only in `vault.views.*`.
 - Task policy, taxonomy verbs, note creation, and note path policy have all been extracted into owning modules.
 
 ## Remaining frontier
 
-The original great-refactor plan is materially complete through Chunk 7.
+The great refactor is complete.
 
-Useful follow-up work now lives in cleanup / convergence rather than core restructuring:
-
-1. Add package-local command specs for more nouns (`notes`, `tags`, `tasks`, `bases`) so the registry owns more of the tree.
-2. Export remaining note/journal naming preferences into config if they should be user-tunable.
-3. Remove or archive stale planning sections once the new structure is considered stable.
+Any further work now counts as normal feature work or incremental cleanup, not architectural migration.
 
 ## Post-migration cleanup
 
@@ -271,9 +267,18 @@ Useful follow-up work now lives in cleanup / convergence rather than core restru
 - Removed the stale `vault.api.refresh_buffers` dependency from `notes/note/init.lua`.
 - Kept `vault.api` itself as a workflow facade because several orchestration call sites still legitimately use it.
 - Added package-local command specs for `notes`, `tags`, `properties`, and `bases`.
-- Moved `vault.views.shared` to the real owner implementation and kept `bases/views/shared.lua` as the shim.
+- Moved `vault.views.shared` to the real owner implementation.
 - Moved merge/promote/retarget workflow bodies out of `vault.api` into noun-owned workflow modules.
 - Removed the remaining `bases/views/{grid,list,kanban,calendar,shared}.lua` shims entirely; `vault.views.*` is now the only owner namespace.
+
+## Final state
+
+- noun-owned modules are the architectural owners
+- `vault.views.*` is the only view namespace
+- command ownership is distributed via package-local `commands.lua`
+- `vault.api` is only a lightweight orchestration facade
+- `note.data` remains intact as the payload boundary
+- the migration is finished
 
 ## First recommended implementation order
 

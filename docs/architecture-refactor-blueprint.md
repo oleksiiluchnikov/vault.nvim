@@ -196,7 +196,7 @@ M.paths = require("vault.notes.paths")
 return M
 ```
 
-`vault.api` may remain temporarily, but only as a compatibility shim. No new features should be added there.
+`vault.api` now remains only as a lightweight orchestration facade. Core ownership has moved into noun-owned modules.
 
 ---
 
@@ -596,7 +596,7 @@ Completed in code:
 - command registry scaffolding
 - taxonomy pilot command specs
 - package-owned config readers for taxonomy, tasks, and grid views
-- shared `vault.views.*` namespace with compatibility shims
+- shared `vault.views.*` namespace
 - task policy / create / paths extraction
 - taxonomy split into classify / audit / plan / rename modules
 - note create / paths helpers
@@ -611,7 +611,7 @@ Key commits:
 - `21afdba` - chunk 6
 - `4b4970b` - chunk 7
 
-What remains is mostly convergence work, not foundational architecture surgery.
+The foundational architecture refactor is complete.
 
 Recent cleanup after the main migration:
 
@@ -622,6 +622,13 @@ Recent cleanup after the main migration:
 - made `vault.views.shared` the canonical shared view implementation
 - moved merge/promote/retarget workflow bodies into noun-owned workflow modules
 - removed the old `bases/views/*` shim namespace so `vault.views.*` is canonical
+
+### Final status
+
+- noun-owned modules are now the canonical owners
+- `vault.views.*` is the only view namespace
+- package-local command specs are established across the refactored areas
+- the original migration plan has been executed end to end
 
 ---
 
