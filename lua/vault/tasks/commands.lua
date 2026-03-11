@@ -1,10 +1,14 @@
 local M = {}
 
+local function commands()
+    return require("vault.commands")
+end
+
 function M.spec()
     return {
         tasks = {
             run = function()
-                require("vault.commands")._callbacks.tasks_list()
+                commands().tasks_list()
             end,
             complete = function(prefix)
                 local subs = {
@@ -24,12 +28,12 @@ function M.spec()
             end,
             new = {
                 run = function(args)
-                    require("vault.commands")._callbacks.tasks_new(args)
+                    commands().tasks_new(args)
                 end,
             },
             status = {
                 run = function(args)
-                    require("vault.commands")._callbacks.tasks_status(args)
+                    commands().tasks_status(args)
                 end,
                 complete = function(prefix)
                     local notes = require("vault.tasks.notes")
@@ -50,37 +54,37 @@ function M.spec()
             },
             ["pick-next"] = {
                 run = function()
-                    require("vault.commands")._callbacks.tasks_pick_next()
+                    commands().tasks_pick_next()
                 end,
             },
             promote = {
                 run = function(args)
-                    require("vault.commands")._callbacks.tasks_promote(args)
+                    commands().tasks_promote(args)
                 end,
             },
             list = {
                 run = function()
-                    require("vault.commands")._callbacks.tasks_list()
+                    commands().tasks_list()
                 end,
             },
             kanban = {
                 run = function()
-                    require("vault.commands")._callbacks.tasks_kanban()
+                    commands().tasks_kanban()
                 end,
             },
             backlog = {
                 run = function()
-                    require("vault.commands")._callbacks.tasks_backlog()
+                    commands().tasks_backlog()
                 end,
             },
             doctor = {
                 run = function(args)
-                    require("vault.commands")._callbacks.tasks_doctor(args)
+                    commands().tasks_doctor(args)
                 end,
             },
             recur = {
                 run = function()
-                    require("vault.commands")._callbacks.tasks_recur_preview()
+                    commands().tasks_recur_preview()
                 end,
                 complete = function(prefix)
                     local subs = { "preview", "now", "sweep" }
@@ -90,17 +94,17 @@ function M.spec()
                 end,
                 preview = {
                     run = function()
-                        require("vault.commands")._callbacks.tasks_recur_preview()
+                        commands().tasks_recur_preview()
                     end,
                 },
                 now = {
                     run = function()
-                        require("vault.commands")._callbacks.tasks_recur_now()
+                        commands().tasks_recur_now()
                     end,
                 },
                 sweep = {
                     run = function()
-                        require("vault.commands")._callbacks.tasks_recur_sweep()
+                        commands().tasks_recur_sweep()
                     end,
                 },
             },
