@@ -5,3 +5,9 @@
 - `tests/minimal_init.lua` now accepts `VAULT_TEST_ROOT`, `VAULT_TEST_LINES`, `VAULT_TEST_COLUMNS`, and `VAULT_TEST_APPNAME` overrides for isolated E2E runs.
 - `tests/e2e/foundation_spec.lua` proves that a real `:Vault note new ...` command mutates only the cloned vault and emits a diff artifact.
 - Next step: implement the first real user journey E2E on top of the harness, starting with taxonomy/process (`:Vault classify`).
+2026-03-12
+- Added `tests/e2e/taxonomy_process_spec.lua` with three real journeys: process edit/save/undo, classify edit/save, and taxonomy preview/apply/undo-last.
+- Driver control needed to be synchronous for deterministic E2E: `driver.command()` and `driver.lua()` now execute through `--remote-expr execute(...)` instead of async `--remote-send`.
+- For first-grid journeys, Ex substitutions inside the child Neovim were more reliable than trying to mutate process buffers via ad hoc Lua snippets.
+- The first strong E2E seam is confirmed: command -> grid/taxonomy UI -> file mutation -> undo.
+- Next step: tasks lifecycle E2E journeys (`tasks promote`, `status`, `pick-next`, `recur`, `doctor`).
