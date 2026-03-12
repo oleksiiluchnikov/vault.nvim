@@ -1,0 +1,7 @@
+2026-03-12
+- Built initial Neovim-native E2E harness under `tests/e2e/`.
+- Harness launches a fresh headless Neovim process with its own `NVIM_APPNAME` and `--listen` socket.
+- Harness clones the source vault into a disposable temp directory and refuses to target the live `~/knowledge` root directly.
+- `tests/minimal_init.lua` now accepts `VAULT_TEST_ROOT`, `VAULT_TEST_LINES`, `VAULT_TEST_COLUMNS`, and `VAULT_TEST_APPNAME` overrides for isolated E2E runs.
+- `tests/e2e/foundation_spec.lua` proves that a real `:Vault note new ...` command mutates only the cloned vault and emits a diff artifact.
+- Next step: implement the first real user journey E2E on top of the harness, starting with taxonomy/process (`:Vault classify`).

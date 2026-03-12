@@ -280,6 +280,68 @@ Any further work now counts as normal feature work or incremental cleanup, not a
 - `note.data` remains intact as the payload boundary
 - the migration is finished
 
+---
+
+# E2E Testing Plan
+
+Date: 2026-03-12
+Branch: main
+
+Reference: `docs/PRD-e2e-testing.md`
+
+## Goal
+
+- add a Neovim-native E2E layer for real user journeys
+- keep unit/integration tests as the main body of test coverage
+- make failures produce replayable artifacts
+- ensure tests run in a separate Neovim instance/window and only against disposable vault copies
+
+## Execution chunks
+
+### Chunk 1: E2E harness foundation
+- Create `tests/e2e/` structure
+- Add helpers for temp vault copies, process launch, command execution, key input, and artifact capture
+- Fix deterministic geometry and runtime defaults
+- Enforce safety rails: separate Neovim instance/window, never target the live vault, always clone source vault first
+- Commit target: one minimal scenario can run end-to-end
+
+### Chunk 2: Grid and taxonomy journeys
+- Add `:Vault process` save/reload/undo journey
+- Add `:Vault classify` edit/save journey
+- Add `:Vault taxonomy preview/apply/undo-last` journey
+- Commit target: command -> grid -> filesystem -> reload path is covered
+
+### Chunk 3: Task journeys
+- Add promote/status/pick-next journey
+- Add recur now/sweep journey
+- Add doctor journey
+- Commit target: task lifecycle is covered through real commands
+
+### Chunk 4: Resolve picker journeys
+- Add note merge flow
+- Add note retarget flow
+- Add tag promote flow
+- Commit target: create vs rewrite flows are covered end-to-end
+
+### Chunk 5: Duplicate review journey
+- Add open/preview/queue/apply/pause-resume coverage
+- Commit target: duplicate review stops depending on manual smoke tests
+
+### Chunk 6: View and picker smoke layer
+- Add kanban/calendar open and create/move coverage
+- Add notes/tags/properties/bases picker smoke coverage
+- Add gradient/highlight existence checks for Telescope picker health
+- Commit target: major interactive surfaces have a smoke layer
+
+## First recommended slice
+
+Start with Chunk 1 plus one real scenario:
+
+1. harness foundation
+2. `:Vault classify` -> edit taxonomy -> `:w` -> verify mutation
+
+Reason: it exercises command dispatch, interactive grid state, save behavior, and filesystem assertions in one compact flow.
+
 ## First recommended implementation order
 
 1. Chunk 0
