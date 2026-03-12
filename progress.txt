@@ -11,3 +11,8 @@
 - For first-grid journeys, Ex substitutions inside the child Neovim were more reliable than trying to mutate process buffers via ad hoc Lua snippets.
 - The first strong E2E seam is confirmed: command -> grid/taxonomy UI -> file mutation -> undo.
 - Next step: tasks lifecycle E2E journeys (`tasks promote`, `status`, `pick-next`, `recur`, `doctor`).
+2026-03-12
+- Added `tests/e2e/tasks_lifecycle_spec.lua` covering `tasks promote`, `tasks status`, `tasks pick-next`, `tasks recur now`, `tasks recur sweep`, and `tasks doctor fix` on disposable cloned vaults.
+- Early task E2E exposed path-escaping quirks; the stable fix for assertions was to compare on basename or use space-safe fixture filenames where current-task detection matters.
+- The command-driven task lifecycle is now covered through real `:Vault tasks ...` entrypoints, not direct helper calls.
+- Next step: resolve-picker note/tag workflows (`merge`, `retarget`, `promote`) using the same harness.
