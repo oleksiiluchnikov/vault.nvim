@@ -16,3 +16,9 @@
 - Early task E2E exposed path-escaping quirks; the stable fix for assertions was to compare on basename or use space-safe fixture filenames where current-task detection matters.
 - The command-driven task lifecycle is now covered through real `:Vault tasks ...` entrypoints, not direct helper calls.
 - Next step: resolve-picker note/tag workflows (`merge`, `retarget`, `promote`) using the same harness.
+2026-03-12
+- Added `tests/e2e/resolve_picker_workflows_spec.lua` covering note merge, note retarget create, and tag promote through the real resolve-picker UI.
+- Merge flow revealed a second interactive stage: after target selection, the merge conflict UI needs a final `<CR>` apply step.
+- Tag promote E2E is more reliable when it tests create-target flow through `<C-n>` instead of depending on fuzzy selection of an existing target.
+- Resolve-picker journeys now cover both rewrite and create outcomes through real interactive input.
+- Next step: duplicate review E2E journey, then kanban/calendar plus picker health smoke.
