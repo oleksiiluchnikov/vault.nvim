@@ -2,7 +2,7 @@
 
 -- 1. ISOLATION
 -- Prevent loading user's personal config
-vim.env.NVIM_APPNAME = "nvim-test"
+vim.env.NVIM_APPNAME = vim.env.VAULT_TEST_APPNAME or vim.env.NVIM_APPNAME or "nvim-test"
 vim.opt.runtimepath:remove(vim.fn.expand("~/.config/nvim"))
 vim.opt.packpath:remove(vim.fn.expand("~/.local/share/nvim/site"))
 
@@ -54,12 +54,18 @@ end
 vim.opt.swapfile = false
 vim.opt.termguicolors = true
 vim.o.hidden = true
+if tonumber(vim.env.VAULT_TEST_LINES) then
+    vim.o.lines = tonumber(vim.env.VAULT_TEST_LINES)
+end
+if tonumber(vim.env.VAULT_TEST_COLUMNS) then
+    vim.o.columns = tonumber(vim.env.VAULT_TEST_COLUMNS)
+end
 
 -- Make assertions available globally for convenience
 _G.assert = require("luassert")
 
 -- 4. SETUP VAULT WITH FIXTURES
-local fixture_root = root_cwd .. "/tests/fixtures/demo-vault"
+local fixture_root = vim.fn.expand(vim.env.VAULT_TEST_ROOT or (root_cwd .. "/tests/fixtures/demo-vault"))
 
 -- Ensure the fixture directory actually exists to prevent crashes
 if vim.fn.isdirectory(fixture_root) == 0 then
