@@ -59,7 +59,15 @@ end
 ---@param session vault.e2e.DriverSession
 ---@param command string
 function M.command(session, command)
-    remote_send(session.socket, string.format(":%s<CR>", command))
+    local escaped = command:gsub("\\", "\\\\"):gsub("'", "''")
+    remote_expr(session.socket, string.format("execute('%s')", escaped))
+end
+
+---@param session vault.e2e.DriverSession
+---@param code string
+function M.lua(session, code)
+    local escaped = code:gsub("\\", "\\\\"):gsub("'", "''")
+    remote_expr(session.socket, string.format("execute('lua %s')", escaped))
 end
 
 ---@param session vault.e2e.DriverSession
@@ -104,6 +112,34 @@ function M.capture(session)
     if ok_buf then
         artifacts.write_text(session.artifacts_dir, "current-buffer.txt", bufname)
     end
+    local ok_text, text = pcall(M.current_buffer_text, session)
+    if ok_text then
+        artifacts.write_text(session.artifacts_dir, "current-buffer-body.txt", text)
+    end
+end
+
+---@param session vault.e2e.DriverSession
+---@return string
+function M.current_buffer_name(session)
+    return M.expr(session, [[expand('%:p')]])
+end
+
+---@param session vault.e2e.DriverSession
+---@return string
+function M.current_buffer_text(session)
+    return M.expr(session, [[luaeval('table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")')]])
+end
+
+---@param session vault.e2e.DriverSession
+---@param before string
+---@param after string
+function M.replace_in_current_buffer(session, before, after)
+    local code = string.format(
+        "local before=%q; local after=%q; local lines=vim.api.nvim_buf_get_lines(0,0,-1,false); for i,l in ipairs(lines) do if l:find(before,1,true) then lines[i]=l:gsub(before,after,1); break; end end; vim.api.nvim_buf_set_lines(0,0,-1,false,lines)",
+        before,
+        after
+    )
+    M.lua(session, code)
 end
 
 ---@param opts? { source_root?: string, scenario?: string, lines?: integer, columns?: integer }
