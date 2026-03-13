@@ -27,3 +27,8 @@
 - Duplicate review E2E should assert on the actual center/preview buffer names (`vault://duplicates/center`, `vault://duplicates/merge-preview`) instead of invented title text.
 - The first duplicate-review scenario is strongest when it uses a conflict-free subset pair, so the journey covers the real review loop without detouring into merge-conflict resolution UI.
 - Next step: kanban/calendar plus picker health smoke E2E.
+2026-03-12
+- Added `tests/e2e/views_and_picker_health_spec.lua` covering notes/tags/properties/bases picker smoke plus kanban/calendar open/create smoke on cloned vaults.
+- Picker health is most robust when asserted through highlight-group existence (`VaultTag1`, `VaultProperty1`, `VaultBase1`, `VaultNoteContent1`) instead of trying to introspect Telescope prompt internals.
+- Calendar smoke exposed a real compatibility bug with older `dates.nvim` surfaces; `vault.views.calendar` now patches missing date helpers before loading `vimtable` calendar code.
+- Next step: wire the E2E suite into a stable local runner and CI entrypoint.

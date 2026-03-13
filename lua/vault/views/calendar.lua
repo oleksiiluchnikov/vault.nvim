@@ -37,6 +37,81 @@ local shared = require("vault.views.shared")
 
 ---@return Calendar
 local function get_Calendar()
+    local ok, dates = pcall(require, "dates")
+    if ok and type(dates) == "table" then
+        if type(dates.days_in_month) ~= "function" then
+            ---@param year integer
+            ---@param month integer
+            ---@return integer
+            dates.days_in_month = function(year, month)
+                return os.date("*t", os.time({ year = year, month = month + 1, day = 0 })).day
+            end
+        end
+        if type(dates.weekday_num) ~= "function" then
+            ---@param iso string
+            ---@return integer
+            dates.weekday_num = function(iso)
+                local y, m, d = iso:match("^(%d+)-(%d+)-(%d+)")
+                return os.date("*t", os.time({ year = tonumber(y), month = tonumber(m), day = tonumber(d) })).wday - 1
+            end
+        end
+        if type(dates.today) ~= "function" then
+            dates.today = function()
+                return os.date("%Y-%m-%d")
+            end
+        end
+        if type(dates.add_days) ~= "function" then
+            dates.add_days = function(iso, n)
+                local y, m, d = iso:match("^(%d+)-(%d+)-(%d+)")
+                local t = os.time({ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 }) + n * 86400
+                return os.date("%Y-%m-%d", t)
+            end
+        end
+        if type(dates.add_months) ~= "function" then
+            dates.add_months = function(iso, n)
+                local y, m, d = iso:match("^(%d+)-(%d+)-(%d+)")
+                local yi, mi, di = tonumber(y), tonumber(m), tonumber(d)
+                local total = (yi * 12 + mi - 1) + n
+                local ny = math.floor(total / 12)
+                local nm = (total % 12) + 1
+                local max_d = dates.days_in_month(ny, nm)
+                local nd = math.min(di, max_d)
+                return string.format("%04d-%02d-%02d", ny, nm, nd)
+            end
+        end
+        if type(dates.range) ~= "function" then
+            dates.range = function(from, to)
+                local y1, m1, d1 = from:match("^(%d+)-(%d+)-(%d+)")
+                local y2, m2, d2 = to:match("^(%d+)-(%d+)-(%d+)")
+                local t1 = os.time({ year = tonumber(y1), month = tonumber(m1), day = tonumber(d1), hour = 12 })
+                local t2 = os.time({ year = tonumber(y2), month = tonumber(m2), day = tonumber(d2), hour = 12 })
+                if t2 < t1 then return nil end
+                local result = {}
+                local t = t1
+                while t <= t2 do
+                    result[#result + 1] = os.date("%Y-%m-%d", t)
+                    t = t + 86400
+                end
+                return result
+            end
+        end
+        if type(dates.iso_week) ~= "function" then
+            dates.iso_week = function(iso)
+                local y, m, d = iso:match("^(%d+)-(%d+)-(%d+)")
+                local t = os.time({ year = tonumber(y), month = tonumber(m), day = tonumber(d) })
+                return tonumber(os.date("!%V", t)) or 1
+            end
+        end
+        if type(dates.is_valid_string) ~= "function" then
+            dates.is_valid_string = function(iso)
+                local y, m, d = iso:match("^(%d%d%d%d)-(%d%d)-(%d%d)$")
+                if not y then return false end
+                local yi, mi, di = tonumber(y), tonumber(m), tonumber(d)
+                if mi < 1 or mi > 12 then return false end
+                return di >= 1 and di <= dates.days_in_month(yi, mi)
+            end
+        end
+    end
     return require("vimtable.views.calendar")
 end
 
