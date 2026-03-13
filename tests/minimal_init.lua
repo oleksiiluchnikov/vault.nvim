@@ -26,6 +26,15 @@ local function ensure_plugin(repo)
     vim.opt.runtimepath:append(install_path)
 end
 
+local function ensure_local_or_plugin(local_path, repo)
+    local expanded = vim.fn.expand(local_path)
+    if vim.fn.isdirectory(expanded) == 1 then
+        vim.opt.runtimepath:append(expanded)
+        return
+    end
+    ensure_plugin(repo)
+end
+
 -- Install required plugins
 ensure_plugin("nvim-lua/plenary.nvim")
 ensure_plugin("nvim-telescope/telescope.nvim")
@@ -36,19 +45,13 @@ ensure_plugin("oleksiiluchnikov/gradient.nvim")
 ensure_plugin("oleksiiluchnikov/dates.nvim")
 
 -- Add teolog.nvim to runtimepath (structured logging backend)
-local teolog_path = vim.fn.expand("~/projects/teolog.nvim")
-if vim.fn.isdirectory(teolog_path) == 1 then
-  vim.opt.runtimepath:append(teolog_path)
-end
+ensure_local_or_plugin("~/projects/teolog.nvim", "oleksiiluchnikov/teolog.nvim")
 
 -- Add current plugin to runtimepath
 vim.opt.runtimepath:prepend(root_cwd)
 
 -- Add vimtable.nvim (shared grid infrastructure)
-local vimtable_path = vim.fn.expand("~/projects/vimtable.nvim")
-if vim.fn.isdirectory(vimtable_path) == 1 then
-  vim.opt.runtimepath:append(vimtable_path)
-end
+ensure_local_or_plugin("~/projects/vimtable.nvim", "oleksiiluchnikov/vimtable.nvim")
 
 -- 3. CONFIGURATION
 vim.opt.swapfile = false

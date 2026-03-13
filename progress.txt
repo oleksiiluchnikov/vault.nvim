@@ -32,3 +32,8 @@
 - Picker health is most robust when asserted through highlight-group existence (`VaultTag1`, `VaultProperty1`, `VaultBase1`, `VaultNoteContent1`) instead of trying to introspect Telescope prompt internals.
 - Calendar smoke exposed a real compatibility bug with older `dates.nvim` surfaces; `vault.views.calendar` now patches missing date helpers before loading `vimtable` calendar code.
 - Next step: wire the E2E suite into a stable local runner and CI entrypoint.
+2026-03-12
+- Added `scripts/run_e2e.sh` as the local runner and `.github/workflows/e2e.yml` as the CI entrypoint.
+- `tests/minimal_init.lua` now bootstraps `teolog.nvim` and `vimtable.nvim` deterministically by using local checkouts when present and cloning from GitHub otherwise.
+- Added `docs/e2e-testing.md` and a README testing section documenting the separate-process rule, cloned-vault safety model, and failure artifact workflow.
+- The full E2E suite now runs end-to-end through the local runner script.
