@@ -58,3 +58,25 @@
 - Kanban/calendar E2E: floating window keystrokes are unreliable in headless mode. Use exposed APIs (`_apply_group_change`, `shared.set_frontmatter_field`) for deterministic testing.
 - Picker drill-down E2E: check `&filetype == "TelescopePrompt"` instead of buffer name (Telescope prompt buffers have empty names).
 - All tests pass: 0 failures across unit + E2E suites.
+2026-03-14
+- Completed all 28 E2E coverage gap tasks in a single session.
+- Added 28 new E2E spec files covering all vault.nvim command families:
+  Tier 1 (11 high-risk): note delete, rename, move, tasks new, tasks kanban,
+  conflicts review, duplicates related, vault doctor, grid keymaps undo,
+  tags promote existing-target, watcher integration (gated).
+  Tier 2 (9 medium-risk): filtered notes pickers, tags bulk rename,
+  properties rename, process filter variants, classify scoped, taxonomy audit,
+  tasks views, duplicate pause/resume, view filter variants.
+  Tier 3 (8 low-risk smoke): readonly pickers, journal, note info, fleeting,
+  stats/list, toggle-link/trash, misc commands, note cluster/extract.
+- Suite total: 71 E2E tests, 0 failures.
+- Key patterns for new tests:
+  - Commands that use `vim.fn.input`, `vim.ui.select`, or `vim.fn.confirm` for interactive
+    dialogs can't be tested via `:Vault` commands in headless mode. Use the underlying
+    API functions (Note:delete, Note:move, etc.) or driver.lua to bypass the dialog.
+  - Commands that need specific config (journal.daily dir, .base files) must set the config
+    via `driver.lua` before running the command.
+  - Pickers that may return 0 results should use `pcall(vim.cmd, ...)` in driver.lua
+    and check `ok ~= false` rather than waiting for TelescopePrompt filetype.
+  - grep picker has a real bug: `grep/init.lua:8` attempts to index nil when no
+    live_grep extension is available. Tracked as known issue.
