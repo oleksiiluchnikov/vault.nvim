@@ -161,7 +161,7 @@ All commands live under a single `:Vault` entry point. Running `:Vault` with no 
 | `:Vault tasks doctor [--fix]` | Diagnose task frontmatter status issues; optionally auto-fix canonical forms. |
 | `:Vault actions` | Legacy inline-checkbox task picker (`- [ ]` lines). |
 
-Task Kanban column order is task-specific and configured via `task_notes.status_order`:
+Task Kanban column order, card sorting, and empty-column behavior are task-specific and configured via `task_notes`:
 
 ```lua
 require("vault").setup({
@@ -176,9 +176,19 @@ require("vault").setup({
       "Status - Deprecated",
       "Status - Archived",
     },
+    -- Sort cards within each column (applied in order).
+    -- Prefix with "-" for descending. Default: {} (sort by slug).
+    kanban_sort = { "priority", "-created" },
+    -- Empty-column behavior:
+    --   "always"    — show all status columns even when empty (default)
+    --   "non-empty" — show only columns with at least one card
+    --   "hide"      — same as non-empty
+    kanban_empty_columns = "always",
   },
 })
 ```
+
+These controls only affect `:Vault tasks kanban`; other kanban boards are not changed.
 | `:Vault dates` | Telescope picker for dates found in notes. |
 | `:Vault lines` | Telescope picker for dash-prefixed lines from journal notes. |
 | `:Vault bases` | Telescope picker for `.base` files. |

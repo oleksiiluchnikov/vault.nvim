@@ -791,6 +791,8 @@ end
 ---@field display_fields? string[]   Override display fields
 ---@field render_mode? kanban.RenderMode  Override render mode
 ---@field filter_desc? string        Description for logging
+---@field card_sort? string[]        Sort fields for cards (prefix with "-" for desc)
+---@field empty_columns? "always"|"non-empty"|"hide"  Empty-column behavior
 
 ---@param opts? vault.GridKanbanOpenOpts
 function M.open(opts)
@@ -872,6 +874,52 @@ function M.open(opts)
   if #records == 0 then
     log.info("No records after flattening")
     return
+  end
+
+  -- Apply custom card sort if specified
+  local card_sort = opts.card_sort
+  if card_sort and #card_sort > 0 then
+    table.sort(records, function(a, b)
+      for _, spec in ipairs(card_sort) do
+        local desc = spec:sub(1, 1) == "-"
+        local field = desc and spec:sub(2) or spec
+        local va = a[field]
+        local vb = b[field]
+        if va == nil then va = "" end
+        if vb == nil then vb = "" end
+        if type(va) == "table" then va = va[1] or "" end
+        if type(vb) == "table" then vb = vb[1] or "" end
+        va = tostring(va):lower()
+        vb = tostring(vb):lower()
+        if va ~= vb then
+          if desc then
+            return va > vb
+          end
+          return va < vb
+        end
+      end
+      return (a.id or "") < (b.id or "")
+    end)
+  end
+
+  -- Filter empty columns if requested
+  local empty_columns = opts.empty_columns or "always"
+  if empty_columns == "non-empty" or empty_columns == "hide" then
+    local populated = {}
+    for _, rec in ipairs(records) do
+      local gv = rec[group_info.field_key] or ""
+      if group_info.resolver then
+        gv = group_info.resolver(rec, group_info.field_key)
+      end
+      populated[gv] = true
+    end
+    local filtered_values = {}
+    for _, v in ipairs(group_info.values) do
+      if populated[v] then
+        filtered_values[#filtered_values + 1] = v
+      end
+    end
+    group_info.values = filtered_values
   end
 
   -- Build kanban fields
