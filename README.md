@@ -19,6 +19,14 @@ Plugin to manage [Obsidian](https://obsidian.md)-compatible vaults in Neovim.
 
 See [docs/installation.md](docs/installation.md).
 
+## Testing
+
+- Unit and integration tests live under `tests/vault/`.
+- End-to-end tests live under `tests/e2e/`.
+- Run the E2E suite with `bash ./scripts/run_e2e.sh`.
+- E2E always runs in a separate Neovim process against a disposable cloned vault, never the live `~/knowledge` root.
+- See `docs/e2e-testing.md` for safety rules and artifact debugging.
+
 ## Configuration
 
 Duplicate review and merge heuristics are user-configurable rather than hardcoded.
