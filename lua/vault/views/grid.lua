@@ -562,7 +562,8 @@ local function columns_from_base(base)
     order = base.data.views[1].order
   end
   if not order then
-    order = base.data.properties and vim.tbl_keys(base.data.properties) or {}
+    order = (type(base.data.properties) == "table" and not vim.tbl_isempty(base.data.properties))
+        and vim.tbl_keys(base.data.properties) or {}
   end
   if #order == 0 then
     return DEFAULT_COLUMNS, {}, {}, DEFAULT_COLUMNS
