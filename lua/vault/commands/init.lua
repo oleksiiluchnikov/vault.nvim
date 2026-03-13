@@ -2951,11 +2951,16 @@ function callbacks.tasks_kanban()
     local cfg = require("vault.config").options or {}
     local task_cfg = cfg.task_notes or {}
     local group_values = type(task_cfg.status_order) == "table" and task_cfg.status_order or nil
+    local card_sort = type(task_cfg.kanban_sort) == "table" and task_cfg.kanban_sort or nil
+    local empty_columns = type(task_cfg.kanban_empty_columns) == "string"
+        and task_cfg.kanban_empty_columns or nil
 
     require("vault.views.kanban").open({
         base = base,
         filter_desc = "base:Tasks Kanban",
         group_values = group_values,
+        card_sort = card_sort,
+        empty_columns = empty_columns,
     })
 end
 

@@ -248,6 +248,17 @@ local DEFAULT_OPTIONS = {
             "Status - Deprecated",
             "Status - Archived",
         },
+        --- Card sort fields for tasks kanban (applied in order).
+        --- Each entry is a field name; prefix with "-" for descending.
+        --- Example: { "priority", "-created" }
+        ---@type string[]
+        kanban_sort = {},
+        --- Empty-column behavior for tasks kanban.
+        --- "always"    — show all status columns even when empty
+        --- "non-empty" — show only columns with at least one card
+        --- "hide"      — same as non-empty (alias)
+        ---@type "always"|"non-empty"|"hide"
+        kanban_empty_columns = "always",
     },
     tasks = {},
     notify = {
