@@ -242,6 +242,208 @@ Press `gJ` in the process buffer to open a Telescope picker of all notes ranked 
 4. All `[[B]]` wikilinks are rewritten to `[[A]]` across the vault
 5. B is trashed
 
+## Calendar
+
+The calendar view places notes on a month grid by a frontmatter date field. It is backed by `vimtable.views.calendar` and works like a visual date picker for your vault.
+
+### Open the calendar
+
+```vim
+:Vault calendar
+```
+
+Opens a month calendar using the default date field (`due`). Notes with a parseable date in that field appear as cards on the corresponding day cell.
+
+### Choose which date field to use
+
+```vim
+:Vault calendar date=created
+:Vault calendar date=due
+:Vault calendar date=scheduled
+```
+
+The `date=` parameter overrides the default `due` field. Any frontmatter key containing an ISO date (`YYYY-MM-DD`) or a daily-note wikilink (`[[2026-03-14 Friday]]`) works.
+
+Built-in virtual fields are also supported:
+
+```vim
+:Vault calendar date=file.ctime
+:Vault calendar date=file.mtime
+:Vault calendar date=file.name
+```
+
+- `file.ctime` / `file.mtime` — file creation/modification timestamp
+- `file.name` — extracts a date from the filename (useful for daily notes like `2026-03-14.md`)
+
+> **Note:** `file.*` date fields are read-only. You cannot drag cards placed by file timestamps.
+
+### Filter which notes appear
+
+```vim
+" Only notes in a specific directory
+:Vault calendar dir Projects
+
+" Only notes with a specific tag
+:Vault calendar tag meeting
+
+" Only notes matched by a base definition
+:Vault calendar base Deadlines
+
+" Combine filters with date override
+:Vault calendar date=due tag project
+```
+
+### Navigate the calendar
+
+| Key | Action |
+|-----|--------|
+| `]m` | Next month |
+| `[m` | Previous month |
+| `H` | Move selected card one day earlier |
+| `L` | Move selected card one day later |
+| `j` / `k` | Move between cards within a day cell |
+| `<CR>` | Open the note under cursor for editing |
+| `<C-s>` or `:w` | Save all pending changes |
+| `a` | Add a new note on the current day |
+| `R` | Reload the calendar from disk |
+
+### Move a note to a different date
+
+1. Navigate to the card you want to move.
+2. Press `H` to move it one day earlier or `L` to move it one day later.
+3. Press `<C-s>` to save.
+
+The frontmatter date field is rewritten on disk. For fields listed in `link_date_fields` (default: `{ "due" }`), the value is stored as a daily-note wikilink:
+
+```yaml
+# Before
+due: "[[2026-03-14 Friday]]"
+
+# After pressing L
+due: "[[2026-03-15 Saturday]]"
+```
+
+For other date fields the value is stored as a plain ISO date:
+
+```yaml
+# Before
+scheduled: "2026-03-14"
+
+# After pressing L
+scheduled: "2026-03-15"
+```
+
+### Create a note from the calendar
+
+Press `a` on any day cell. A new note is created with the date field pre-populated:
+
+```yaml
+---
+title: note-20260314153000
+due: "[[2026-03-14 Friday]]"
+---
+```
+
+The calendar reloads automatically to show the new card.
+
+### Configure the calendar
+
+Add a `calendar` section to your vault setup:
+
+```lua
+require("vault").setup({
+    calendar = {
+        -- Frontmatter key for date placement (or "file.ctime"/"file.mtime"/"file.name")
+        date_field = "due",
+
+        -- Fields stored as daily-note wikilinks ([[YYYY-MM-DD Weekday]])
+        -- Other date fields are stored as plain ISO dates
+        link_date_fields = { "due" },
+
+        -- Optional: end date field for date ranges (shows cards spanning multiple days)
+        end_date_field = nil, -- e.g. "end_date"
+
+        -- Field displayed on calendar cards
+        primary_field = "title",
+
+        -- Multi-line card fields (nil = primary_field only)
+        display_fields = nil, -- e.g. { "title", "status" }
+
+        -- First day of week: 0 = Sunday, 1 = Monday
+        first_day = 1,
+
+        -- Max cards shown per day cell before "+N more" overflow
+        max_cards_per_cell = 3,
+
+        -- Week/timetable view hour range
+        hour_start = 8,
+        hour_end = 18,
+
+        -- Override empty cell symbol (nil = use bases.empty_cell)
+        empty_cell = nil,
+
+        -- Keymap overrides (set key to false to disable)
+        keymaps = {},
+    },
+})
+```
+
+### Use a `.base` file for a calendar view
+
+Create a `.base` file in your vault:
+
+```yaml
+# Deadlines.base
+views:
+  - type: calendar
+    name: Deadlines Calendar
+    date_field: due
+    primary_field: title
+    filters:
+      and:
+        - { property: "due", operator: "is-not-empty" }
+```
+
+Then open it:
+
+```vim
+:Vault calendar base Deadlines
+```
+
+The base filters control which notes appear and the calendar view definition sets the date field and display options.
+
+### Date ranges
+
+If your notes have both a start and end date, configure `end_date_field`:
+
+```lua
+require("vault").setup({
+    calendar = {
+        date_field = "start",
+        end_date_field = "end_date",
+    },
+})
+```
+
+Notes will span multiple day cells from `start` to `end_date`.
+
+### Daily notes on a calendar
+
+To see your daily journal entries on a calendar grid:
+
+```vim
+:Vault calendar date=file.name dir Journal/Daily
+```
+
+This extracts the date from the filename (`2026-03-14.md` -> `2026-03-14`) and shows only notes in the daily journal directory.
+
+### Suggested keymap
+
+```lua
+vim.keymap.set("n", "<leader>vc", "<cmd>Vault calendar<cr>", { desc = "Calendar view" })
+vim.keymap.set("n", "<leader>vC", "<cmd>Vault calendar date=file.name dir Journal/Daily<cr>", { desc = "Daily journal calendar" })
+```
+
 ## Bases
 
 ### Create a base for inbox triage
@@ -343,4 +545,6 @@ vim.keymap.set("n", "<leader>vg", "<cmd>Vault grep<cr>", { desc = "Grep vault" }
 vim.keymap.set("n", "<leader>vT", "<cmd>Vault tags<cr>", { desc = "Tags picker" })
 vim.keymap.set("n", "<leader>vw", "<cmd>Vault wikilinks unresolved<cr>", { desc = "Unresolved links" })
 vim.keymap.set("n", "<leader>vr", "<cmd>Vault note random<cr>", { desc = "Random note" })
+vim.keymap.set("n", "<leader>vc", "<cmd>Vault calendar<cr>", { desc = "Calendar view" })
+vim.keymap.set("n", "<leader>vC", "<cmd>Vault calendar date=file.name dir Journal/Daily<cr>", { desc = "Daily journal calendar" })
 ```
