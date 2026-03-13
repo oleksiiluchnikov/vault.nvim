@@ -37,3 +37,24 @@
 - `tests/minimal_init.lua` now bootstraps `teolog.nvim` and `vimtable.nvim` deterministically by using local checkouts when present and cloning from GitHub otherwise.
 - Added `docs/e2e-testing.md` and a README testing section documenting the separate-process rule, cloned-vault safety model, and failure artifact workflow.
 - The full E2E suite now runs end-to-end through the local runner script.
+2026-03-14
+- Completed all 8 remaining vault.nvim tasks from the backlog.
+- Added 6 new E2E spec files:
+  - `retarget_rewrite_spec.lua` — retarget picker merge path (select existing target)
+  - `duplicates_queue_spec.lua` — queue decisions with A/B and batch-flush with X
+  - `kanban_move_spec.lua` — move card between columns, verify frontmatter on disk
+  - `calendar_move_spec.lua` — move note to new date, verify date field on disk
+  - `merge_conflict_spec.lua` — merge with conflicting frontmatter, resolve via picker
+  - `picker_navigation_spec.lua` — drill-down in notes/tags/properties/bases pickers
+- Fixed 3 real runtime bugs discovered during E2E development:
+  - `telescope/actions.lua`: `safe_find` was undefined, causing tag enter to crash
+  - `properties/actions.lua`: `open_picker_values` passed empty `opts.values` to picker
+  - `views/grid.lua`: `base.data.properties` could be `vim.NIL` (userdata), crashing `tbl_keys`
+- Added kanban sort and empty-column controls for task boards:
+  - `task_notes.kanban_sort` — custom card sort fields (prefix "-" for desc)
+  - `task_notes.kanban_empty_columns` — "always"/"non-empty"/"hide"
+  - Only affects `:Vault tasks kanban`, not other kanban boards
+- Added watcher and external integration test strategy to `docs/e2e-testing.md`
+- Kanban/calendar E2E: floating window keystrokes are unreliable in headless mode. Use exposed APIs (`_apply_group_change`, `shared.set_frontmatter_field`) for deterministic testing.
+- Picker drill-down E2E: check `&filetype == "TelescopePrompt"` instead of buffer name (Telescope prompt buffers have empty names).
+- All tests pass: 0 failures across unit + E2E suites.
