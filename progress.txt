@@ -22,3 +22,8 @@
 - Tag promote E2E is more reliable when it tests create-target flow through `<C-n>` instead of depending on fuzzy selection of an existing target.
 - Resolve-picker journeys now cover both rewrite and create outcomes through real interactive input.
 - Next step: duplicate review E2E journey, then kanban/calendar plus picker health smoke.
+2026-03-12
+- Added `tests/e2e/duplicates_review_spec.lua` covering open, preview, and apply through the real `:Vault duplicates review ...` flow.
+- Duplicate review E2E should assert on the actual center/preview buffer names (`vault://duplicates/center`, `vault://duplicates/merge-preview`) instead of invented title text.
+- The first duplicate-review scenario is strongest when it uses a conflict-free subset pair, so the journey covers the real review loop without detouring into merge-conflict resolution UI.
+- Next step: kanban/calendar plus picker health smoke E2E.
