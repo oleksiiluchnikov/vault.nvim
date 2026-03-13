@@ -16,6 +16,17 @@ local event = require("nui.utils.autocmd").event
 --- @type table<string, vault.Picker.actions>
 local vault_actions = {}
 
+--- Safely call :find() on a picker, logging a message if the picker is nil.
+---@param picker table|nil
+---@param empty_msg string|nil
+local function safe_find(picker, empty_msg)
+    if picker then
+        picker:find()
+    else
+        log.info(empty_msg or "No results found")
+    end
+end
+
 --- Refresh the picker
 function vault_actions.refresh()
     local current_picker = vault_state.get_global_key("picker")

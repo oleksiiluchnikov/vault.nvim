@@ -12,7 +12,16 @@ local function safe_find(picker, empty_msg)
 end
 
 function M.open_picker_values(property_name)
-    safe_find(pickers.property_values({ property = property_name }), "No values found for property: " .. property_name)
+    local properties = require("vault.properties")()
+    local prop = properties.map and properties.map[property_name]
+    if not prop or not prop.data or not prop.data.values then
+        log.info("No values found for property: %s", property_name)
+        return
+    end
+    safe_find(
+        pickers.property_values({ property = property_name, values = prop.data.values }),
+        "No values found for property: " .. property_name
+    )
 end
 
 function M.open_picker_notes_with_value(property_name, value)
