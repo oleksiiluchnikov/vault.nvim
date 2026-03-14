@@ -1187,7 +1187,7 @@ local function build_subcommands()
                 local notes, desc
 
                 -- Parse key=value args
-                local date_field, primary_field
+                local date_field, primary_field, annual_override
                 local remaining = {}
                 for _, arg in ipairs(args) do
                     local k, v = arg:match("^(%w+)=(.+)$")
@@ -1195,6 +1195,8 @@ local function build_subcommands()
                         date_field = v
                     elseif k == "primary" then
                         primary_field = v
+                    elseif k == "annual" then
+                        annual_override = (v == "true" or v == "1")
                     else
                         table.insert(remaining, arg)
                     end
@@ -1218,6 +1220,7 @@ local function build_subcommands()
                             base = base,
                             date_field = date_field,
                             primary_field = primary_field,
+                            annual = annual_override,
                         })
                     else
                         local ok, picker =
@@ -1256,6 +1259,7 @@ local function build_subcommands()
                     filter_desc = desc,
                     date_field = date_field,
                     primary_field = primary_field,
+                    annual = annual_override,
                 })
             end,
             complete = function(prefix, line)
@@ -1271,7 +1275,7 @@ local function build_subcommands()
                     end
                     return {}
                 end
-                local subs = { "base", "tag", "dir", "date=", "primary=" }
+                local subs = { "base", "tag", "dir", "date=", "primary=", "annual=" }
                 return vim.tbl_filter(function(s)
                     return s:find(prefix, 1, true) == 1
                 end, subs)

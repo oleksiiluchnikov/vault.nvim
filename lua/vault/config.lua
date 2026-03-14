@@ -225,6 +225,7 @@ local DEFAULT_OPTIONS = {
         hour_end = 18, -- Last hour in timetable view (week mode)
         empty_cell = nil, --- @type string|nil Override empty cell symbol (nil = use bases.empty_cell)
         keymaps = {}, --- @type table<string, string|false> Keymap overrides (set key to false to disable)
+        annual_fields = {}, --- @type string[] Date fields that repeat every year (e.g. { "birthday", "anniversary" })
     },
     typecheck = {
         on_save = false, -- BufWritePost diagnostics (off by default, ADHD-friendly)
