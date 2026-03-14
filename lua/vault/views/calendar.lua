@@ -32,6 +32,7 @@ local shared = require("vault.views.shared")
 ---@field empty_cell? string
 ---@field keymaps? table<string, string>
 ---@field link_date_fields? string[]
+---@field annual_fields? string[]    Fields that repeat every year (e.g. "birthday")
 
 -- ─── Lazy imports ─────────────────────────────────────────────────────────────
 
@@ -450,6 +451,7 @@ end
 ---@field primary_field? string      Main display field (default "title")
 ---@field end_date_field? string     Optional range end field
 ---@field filter_desc? string        Description for logging
+---@field annual? boolean            Override annual mode for this date field
 
 ---@param opts? vault.CalendarOpenOpts
 function M.open(opts)
@@ -479,6 +481,15 @@ function M.open(opts)
     local hour_end = cfg.hour_end or 18
     local empty_cell_override = cfg.empty_cell
     local keymap_overrides = cfg.keymaps or {}
+    local annual_fields = cfg.annual_fields or {}
+    -- Determine annual mode: command override > config list
+    local annual
+    if opts.annual then
+        -- Explicit override from command arg: treat current date_field as annual
+        annual = { date_field }
+    elseif #annual_fields > 0 then
+        annual = annual_fields
+    end
 
     if base then
         filter_desc = opts.filter_desc or ("base:" .. (base.data.name or "unnamed"))
@@ -564,6 +575,7 @@ function M.open(opts)
         hour_start = hour_start,
         hour_end = hour_end,
         keymaps = keymap_overrides,
+        annual = annual,
         buf_name = buf_name,
         filetype = "vault_calendar",
         on_save = make_on_save(st),

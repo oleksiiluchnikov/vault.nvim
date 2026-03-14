@@ -439,19 +439,7 @@ This extracts the date from the filename (`2026-03-14.md` -> `2026-03-14`) and s
 
 ### Birthdays and annual recurring dates
 
-For fields like `birthday` or `anniversary` where the event repeats every year, the calendar currently places cards on the original year. Annual projection (showing a `birthday: "1990-05-15"` card on May 15 of every viewed year) requires support from the underlying `vimtable.views.calendar` library and is planned but not yet implemented.
-
-**Current workaround:** use the current year in the date field and update it annually, or use a month-day-only format in a separate field:
-
-```yaml
----
-title: "John Doe"
-birthday: "1990-05-15"
-birthday_month_day: "03-15"
----
-```
-
-When annual mode lands in vimtable, vault.nvim will expose it via:
+For fields like `birthday` or `anniversary` where the event repeats every year, use `annual_fields` to project dates onto the currently viewed year:
 
 ```lua
 require("vault").setup({
@@ -460,6 +448,26 @@ require("vault").setup({
     },
 })
 ```
+
+Now `:Vault calendar date=birthday` shows a `birthday: "1990-05-15"` card on May 15 of whichever year you're viewing. Navigating to a different year with `]m`/`[m` automatically re-projects.
+
+You can also enable annual mode on-the-fly from the command line:
+
+```vim
+:Vault calendar date=birthday annual=true
+```
+
+Moving a card with `H`/`L` changes only the month-day on disk — the original year is preserved:
+
+```yaml
+# Before pressing L
+birthday: "1990-05-15"
+
+# After pressing L
+birthday: "1990-05-16"
+```
+
+Feb 29 birthdays are clamped to Feb 28 when viewing a non-leap year.
 
 ### Suggested keymap
 
