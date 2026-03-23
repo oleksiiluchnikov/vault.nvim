@@ -17,5 +17,6 @@ return function(opts)
     if next(notes_cluster.map) == nil then
         error("No notes found in cluster")
     end
+    opts.notes = notes_cluster
     return require("telescope._extensions.vault.pickers.notes")(opts)
 end
