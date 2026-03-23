@@ -49,6 +49,15 @@ describe("vault.e2e note cluster and extract", function()
                 "",
                 "# Cluster neighbor",
             },
+            ["Inbox/unrelated-note.md"] = {
+                "---",
+                'title: "unrelated note"',
+                "tags:",
+                "  - beta",
+                "---",
+                "",
+                "# Unrelated note",
+            },
         })
 
         with_session(source_root, "note-cluster", function(session)
@@ -58,6 +67,7 @@ describe("vault.e2e note cluster and extract", function()
                 local ft = driver.expr(session, "&filetype")
                 return ft == "TelescopePrompt"
             end, { timeout_ms = 8000 }))
+
             driver.keys(session, "<Esc>")
         end)
     end)
