@@ -9,6 +9,7 @@ return function(opts)
     local sorters = require("telescope.sorters")
     local vault_mappings = require("telescope._extensions.vault.mappings")
     local vault_hl = require("telescope._extensions.vault.highlights")
+    local layouts = require("telescope._extensions.vault.layouts")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
 
     opts = opts or {}
@@ -18,8 +19,7 @@ return function(opts)
         table.insert(values_list, value)
     end
 
-    local uis = vim.api.nvim_list_uis()
-    local ui_height = (uis[1] and uis[1].height) or 40
+    local ui_height, _ = layouts.ui_size()
     local steps = math.min(ui_height, vim.tbl_count(values_list))
     local hl_name = "VaultProperty"
     local colors = vault_hl.setup(hl_name, steps, { "Comment", "Normal", "String" })
@@ -62,14 +62,14 @@ return function(opts)
         }
     end
 
+    table.sort(values_list, function(a, b)
+        return a.data.count > b.data.count
+    end)
+
     local finder = finders.new_table({
         results = values_list,
         entry_maker = entry_maker,
     })
-
-    table.sort(values_list, function(a, b)
-        return a.data.count > b.data.count
-    end)
 
     local picker = pickers.new(opts, {
         prompt_title = opts.property_name,
