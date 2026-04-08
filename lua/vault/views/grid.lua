@@ -27,6 +27,11 @@ end
 local READONLY_FILE_COLS = shared.READONLY_FILE_COLS
 local uv = vim.uv or vim.loop
 local DEFAULT_COLUMNS = { "slug", "title", "status", "tags" }
+local SAVE_PROFILE_KEY = "vault.process_save_profile.current"
+local pack = table.pack or function(...)
+    return { n = select("#", ...), ... }
+end
+local unpack_values = table.unpack or unpack
 
 local get_empty_cell = shared.get_empty_cell
 local get_mtime = shared.get_mtime
@@ -100,6 +105,65 @@ local function leave_process_save()
         return
     end
     state.set_global_key(SAVE_DEPTH_KEY, depth - 1)
+end
+
+---@return vault.ProcessSaveProfile
+local function new_save_profile()
+    return {
+        started_ns = uv.hrtime(),
+        phases = {},
+        phase_counts = {},
+    }
+end
+
+---@param profile? vault.ProcessSaveProfile
+---@param phase string
+---@param elapsed_ms number
+local function record_save_phase(profile, phase, elapsed_ms)
+    if type(profile) ~= "table" then
+        return
+    end
+    profile.phases[phase] = (profile.phases[phase] or 0) + elapsed_ms
+    profile.phase_counts[phase] = (profile.phase_counts[phase] or 0) + 1
+end
+
+---@param profile? vault.ProcessSaveProfile
+---@param phase string
+---@param fn fun(): ...
+---@return ...
+local function measure_save_phase(profile, phase, fn)
+    local t0 = uv.hrtime()
+    local ok, packed = pcall(function()
+        return pack(fn())
+    end)
+    record_save_phase(profile, phase, (uv.hrtime() - t0) / 1e6)
+    if not ok then
+        error(packed)
+    end
+    return unpack_values(packed, 1, packed.n)
+end
+
+---@param st vault.GridEditorState
+---@param profile vault.ProcessSaveProfile
+local function activate_save_profile(st, profile)
+    st.last_save_profile = nil
+    state.set_global_key(SAVE_PROFILE_KEY, profile)
+end
+
+---@param st vault.GridEditorState
+---@param profile? vault.ProcessSaveProfile
+---@param err? string
+local function finish_save_profile(st, profile, err)
+    if type(profile) ~= "table" then
+        return
+    end
+    profile.total_ms = (uv.hrtime() - profile.started_ns) / 1e6
+    profile.completed = err == nil
+    profile.error = err
+    st.last_save_profile = profile
+    if state.get_global_key(SAVE_PROFILE_KEY) == profile then
+        state.set_global_key(SAVE_PROFILE_KEY, nil)
+    end
 end
 
 -- ─── Row highlight defaults ───────────────────────────────────────────────────
@@ -202,6 +266,15 @@ end
 ---@field retain_note? fun(note: vault.Note): boolean
 ---@field statusline_builder? fun(count: integer): string
 ---@field banner_builder? fun(count: integer): string|string[]
+---@field last_save_profile? vault.ProcessSaveProfile
+
+---@class vault.ProcessSaveProfile
+---@field started_ns integer
+---@field total_ms? number
+---@field phases table<string, number>
+---@field phase_counts table<string, integer>
+---@field completed? boolean
+---@field error? string
 
 local buf_states = {} --- @type table<integer, vault.GridEditorState>
 local ok_vt_undo, vt_undo = pcall(require, "vimtable.undo")
@@ -1322,9 +1395,13 @@ local function make_on_save(st)
         end
 
         enter_process_save()
+        local save_profile = new_save_profile()
+        activate_save_profile(st, save_profile)
 
         -- ── Snapshot for undo ──
-        local undo_payload = snapshot_for_undo(diff, st, bufnr, structural_ops)
+        local undo_payload = measure_save_phase(save_profile, "snapshot_for_undo", function()
+            return snapshot_for_undo(diff, st, bufnr, structural_ops)
+        end)
 
         -- ── Hard cap on creates ──
         local grid_cfg = grid_config.get()
@@ -1352,8 +1429,19 @@ local function make_on_save(st)
         local mutation_details = {}
 
         -- ── Process structural moves/renames ──
-        local n_renamed, n_patched =
-            apply_structural_ops(structural_ops, diff, st, undo_payload, mutation_details)
+        local n_renamed, n_patched = measure_save_phase(
+            save_profile,
+            "apply_structural_ops",
+            function()
+                return apply_structural_ops(
+                    structural_ops,
+                    diff,
+                    st,
+                    undo_payload,
+                    mutation_details
+                )
+            end
+        )
 
         -- ── Handle deletes ──
         if #diff.deletes > 0 and #diff.deletes > grid_cfg.delete_hard_cap then
@@ -1372,6 +1460,7 @@ local function make_on_save(st)
             if not ok_apply then
                 leave_process_save()
                 st.saving = false
+                finish_save_profile(st, save_profile, tostring(n_u))
                 done(tostring(n_u))
                 return
             end
@@ -1415,7 +1504,15 @@ local function make_on_save(st)
             -- Reload the grid to rebuild snapshot from current state.
             -- Without this, incremental saves compare against the stale
             -- snapshot and re-detect already-applied changes.
-            M.refresh_current(bufnr)
+            local refresh_ok, refresh_err = pcall(function()
+                measure_save_phase(save_profile, "post_save_refresh", function()
+                    M.refresh_current(bufnr)
+                end)
+            end)
+            finish_save_profile(st, save_profile, refresh_ok and nil or tostring(refresh_err))
+            if not refresh_ok then
+                error(refresh_err)
+            end
         end
 
         if #diff.deletes > 0 then
@@ -1455,6 +1552,7 @@ local function make_on_save(st)
                         action = function()
                             leave_process_save()
                             st.saving = false
+                            finish_save_profile(st, save_profile, "cancelled")
                             done(nil)
                         end,
                     },
@@ -1462,6 +1560,7 @@ local function make_on_save(st)
                 on_cancel = function()
                     leave_process_save()
                     st.saving = false
+                    finish_save_profile(st, save_profile, "cancelled")
                     done(nil)
                 end,
             })
