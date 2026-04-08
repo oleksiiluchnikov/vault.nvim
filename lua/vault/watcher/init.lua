@@ -15,9 +15,13 @@ function Watcher:init()
     --- @type uv_fs_event_t|nil
     self.handle = nil
 
-    --- Debounce timer for bursty FS events (optional use)
+    --- Debounce timer for bursty FS events — trailing-edge, resets on each new event.
     --- @type uv_timer_t|nil
     self.debouncer = uv.new_timer()
+
+    --- Events accumulated during the debounce window, keyed by full_path.
+    --- @type table<string, { filename: string, events: table }>
+    self._pending_events = {}
 
     --- Track deletes to detect renames (most FS APIs report rename as delete+create)
     --- @type table<string, number>
@@ -336,6 +340,9 @@ function Watcher:start()
 
     self.handle = uv.new_fs_event()
 
+    local watcher_conf = (config.options and config.options.watcher) or {}
+    local debounce_ms = watcher_conf.debounce_ms or 500
+
     local ok, err = pcall(function()
         self.handle:start(
             root,
@@ -344,7 +351,19 @@ function Watcher:start()
                 if fs_err then
                     return
                 end
-                self:on_event(filename, events)
+                if self._writing then
+                    return
+                end
+                -- Accumulate events; deduplicate by resolved path
+                local full_path = normalize_event_path(root, filename)
+                if full_path then
+                    self._pending_events[full_path] = { filename = filename, events = events }
+                end
+                -- Reset trailing-edge debounce timer
+                self.debouncer:stop()
+                self.debouncer:start(debounce_ms, 0, vim.schedule_wrap(function()
+                    self:_flush_pending_events()
+                end))
             end)
         )
     end)
@@ -355,6 +374,16 @@ function Watcher:start()
     end
 
     self.is_watching = true
+end
+
+--- Drain all accumulated events, deduplicating by path.
+--- Called once the debounce timer fires (trailing edge).
+function Watcher:_flush_pending_events()
+    local batch = self._pending_events
+    self._pending_events = {}
+    for _, info in pairs(batch) do
+        self:on_event(info.filename, info.events)
+    end
 end
 
 function Watcher:stop()
@@ -378,8 +407,15 @@ function Watcher:stop()
         pcall(function()
             self.debouncer:stop()
         end)
+        pcall(function()
+            if not self.debouncer:is_closing() then
+                self.debouncer:close()
+            end
+        end)
+        self.debouncer = nil
     end
 
+    self._pending_events = {}
     self.deleted_paths = {}
     self.is_watching = false
 end

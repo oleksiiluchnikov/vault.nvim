@@ -39,14 +39,8 @@ return function(opts)
         local basename = vim.fn.fnamemodify(opts.note.data.path, ":t")
         local new_path = string.format("%s%s", path, basename)
         actions.close(bufnr)
-        -- vim.fn.rename(note.data.path, new_path)
         opts.note:rename(new_path)
-        -- Update current buffer.
-        -- How does vim manage this?
-        -- If we rename current buffer, it will be closed and new buffer will be opened
         local bufnr_of_note = vim.fn.bufnr(opts.note.data.path)
-        -- vim.cmd("write") -- write changes to disk
-        -- we couldnd write becaust the picker is still open
         vim.api.nvim_buf_delete(bufnr_of_note, { force = true })
         vim.cmd("edit " .. vim.fn.fnameescape(new_path))
     end

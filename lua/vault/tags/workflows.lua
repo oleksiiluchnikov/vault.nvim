@@ -27,14 +27,15 @@ local function make_wikilink(tag_name, note_slug)
 end
 
 local function filtered_occurrences(path, occurrences, keep_frontmatter_tags)
-    if keep_frontmatter_tags then
+    if not keep_frontmatter_tags then
         return occurrences
     end
     local note = require("vault.notes.note")(path)
     local frontmatter_end = note.data.frontmatter and note.data.frontmatter.end_line or 0
     local filtered = {}
-    for _, occ in ipairs(occurrences or {}) do
-        if occ.line > frontmatter_end then
+    for _, occ in pairs(occurrences or {}) do
+        local lnum = occ and (occ.lnum or occ.line)
+        if lnum and lnum > frontmatter_end then
             filtered[#filtered + 1] = occ
         end
     end

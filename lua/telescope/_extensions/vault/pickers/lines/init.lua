@@ -8,6 +8,7 @@ return function(opts)
     local log = require("vault.log").scope("telescope")
     local vault_mappings = require("telescope._extensions.vault.mappings")
     local vault_hl = require("telescope._extensions.vault.highlights")
+    local layouts = require("telescope._extensions.vault.layouts")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
 
     opts = opts or {}
@@ -22,7 +23,7 @@ return function(opts)
     local hl_name = "VaultLine"
     local colors = vault_hl.setup(hl_name, steps, { "Comment", "Normal", "String" })
 
-    local screen_width = vim.api.nvim_list_uis()[1].width
+    local _, screen_width = layouts.ui_size()
     local max_widths = {
         content = math.min(60, math.floor((screen_width - 13) * 0.5)),
         tags = math.min(20, math.floor((screen_width - 13) * 0.15)),

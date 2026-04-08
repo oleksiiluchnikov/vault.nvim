@@ -69,7 +69,6 @@ end
 --- ```
 local WikilinkData = Object("VaultWikilinkData")
 
-
 --- Strip [[ ]] brackets from a wikilink string and return the inner content.
 --- Also handles embedded links (![[...]]).
 --- @private
@@ -98,7 +97,6 @@ local function strip_brackets(input)
 
     return s, embedded
 end
-
 
 --- Check whether a wikilink slug looks like a plausible Obsidian note name.
 --- Real note names are alphanumeric with spaces, hyphens, underscores, dots,
@@ -165,7 +163,6 @@ local function is_valid_content(content)
     end
     return true
 end
-
 
 --- Initialise a WikilinkData instance from a raw or partially-parsed table.
 --- @param this vault.Wikilink.Data.InitArgs
@@ -263,11 +260,9 @@ function WikilinkData:init(this)
     end
 end
 
-
 --- @class vault.Wikilink: vault.Object
 --- @field data vault.Wikilink.Data
 local Wikilink = Object("VaultWikilink")
-
 
 --- Initialise a Wikilink from a raw link string or a partial data table.
 ---
@@ -282,7 +277,7 @@ local Wikilink = Object("VaultWikilink")
 function Wikilink:init(this)
     local input_repr = type(this) == "string" and this:sub(1, 80) or type(this)
     if not this or (type(this) == "string" and this == "") then
-        error("Invalid wikilink: empty or nil input")
+        error("Invalid wikilink format")
     end
 
     if type(this) == "string" then
@@ -300,20 +295,23 @@ function Wikilink:init(this)
             -- Bare string — could be single brackets or raw wikilink content
             if s:match("%[") or s:match("%]") then
                 -- Contains mismatched brackets like "[single bracket]"
-                error("Invalid wikilink: mismatched brackets in: " .. input_repr)
+                error("Invalid wikilink format")
             end
             -- Treat as raw wikilink content (e.g. from parser extracting inner text)
             this = { raw = s }
         elseif has_open and not has_close then
-            error("Invalid wikilink: missing closing ]]: " .. input_repr)
+            error("Invalid wikilink format")
         elseif not has_open and has_close then
-            error("Invalid wikilink: missing opening [[: " .. input_repr)
+            error("Invalid wikilink format")
         else
             -- Normal [[...]] form
             -- Check for multiple closing brackets: "extra]]brackets]]"
             local inner = s:sub(3, -3)
+            if inner == "" or inner == "|" or inner == "#" then
+                error("Invalid wikilink format")
+            end
             if inner:find("%]%]") then
-                error("Invalid wikilink: nested brackets in: " .. input_repr)
+                error("Invalid wikilink format")
             end
             this = { raw = s }
         end
@@ -321,7 +319,6 @@ function Wikilink:init(this)
 
     self.data = WikilinkData(this)
 end
-
 
 --- Convert wikilink back to its canonical string representation.
 --- @return string wikilink_string e.g. `"[[foo/bar#heading|alias]]"`
@@ -336,7 +333,6 @@ function Wikilink:__tostring()
     return "[[" .. result .. "]]"
 end
 
-
 --- Return whether this wikilink resolves to an existing note in the vault.
 --- Resolution is based on the scanner cache; for disk-level certainty use
 --- `Wikilink:is_resolved_on_disk()`.
@@ -345,7 +341,6 @@ end
 function Wikilink:is_resolved()
     return self.data.target ~= nil
 end
-
 
 --- Return the parent directory path of the wikilink slug.
 --- For `"parent/child/note"` returns `"parent/child"`.
@@ -356,7 +351,6 @@ function Wikilink:get_parent_path()
     local parent = self.data.slug:match("(.+)/[^/]+$")
     return parent
 end
-
 
 --- Extract all valid wikilinks from a block of text.
 --- @param text string The text to search for wikilinks.
@@ -375,7 +369,6 @@ function Wikilink.extract_from_text(text)
     return results
 end
 
-
 --- Return whether this wikilink resolves to a readable file on disk.
 --- More reliable than `Wikilink:is_resolved()`, which only checks the scanner cache.
 --- @nodiscard
@@ -389,7 +382,6 @@ function Wikilink:is_resolved_on_disk()
     local abs_path = utils.slug_to_path(target_slug)
     return vim.fn.filereadable(abs_path) == 1
 end
-
 
 --- Result shape returned by `Wikilink:rewrite_preview`.
 --- @class vault.Wikilink.RewritePreview
@@ -447,7 +439,6 @@ function Wikilink:rewrite_preview(new_slug)
     return count, affected
 end
 
-
 --- Rewrite all occurrences of this wikilink's slug to `new_slug` across source files.
 --- Replaces both the full-slug form (`[[slug]]`) and the stem-only form (`[[stem]]`).
 --- @param new_slug string The new slug to replace the old one with.
@@ -480,14 +471,10 @@ function Wikilink:rewrite(new_slug)
                 local new_line = line
                 for old_pat, _ in pairs(old_patterns) do
                     local escaped = old_pat:gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
-                    new_line = new_line:gsub(
-                        "%[%[" .. escaped .. "(%]%])",
-                        "[[" .. new_slug .. "%1"
-                    )
-                    new_line = new_line:gsub(
-                        "%[%[" .. escaped .. "([#|])",
-                        "[[" .. new_slug .. "%1"
-                    )
+                    new_line =
+                        new_line:gsub("%[%[" .. escaped .. "(%]%])", "[[" .. new_slug .. "%1")
+                    new_line =
+                        new_line:gsub("%[%[" .. escaped .. "([#|])", "[[" .. new_slug .. "%1")
                 end
                 if new_line ~= line then
                     lines[i] = new_line
@@ -504,19 +491,16 @@ function Wikilink:rewrite(new_slug)
     return patched
 end
 
-
 --- Create a target note for an unresolved wikilink.
 --- The note is written to the path derived from `self.data.slug`.
 --- @return vault.Note note The newly created note object.
 function Wikilink:create_target()
-    local utils = require("vault.utils")
     local Note = require("vault.notes.note")
-    local path = utils.slug_to_path(self.data.slug)
+    local path = require("vault.notes.paths").for_slug(self.data.slug)
     local note = Note(path)
     note:write(path)
     return note
 end
-
 
 --- Expose slug validation for use by other modules (e.g. scanner filtering).
 --- @param slug string Candidate slug string.

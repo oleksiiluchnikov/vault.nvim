@@ -33,6 +33,12 @@
             }
         },
 
+        -- If the vault contains Obsidian settings, vault.nvim derives:
+        --   - daily note folder/format/template from .obsidian/daily-notes.json
+        --   - daily fallback from .obsidian/app.json
+        --   - generic new-note folder from app.json newFileLocation/newFileFolderPath
+        --   - link rewrite default from app.json alwaysUpdateLinks
+
         -- Optional: Files/directories to ignore during searches
         ignore = {
             ".git/*",

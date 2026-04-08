@@ -12,8 +12,8 @@ target := "lua/vault_core.so"
 rustflags := if os == "macos" { "-C link-arg=-undefined -C link-arg=dynamic_lookup" } else { "" }
 minimal_init := "tests/minimal_init.lua"
 
-# Default: build + reload
-default: build reload
+# Build + reload (alias)
+br: build reload
 
 # Compile Rust module, copy to lua/, re-sign on macOS
 build:
@@ -78,6 +78,29 @@ test-file file:
 test-dir dir:
     nvim --headless -u {{ minimal_init }} \
         -c 'PlenaryBustedDirectory {{ dir }} {minimal_init = "{{ minimal_init }}"}'
+
+# Run performance benchmarks (default: 500 notes)
+bench vault_size="500":
+    NVIM_LISTEN_ADDRESS= nvim --headless -u {{ minimal_init }} -l scripts/benchmark.lua -- --vault-size {{ vault_size }}
+
+# Compare latest benchmark against the stored baseline for this size
+bench-check vault_size="500" threshold="20":
+    NVIM_LISTEN_ADDRESS= nvim --headless -u {{ minimal_init }} -l scripts/check_bench.lua -- --baseline benchmarks/baseline-{{ vault_size }}.json --latest benchmarks/latest.json --threshold {{ threshold }}
+
+# Refresh the stored baseline for this size from a fresh run
+bench-baseline vault_size="500":
+    just bench {{ vault_size }}
+    cp benchmarks/latest.json benchmarks/baseline-{{ vault_size }}.json
+
+# Trace :Vault notes performance step-by-step (default: real knowledge vault)
+trace-notes vault_root="":
+    NVIM_LISTEN_ADDRESS= nvim --headless -u {{ minimal_init }} -l scripts/trace_vault_notes.lua {{ if vault_root != "" { "-- --vault-root " + vault_root } else { "" } }}
+
+# Run benchmarks for all sizes (100, 500, 1000)
+bench-all:
+    just bench 100
+    just bench 500
+    just bench 1000
 
 # Format Lua files with StyLua
 fmt:

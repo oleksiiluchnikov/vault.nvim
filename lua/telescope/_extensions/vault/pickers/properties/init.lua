@@ -11,6 +11,7 @@ return function(opts)
     local log = require("vault.log").scope("telescope")
     local vault_mappings = require("telescope._extensions.vault.mappings")
     local vault_hl = require("telescope._extensions.vault.highlights")
+    local layouts = require("telescope._extensions.vault.layouts")
     local vault_previewers = require("telescope._extensions.vault.previewers")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
 
@@ -27,8 +28,7 @@ return function(opts)
         return a.data.count > b.data.count
     end)
 
-    local uis = vim.api.nvim_list_uis()
-    local ui_height = (uis[1] and uis[1].height) or 40
+    local ui_height, _ = layouts.ui_size()
     local steps = math.min(ui_height, vim.tbl_count(properties_list))
     local hl_name = "VaultProperty"
     local colors = vault_hl.setup(hl_name, steps, { "Comment", "Normal", "String" })

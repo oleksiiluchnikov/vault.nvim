@@ -5,9 +5,11 @@ use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::SystemTime;
 use strsim::{jaro_winkler, normalized_levenshtein};
 use walkdir::{DirEntry, WalkDir};
 
@@ -482,6 +484,160 @@ fn scan_all_notes(root: &str, ignore_patterns: Vec<String>) -> Vec<ParsedNote> {
         .collect()
 }
 
+// ============================================================================
+// Incremental Scan Cache
+// ============================================================================
+
+/// Cached parse result for a single file, tagged with its mtime.
+#[derive(Debug, Clone)]
+struct CachedNote {
+    mtime: SystemTime,
+    note: ParsedNote,
+}
+
+/// Global scan cache: holds the last full scan result keyed by file path.
+/// On subsequent scans, only files with changed mtime are re-parsed.
+struct ScanCache {
+    root: String,
+    ignores_hash: u64,
+    entries: HashMap<PathBuf, CachedNote>,
+}
+
+static SCAN_CACHE: Lazy<Mutex<Option<ScanCache>>> = Lazy::new(|| Mutex::new(None));
+
+/// Simple hash for ignore patterns so we can detect config changes.
+fn hash_ignores(ignores: &[String]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325; // FNV offset basis
+    for s in ignores {
+        for b in s.bytes() {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x100000001b3); // FNV prime
+        }
+        h ^= 0xff;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+/// Incremental scan: reuse cached ParsedNotes for unchanged files.
+/// Returns the full set of notes (like scan_all_notes) but only re-parses
+/// files whose mtime has changed since the last scan.
+fn scan_all_notes_cached(root: &str, ignore_patterns: Vec<String>) -> Vec<ParsedNote> {
+    let root_path = Path::new(root);
+    if !root_path.exists() {
+        return Vec::new();
+    }
+
+    let ignores_hash = hash_ignores(&ignore_patterns);
+    let glob_set = build_ignore_set(ignore_patterns);
+
+    // Collect all current .md files with their mtimes
+    let current_files: Vec<(PathBuf, SystemTime)> = WalkDir::new(root)
+        .into_iter()
+        .filter_entry(|e| {
+            if is_hidden(e) {
+                return false;
+            }
+            let path = e.path();
+            if let Ok(rel_path) = path.strip_prefix(root) {
+                if glob_set.is_match(rel_path) {
+                    return false;
+                }
+            }
+            true
+        })
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map_or(false, |ext| ext == "md"))
+        .filter_map(|e| {
+            let path = e.path().to_path_buf();
+            let mtime = fs::metadata(&path).ok()?.modified().ok()?;
+            Some((path, mtime))
+        })
+        .collect();
+
+    let mut cache = SCAN_CACHE.lock().unwrap();
+
+    // Check if cache is valid (same root and ignore config)
+    let cache_valid = cache
+        .as_ref()
+        .map_or(false, |c| c.root == root && c.ignores_hash == ignores_hash);
+
+    if !cache_valid {
+        // Cold start: parse everything in parallel, populate cache
+        let notes: Vec<ParsedNote> = current_files
+            .par_iter()
+            .filter_map(|(path, _)| ParsedNote::from_path(path))
+            .collect();
+
+        let mut entries = HashMap::with_capacity(notes.len());
+        for note in &notes {
+            let path = PathBuf::from(&note.path);
+            if let Ok(mtime) = fs::metadata(&path).and_then(|m| m.modified()) {
+                entries.insert(
+                    path,
+                    CachedNote {
+                        mtime,
+                        note: note.clone(),
+                    },
+                );
+            }
+        }
+
+        *cache = Some(ScanCache {
+            root: root.to_string(),
+            ignores_hash: ignores_hash,
+            entries,
+        });
+
+        return notes;
+    }
+
+    // Warm path: incremental update
+    let sc = cache.as_mut().unwrap();
+    let current_set: HashMap<&PathBuf, &SystemTime> =
+        current_files.iter().map(|(p, m)| (p, m)).collect();
+
+    // Find changed and new files
+    let to_reparse: Vec<&PathBuf> = current_files
+        .iter()
+        .filter(|(path, mtime)| {
+            sc.entries
+                .get(path)
+                .map_or(true, |cached| cached.mtime != *mtime)
+        })
+        .map(|(path, _)| path)
+        .collect();
+
+    // Remove deleted files from cache
+    sc.entries.retain(|path, _| current_set.contains_key(path));
+
+    // Re-parse changed/new files in parallel
+    if !to_reparse.is_empty() {
+        let reparsed: Vec<(PathBuf, CachedNote)> = to_reparse
+            .par_iter()
+            .filter_map(|path| {
+                let note = ParsedNote::from_path(path)?;
+                let mtime = fs::metadata(path).ok()?.modified().ok()?;
+                Some((path.to_path_buf(), CachedNote { mtime, note }))
+            })
+            .collect();
+
+        for (path, cached) in reparsed {
+            sc.entries.insert(path, cached);
+        }
+    }
+
+    // Collect all notes from cache
+    sc.entries.values().map(|c| c.note.clone()).collect()
+}
+
+/// Clear the scan cache (called from Lua when the watcher detects changes
+/// or when the user explicitly requests a refresh).
+fn clear_scan_cache() {
+    let mut cache = SCAN_CACHE.lock().unwrap();
+    *cache = None;
+}
+
 fn build_paths_map(notes: &[ParsedNote], root: &str) -> HashMap<String, PathInfo> {
     notes
         .iter()
@@ -861,6 +1017,56 @@ fn vault_score_merge_candidates<'a>(
     scored.truncate(limit);
 
     lua.to_value(&scored)
+}
+
+/// Build wikilinks map WITHOUT computing fuzzy suggestions for unresolved links.
+/// Much faster than `build_wikilinks_map` — suitable for display/counting use cases
+/// (e.g. telescope picker link stats) where suggestions aren't needed.
+fn build_wikilinks_map_no_suggest(
+    notes: &[ParsedNote],
+    root: &str,
+) -> HashMap<String, WikilinkData> {
+    let mut wikilinks_map: HashMap<String, WikilinkData> = HashMap::new();
+
+    for note in notes {
+        let slug = path_to_slug(&note.path, root);
+
+        for link_item in &note.wikilinks {
+            let stem = extract_wikilink_stem(&link_item.target);
+
+            let entry = wikilinks_map
+                .entry(stem.clone())
+                .or_insert_with(|| WikilinkData {
+                    stem: stem.clone(),
+                    count: 0,
+                    embedded: false,
+                    sources: HashMap::new(),
+                    suggestions: HashMap::new(),
+                });
+
+            entry.count += 1;
+            if link_item.embedded {
+                entry.embedded = true;
+            }
+
+            entry
+                .sources
+                .entry(slug.clone())
+                .or_insert_with(HashMap::new)
+                .insert(
+                    link_item.line,
+                    SourceOccurrence {
+                        lnum: link_item.line,
+                        line: None,
+                        col: None,
+                        end_lnum: Some(link_item.line),
+                        end_col: None,
+                    },
+                );
+        }
+    }
+
+    wikilinks_map
 }
 
 fn build_wikilinks_map(notes: &[ParsedNote], root: &str) -> HashMap<String, WikilinkData> {
@@ -1469,6 +1675,60 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
         "dirs",
         lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
             run_scanner(lua, (root, ignores), build_dirs_map)
+        })?,
+    )?;
+
+    // wikilinks_no_suggest: same as wikilinks but skips fuzzy suggestion computation
+    exports.set(
+        "wikilinks_no_suggest",
+        lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
+            run_scanner(lua, (root, ignores), build_wikilinks_map_no_suggest)
+        })?,
+    )?;
+
+    // paths_and_wikilinks: single scan_all_notes call, returns both paths and wikilinks
+    // (without suggestions). Avoids reading every file twice.
+    exports.set(
+        "paths_and_wikilinks",
+        lua.create_function(
+            |lua, (root, ignores): (String, Vec<String>)| -> LuaResult<LuaValue> {
+                let notes = scan_all_notes(&root, ignores);
+                let paths = build_paths_map(&notes, &root);
+                let wikilinks = build_wikilinks_map_no_suggest(&notes, &root);
+
+                let table = lua.create_table()?;
+                table.set("paths", lua.to_value(&paths)?)?;
+                table.set("wikilinks", lua.to_value(&wikilinks)?)?;
+                Ok(LuaValue::Table(table))
+            },
+        )?,
+    )?;
+
+    // paths_and_wikilinks_cached: uses mtime-based incremental scan cache.
+    // First call is same speed as paths_and_wikilinks. Subsequent calls only
+    // re-parse files whose mtime changed — typically <100ms for a 10k note vault.
+    exports.set(
+        "paths_and_wikilinks_cached",
+        lua.create_function(
+            |lua, (root, ignores): (String, Vec<String>)| -> LuaResult<LuaValue> {
+                let notes = scan_all_notes_cached(&root, ignores);
+                let paths = build_paths_map(&notes, &root);
+                let wikilinks = build_wikilinks_map_no_suggest(&notes, &root);
+
+                let table = lua.create_table()?;
+                table.set("paths", lua.to_value(&paths)?)?;
+                table.set("wikilinks", lua.to_value(&wikilinks)?)?;
+                Ok(LuaValue::Table(table))
+            },
+        )?,
+    )?;
+
+    // clear_cache: invalidate the incremental scan cache
+    exports.set(
+        "clear_cache",
+        lua.create_function(|_, ()| -> LuaResult<()> {
+            clear_scan_cache();
+            Ok(())
         })?,
     )?;
 

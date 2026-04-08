@@ -4,17 +4,10 @@ local M = {}
 
 local log = require("vault.log").scope("wikilinks")
 local utils = require("vault.utils")
+local telescope_utils = require("telescope._extensions.vault.utils")
 local resolve_picker = require("vault.ui.resolve_picker")
 
---- Get wikilinks config options with defaults.
---- @return table
-local function get_config()
-    local ok, config = pcall(require, "vault.config")
-    if ok and config.options and config.options.wikilinks then
-        return config.options.wikilinks
-    end
-    return { confirm_rewrite = true, confirm_merge = true, confirm_create = false }
-end
+local get_config = telescope_utils.get_wikilinks_config
 
 --- Remove a wikilink from results in-place (picker-level bookkeeping).
 --- @param results vault.Wikilink[]
@@ -46,23 +39,7 @@ function M.make_reopen(ctx)
     end
 end
 
---- Confirm a destructive action. Calls `on_yes()` if confirmed or if confirmation is disabled.
---- @param enabled boolean Whether confirmation is enabled
---- @param message string The confirmation prompt
---- @param on_yes function Called when confirmed (or confirmation disabled)
---- @param on_no? function Called when cancelled
-local function confirm(enabled, message, on_yes, on_no)
-    if not enabled then
-        on_yes()
-        return
-    end
-    require("vault.ui.confirm").confirm({
-        message = message,
-        title = "Vault",
-        on_yes = on_yes,
-        on_no = on_no or function() end,
-    })
-end
+local confirm = telescope_utils.confirm
 
 --- <CR> action: open target (resolved) or create note (unresolved).
 --- @param ctx table

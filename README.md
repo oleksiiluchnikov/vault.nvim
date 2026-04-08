@@ -114,10 +114,10 @@ All commands live under a single `:Vault` entry point. Running `:Vault` with no 
 | `:Vault note new [slug]` | Create a named note (or open it if it exists). No slug = fleeting popup. |
 | `:Vault note merge [source-slug] [target-slug]` | Merge one note into another. With no args, uses the current note and opens the combined target picker. With one arg, uses the current note if present, otherwise treats the arg as source and opens the target picker. The target can be a note, resolved wikilink, or unresolved wikilink. |
 | `:'<,'>Vault note extract [slug]` | Extract visual selection into a new note, replace with `[[wikilink]]`. |
-| `:Vault today` | Open/create today's daily journal note. |
+| `:Vault today` | Open/create today's daily journal note. Uses Obsidian daily-notes settings and daily template when available. |
 | `:Vault today append <text>` | Append `- <text>` to today's journal without opening it. |
 | `:Vault today dictate` | Voice capture via external `ask` tool, appends with timestamp. See note below. |
-| `:Vault yesterday` | Open yesterday's journal note. |
+| `:Vault yesterday` | Open yesterday's journal note. Uses Obsidian daily-notes settings and daily template when available. |
 
 > **`:Vault today dictate`** requires an external `ask` binary in PATH that accepts `--dictate --json --context - --placeholder "..."` and returns `{"ok": true, "value": "transcribed text"}` on stdout. This command is only registered when `ask` is detected. The default implementation uses a private tool; to use your own dictation solution, create a wrapper script named `ask` that conforms to this interface, or override `callbacks.today_dictate` in your config.
 

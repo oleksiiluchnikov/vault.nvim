@@ -736,7 +736,8 @@ function M.recur_preview(path)
     if not repeat_rule then
         return nil, "Task has no repeat rule"
     end
-    local next_iso = next_due_iso(values, today_iso())
+    local preview_base = parse_iso_date(values.due) or today_iso()
+    local next_iso = next_due_iso(values, preview_base)
     if not next_iso then
         return nil, "Cannot compute next due date for repeat rule"
     end

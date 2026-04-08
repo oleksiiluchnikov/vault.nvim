@@ -6,7 +6,11 @@ local callbacks = {}
 local complete_duplicates_review
 local complete_duplicates_related
 
-local pickers = require("telescope._extensions.vault.pickers")
+--- Lazy accessor for telescope pickers — only loaded when a picker command runs.
+--- @return table
+local function get_pickers()
+    return require("telescope._extensions.vault.pickers")
+end
 
 --- Safe picker launch — handles nil return from empty results.
 --- @param picker any
@@ -247,7 +251,7 @@ local function build_subcommands()
                     end
                     notes = require("vault.notes")()
                     local cluster = notes:to_cluster(note, 0)
-                    local picker = pickers.notes({ notes = cluster })
+                    local picker = get_pickers().notes({ notes = cluster })
                     if picker then
                         picker:find()
                     end
@@ -408,7 +412,7 @@ local function build_subcommands()
             leaves = {
                 run = function()
                     safe_find(
-                        pickers.notes({ notes = require("vault.notes")():leaves() }),
+                        get_pickers().notes({ notes = require("vault.notes")():leaves() }),
                         "No leaf notes found"
                     )
                 end,
@@ -416,7 +420,7 @@ local function build_subcommands()
             internals = {
                 run = function()
                     safe_find(
-                        pickers.notes({ notes = require("vault.notes")():internals() }),
+                        get_pickers().notes({ notes = require("vault.notes")():internals() }),
                         "No internal notes found"
                     )
                 end,
@@ -424,7 +428,7 @@ local function build_subcommands()
             dangling = {
                 run = function()
                     safe_find(
-                        pickers.notes({
+                        get_pickers().notes({
                             notes = require("vault.notes")():with_outlinks_unresolved(),
                         }),
                         "No dangling links found"
@@ -434,7 +438,7 @@ local function build_subcommands()
             resolved = {
                 run = function()
                     safe_find(
-                        pickers.notes({
+                        get_pickers().notes({
                             notes = require("vault.notes")():with_outlinks_resolved_only(),
                         }),
                         "No notes with all outlinks resolved"
@@ -461,7 +465,10 @@ local function build_subcommands()
                 run = function(args)
                     local prop = args[1]
                     local val = args[2]
-                    require("vault.properties.actions").open_picker_notes_with_empty_value(prop, val)
+                    require("vault.properties.actions").open_picker_notes_with_empty_value(
+                        prop,
+                        val
+                    )
                 end,
                 complete = function(prefix)
                     local ok, props = pcall(function()
@@ -480,7 +487,7 @@ local function build_subcommands()
         -- :Vault tags [tag] — vault tags picker
         tags = {
             run = function(args)
-                safe_find(pickers.tags({ tags_list = args }), "No tags found")
+                safe_find(get_pickers().tags({ tags_list = args }), "No tags found")
             end,
             complete = function(prefix)
                 local subs = { "rename", "merge", "doc", "promote" }
@@ -625,14 +632,14 @@ local function build_subcommands()
         -- :Vault dates — dates picker
         dates = {
             run = function()
-                safe_find(pickers.dates(), "No dates found")
+                safe_find(get_pickers().dates(), "No dates found")
             end,
         },
 
         -- :Vault wikilinks — wikilinks picker
         wikilinks = {
             run = function()
-                safe_find(pickers.wikilinks(), "No wikilinks found")
+                safe_find(get_pickers().wikilinks(), "No wikilinks found")
             end,
             complete = function(prefix)
                 local subs = { "unresolved", "resolved" }
@@ -646,7 +653,7 @@ local function build_subcommands()
                     local wikilinks = require("vault.wikilinks")()
                     local unresolved = wikilinks:unresolved()
                     safe_find(
-                        pickers.wikilinks({ wikilinks = unresolved }),
+                        get_pickers().wikilinks({ wikilinks = unresolved }),
                         "No unresolved wikilinks found"
                     )
                 end,
@@ -656,7 +663,7 @@ local function build_subcommands()
                     local wikilinks = require("vault.wikilinks")()
                     local resolved = wikilinks:resolved()
                     safe_find(
-                        pickers.wikilinks({ wikilinks = resolved }),
+                        get_pickers().wikilinks({ wikilinks = resolved }),
                         "No resolved wikilinks found"
                     )
                 end,
@@ -688,7 +695,7 @@ local function build_subcommands()
                 local kv_opts = {} --- @type table<string, string>
                 local positional = {} --- @type string[]
                 for _, a in ipairs(args) do
-                    local k, v = a:match("^([%w_]+)=(.+)$")
+                    local k, v = a:match("^([%w_-]+)=(.+)$")
                     if k then
                         kv_opts[k] = v
                     else
@@ -719,6 +726,9 @@ local function build_subcommands()
                 if filter == "undo" then
                     grid_editor.undo()
                     return
+                elseif kv_opts["without-property"] and kv_opts["without-property"] ~= "" then
+                    notes = require("vault.notes")():without_property(kv_opts["without-property"])
+                    desc = "without property:" .. kv_opts["without-property"]
                 elseif not filter or filter == "" then
                     notes = require("vault.notes")()
                     desc = "all notes"
@@ -777,7 +787,11 @@ local function build_subcommands()
                         }
                         if kv_opts.taxonomy and kv_opts.taxonomy ~= "" then
                             local taxonomy = require("vault.taxonomy")
-                            open_opts = vim.tbl_extend("force", open_opts, taxonomy.grid_process_opts(kv_opts.taxonomy))
+                            open_opts = vim.tbl_extend(
+                                "force",
+                                open_opts,
+                                taxonomy.grid_process_opts(kv_opts.taxonomy)
+                            )
                         end
                         grid_editor.open(open_opts)
                     else
@@ -849,7 +863,11 @@ local function build_subcommands()
 
                 if kv_opts.taxonomy and kv_opts.taxonomy ~= "" then
                     local taxonomy = require("vault.taxonomy")
-                    open_opts = vim.tbl_extend("force", open_opts, taxonomy.grid_process_opts(kv_opts.taxonomy))
+                    open_opts = vim.tbl_extend(
+                        "force",
+                        open_opts,
+                        taxonomy.grid_process_opts(kv_opts.taxonomy)
+                    )
                 end
 
                 grid_editor.open(open_opts)
@@ -956,11 +974,14 @@ local function build_subcommands()
                     local field = prefix:match("^taxonomy=(.*)$") or ""
                     local settings = require("vault.taxonomy")._get_settings()
                     local fields = { settings.field }
-                    return vim.tbl_map(function(item)
-                        return "taxonomy=" .. item
-                    end, vim.tbl_filter(function(item)
-                        return item:find(field, 1, true) == 1
-                    end, fields))
+                    return vim.tbl_map(
+                        function(item)
+                            return "taxonomy=" .. item
+                        end,
+                        vim.tbl_filter(function(item)
+                            return item:find(field, 1, true) == 1
+                        end, fields)
+                    )
                 end
                 local subs = {
                     "base",
@@ -1503,7 +1524,7 @@ local function build_subcommands()
                     return
                 end
                 safe_find(
-                    pickers.notes({
+                    get_pickers().notes({
                         notes = require("vault.notes")():filter(
                             "relpath",
                             vim.fn.fnamemodify(inbox_dir, ":t"),
@@ -1530,7 +1551,7 @@ local function build_subcommands()
                         return
                     end
                 end
-                safe_find(pickers.move_to(opts), "No directories found")
+                safe_find(get_pickers().move_to(opts), "No directories found")
             end,
             complete = function(prefix)
                 return completions.note_slugs(nil, "Vault move " .. prefix, nil) or {}
@@ -1565,7 +1586,7 @@ function callbacks.api(args)
 
     -- No subcommand: open meta picker (picker of pickers)
     if #fargs == 0 then
-        safe_find(pickers.vault(), "No pickers available")
+        safe_find(get_pickers().vault(), "No pickers available")
         return
     end
 
@@ -1641,6 +1662,12 @@ function callbacks.create_new_note(args)
     end
 
     local new_slug = table.concat(fargs, " ")
+    local create_path = require("vault.notes.paths").for_slug(new_slug)
+    if create_path and vim.fn.filereadable(create_path) == 1 then
+        require("vault.notes.note")(create_path):edit()
+        return
+    end
+
     local notes = require("vault.notes")():filter("slug", new_slug, "exact", false)
     if next(notes.map) then
         local _, existing = next(notes.map)
@@ -1654,11 +1681,11 @@ end
 function callbacks.pick_dirs(args)
     local fargs = args.fargs
     if next(fargs) == nil then
-        safe_find(pickers.dirs(), "No directories found")
+        safe_find(get_pickers().dirs(), "No directories found")
         return
     end
     local notes = require("vault.notes")():filter("relpath", fargs[1], "startswith", false)
-    safe_find(pickers.notes({ notes = notes }), "No notes found in directory: " .. fargs[1])
+    safe_find(get_pickers().notes({ notes = notes }), "No notes found in directory: " .. fargs[1])
 end
 
 ---Edits a random note from the vault.
@@ -1684,7 +1711,7 @@ end
 function callbacks.open_tags_picker(args)
     local fargs = args.fargs
     if next(fargs) == nil then
-        safe_find(pickers.tags(), "No tags found")
+        safe_find(get_pickers().tags(), "No tags found")
         return
     end
 
@@ -1699,7 +1726,7 @@ function callbacks.open_tags_picker(args)
     }
 
     safe_find(
-        pickers.notes({ notes = require("vault.notes")():filter(filter_opts) }),
+        get_pickers().notes({ notes = require("vault.notes")():filter(filter_opts) }),
         "No notes found with tags: " .. table.concat(tags_names, ", ")
     )
 end
@@ -1711,14 +1738,14 @@ end
 function callbacks.open_dates_picker(args)
     local fargs = args.fargs
     if next(fargs) == nil then
-        safe_find(pickers.dates(), "No dates found")
+        safe_find(get_pickers().dates(), "No dates found")
         return
     end
     --TODO: Add configuration to set the date format
     local today = os.date("%Y-%m-%d")
     local year_ago = os.date("%Y-%m-%d", os.time() - 60 * 60 * 24 * 365)
     safe_find(
-        pickers.dates({ start_date = tostring(today), end_date = tostring(year_ago) }),
+        get_pickers().dates({ start_date = tostring(today), end_date = tostring(year_ago) }),
         "No dates found"
     )
 end
@@ -1727,19 +1754,16 @@ end
 --- Opens the today's journal note
 --- @return nil
 function callbacks.today()
-    --- @type vault.Config|vault.Config.options
-    local config = require("vault.config")
-    local today = os.date("%Y-%m-%d %A")
-    if type(today) ~= "string" then
+    local journal = require("vault.journal")
+    local today = os.date("%Y-%m-%d")
+    local path, created = journal.ensure(today)
+    if type(path) ~= "string" then
+        log.error(
+            "Journal daily note path not configured (configure .obsidian/daily-notes.json or dirs.journal.daily)"
+        )
         return
     end
-    local daily_dir = config.dir("journal.daily")
-    if not daily_dir then
-        log.error("Journal daily directory not configured (dirs.journal.daily)")
-        return
-    end
-    local path = require("vault.notes.paths").daily(today)
-    if vim.fn.filereadable(path) == 0 then
+    if created then
         log.info("Initializing today's journal note")
     end
     vim.cmd("e " .. vim.fn.fnameescape(path))
@@ -1749,21 +1773,23 @@ end
 --- @param text string  Line text to append (a "- " prefix is added automatically)
 --- @return nil
 function callbacks.daily_append(text)
-    local config = require("vault.config")
-    local today = os.date("%Y-%m-%d %A")
-    if type(today) ~= "string" then
+    local journal = require("vault.journal")
+    local today = os.date("%Y-%m-%d")
+    local path = select(1, journal.ensure(today))
+    if type(path) ~= "string" then
+        log.error(
+            "Journal daily note path not configured (configure .obsidian/daily-notes.json or dirs.journal.daily)"
+        )
         return
     end
-    local daily_dir = config.dir("journal.daily")
-    if not daily_dir then
-        log.error("Journal daily directory not configured (dirs.journal.daily)")
+    local basename = journal.basename(today)
+    if type(basename) ~= "string" then
         return
     end
-    local path = require("vault.notes.paths").daily(today)
     local Note = require("vault.notes.note")
     local note = Note(path)
     note:append("- " .. text)
-    log.info("Appended to %s", today)
+    log.info("Appended to %s", basename)
 end
 
 --- Open ask --dictate with today's daily note as context, append result.
@@ -1774,17 +1800,19 @@ function callbacks.today_dictate()
         log.error("`ask` not found in PATH — install it to use :Vault today dictate")
         return
     end
-    local config = require("vault.config")
-    local today = os.date("%Y-%m-%d %A")
-    if type(today) ~= "string" then
+    local journal = require("vault.journal")
+    local today = os.date("%Y-%m-%d")
+    local path = select(1, journal.ensure(today))
+    if type(path) ~= "string" then
+        log.error(
+            "Journal daily note path not configured (configure .obsidian/daily-notes.json or dirs.journal.daily)"
+        )
         return
     end
-    local daily_dir = config.dir("journal.daily")
-    if not daily_dir then
-        log.error("Journal daily directory not configured")
+    local basename = journal.basename(today)
+    if type(basename) ~= "string" then
         return
     end
-    local path = require("vault.notes.paths").daily(today)
     local ctx = vim.fn.filereadable(path) == 1 and table.concat(vim.fn.readfile(path), "\n") or ""
     local Note = require("vault.notes.note")
     -- Pass context via stdin ("--context -") to avoid argument-length limits
@@ -1800,6 +1828,7 @@ function callbacks.today_dictate()
                 local ok, json = pcall(vim.json.decode, vim.trim(out.stdout))
                 if ok and json.ok and json.value ~= "" then
                     Note(path):append("- " .. os.date("%H:%M:%S") .. " " .. json.value)
+                    log.info("Appended dictated line to %s", basename)
                 end
             end)
         end
@@ -1809,14 +1838,14 @@ end
 function callbacks.open_properties_picker(args)
     local fargs = args.fargs
     if next(fargs) == nil then
-        safe_find(pickers.properties(), "No properties found")
+        safe_find(get_pickers().properties(), "No properties found")
         return
     end
     local values = {}
     for _, value in ipairs(fargs) do
         table.insert(values, value)
     end
-    safe_find(pickers.properties({ values = values }), "No properties found")
+    safe_find(get_pickers().properties({ values = values }), "No properties found")
 end
 
 --- @command :Vault yesterday [[
@@ -1869,7 +1898,7 @@ end
 --- @return nil
 function callbacks.open_orphans_picker()
     safe_find(
-        pickers.notes({ notes = require("vault.notes")():orphans() }),
+        get_pickers().notes({ notes = require("vault.notes")():orphans() }),
         "No orphan notes found"
     )
 end
@@ -1878,7 +1907,10 @@ end
 --- Opens a picker with linked notes
 --- @return nil
 function callbacks.open_linked_picker()
-    safe_find(pickers.notes({ notes = require("vault.notes")():linked() }), "No linked notes found")
+    safe_find(
+        get_pickers().notes({ notes = require("vault.notes")():linked() }),
+        "No linked notes found"
+    )
 end
 
 --- Opens a live grep picker with fuzzy search
@@ -1901,15 +1933,16 @@ end
 --- Opens the yesterday's journal note
 --- @return nil
 function callbacks.yesterday()
-    local config = require("vault.config")
+    local journal = require("vault.journal")
     local yesterday = os.date("%Y-%m-%d", os.time() - 60 * 60 * 24)
-    local daily_dir = config.dir("journal.daily")
-    if not daily_dir then
-        log.error("Journal daily directory not configured (dirs.journal.daily)")
+    local path, created = journal.ensure(yesterday)
+    if type(path) ~= "string" then
+        log.error(
+            "Journal daily note path not configured (configure .obsidian/daily-notes.json or dirs.journal.daily)"
+        )
         return
     end
-    local path = require("vault.notes.paths").daily(yesterday)
-    if vim.fn.filereadable(path) == 0 then
+    if created then
         log.info("Initializing yesterday's journal note")
     end
     vim.cmd("e " .. vim.fn.fnameescape(path))
@@ -2416,7 +2449,7 @@ function callbacks.duplicates_review_preset(args)
         return
     end
     safe_find(
-        pickers.duplicate_presets({
+        get_pickers().duplicate_presets({
             presets = require("vault.duplicates").presets(),
             on_select = function(entry)
                 run_duplicate_review_preset(entry.name)
@@ -2506,7 +2539,7 @@ function callbacks.note_inlinks_picker()
     end
     local inlink_slugs = vim.tbl_keys(inlinks)
     safe_find(
-        pickers.notes({ notes = require("vault.notes")():filter(inlink_slugs) }),
+        get_pickers().notes({ notes = require("vault.notes")():filter(inlink_slugs) }),
         "No inlink notes found"
     )
 end
@@ -2539,7 +2572,7 @@ function callbacks.note_outlinks_picker()
         end
     end
     safe_find(
-        pickers.notes({ notes = require("vault.notes")():filter(target_slugs) }),
+        get_pickers().notes({ notes = require("vault.notes")():filter(target_slugs) }),
         "No outlink notes found"
     )
 end
@@ -2590,7 +2623,7 @@ function callbacks.note_tags_picker(args)
     --     error("Not implemented")
     -- end
     safe_find(
-        pickers.notes({ notes = require("vault.notes")():filter(slugs) }),
+        get_pickers().notes({ notes = require("vault.notes")():filter(slugs) }),
         "No notes found for tags"
     )
 end
@@ -2644,7 +2677,7 @@ function callbacks.note_from_selected_text(_args)
     new_note_slug = uuid .. " " .. new_note_slug
 
     --- @type vault.path
-    local new_note_path = require("vault.utils").slug_to_path(new_note_slug)
+    local new_note_path = require("vault.notes.paths").for_slug(new_note_slug)
     if vim.fn.filereadable(new_note_path) == 1 then
         log.warn("File already exists: %s", new_note_path)
         return
@@ -2678,14 +2711,14 @@ end
 function callbacks.open_note_properties_picker(args)
     local fargs = args.fargs
     if next(fargs) == nil then
-        safe_find(pickers.properties(), "No properties found")
+        safe_find(get_pickers().properties(), "No properties found")
         return
     end
     local values = {}
     for _, value in ipairs(fargs) do
         table.insert(values, value)
     end
-    safe_find(pickers.properties({ values = values }), "No properties found")
+    safe_find(get_pickers().properties({ values = values }), "No properties found")
 end
 
 --- VaultNoteByDir
@@ -2710,7 +2743,7 @@ function callbacks.open_note_by_dir_picker(args)
         return
     end
     local notes = require("vault.notes")():filter("relpath", fargs[1], "startswith", false)
-    safe_find(pickers.notes({ notes = notes }), "No notes found in directory: " .. fargs[1])
+    safe_find(get_pickers().notes({ notes = notes }), "No notes found in directory: " .. fargs[1])
 end
 
 --- @param args vim.api.keyset.create_user_command.command_args
@@ -2718,7 +2751,7 @@ function callbacks.note(args)
     local fargs = args.fargs
     -- if no arguments, then open a picker
     if next(fargs) == nil then
-        safe_find(pickers.notes(), "No notes found")
+        safe_find(get_pickers().notes(), "No notes found")
         return
     elseif #fargs == 1 then
         -- Apply method to the current buffer's note
@@ -2791,7 +2824,7 @@ local function construct_notes_picker_args(input)
         args = { input[2], input[3], input[4], input[5], input[6] }
     end
     if #args == 0 then
-        safe_find(pickers.notes(), "No notes found")
+        safe_find(get_pickers().notes(), "No notes found")
     elseif #args == 1 then
         if args[1] ~= "by" then
             local notes = require("vault.notes")()
@@ -2799,7 +2832,10 @@ local function construct_notes_picker_args(input)
             if type(preset) == "function" then
                 preset = preset(notes)
             end
-            safe_find(pickers.notes({ notes = preset }), "No notes found for preset: " .. args[1])
+            safe_find(
+                get_pickers().notes({ notes = preset }),
+                "No notes found for preset: " .. args[1]
+            )
         elseif args[1] == "by" then
             log.warn("Need further arguments")
         end
@@ -2810,7 +2846,7 @@ local function construct_notes_picker_args(input)
         if type(args[3]) ~= "table" then
             args[3] = { args[3] }
         end
-        safe_find(pickers.notes({
+        safe_find(get_pickers().notes({
             notes = require("vault.notes")({ args[2], args[3], {}, "startswith", "all" }),
         }))
     elseif #args == 4 then
@@ -2820,7 +2856,7 @@ local function construct_notes_picker_args(input)
         if type(args[4]) ~= "table" then
             args[4] = { args[4] }
         end
-        safe_find(pickers.notes({
+        safe_find(get_pickers().notes({
             notes = require("vault.notes")({ args[2], args[3], args[4], "startswith", "all" }),
         }))
     elseif #args == 5 then
@@ -2830,7 +2866,7 @@ local function construct_notes_picker_args(input)
         if type(args[4]) ~= "table" then
             args[4] = { args[4] }
         end
-        safe_find(pickers.notes({
+        safe_find(get_pickers().notes({
             notes = require("vault.notes")({ args[2], args[3], args[4], args[5], "all" }),
         }))
     elseif #args == 6 then
@@ -2840,7 +2876,7 @@ local function construct_notes_picker_args(input)
         if type(args[4]) ~= "table" then
             args[4] = { args[4] }
         end
-        safe_find(pickers.notes({
+        safe_find(get_pickers().notes({
             notes = require("vault.notes")({ args[2], args[3], args[4], args[5], args[6] }),
         }))
     end
@@ -2848,14 +2884,14 @@ end
 
 function callbacks.notes(args)
     if next(args.fargs) == nil then
-        safe_find(pickers.notes(), "No notes found")
+        safe_find(get_pickers().notes(), "No notes found")
         return
     end
     construct_notes_picker_args(args.fargs)
 end
 
 function callbacks.actions()
-    safe_find(pickers.tasks(), "No tasks found")
+    safe_find(get_pickers().tasks(), "No tasks found")
 end
 
 function callbacks.tasks_new(args)
@@ -2941,7 +2977,7 @@ function callbacks.tasks_list()
         "startswith",
         false
     )
-    safe_find(pickers.notes({ notes = notes }), "No tasks found")
+    safe_find(get_pickers().notes({ notes = notes }), "No tasks found")
 end
 
 function callbacks.tasks_kanban()
@@ -2957,7 +2993,8 @@ function callbacks.tasks_kanban()
     local group_values = type(task_cfg.status_order) == "table" and task_cfg.status_order or nil
     local card_sort = type(task_cfg.kanban_sort) == "table" and task_cfg.kanban_sort or nil
     local empty_columns = type(task_cfg.kanban_empty_columns) == "string"
-        and task_cfg.kanban_empty_columns or nil
+            and task_cfg.kanban_empty_columns
+        or nil
 
     require("vault.views.kanban").open({
         base = base,

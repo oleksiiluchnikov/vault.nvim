@@ -1,4 +1,6 @@
 local config = require("vault.config")
+local journal = require("vault.journal")
+local obsidian = require("vault.obsidian")
 
 local M = {}
 
@@ -15,7 +17,9 @@ end
 --- @param slug vault.slug
 --- @return vault.path
 function M.for_slug(slug)
-    return M.root() .. "/" .. slug .. M.ext()
+    local derived = config.options.obsidian or obsidian.read(M.root())
+    local current = vim.api.nvim_buf_get_name(0)
+    return obsidian.new_note_path(M.root(), M.ext(), slug, derived, current)
 end
 
 --- @param relpath string
@@ -30,11 +34,7 @@ end
 --- @param date_string string
 --- @return vault.path|nil
 function M.daily(date_string)
-    local daily_dir = config.dir("journal.daily")
-    if not daily_dir then
-        return nil
-    end
-    return string.format("%s/%s%s", daily_dir, date_string, M.ext())
+    return journal.path(date_string)
 end
 
 return M
