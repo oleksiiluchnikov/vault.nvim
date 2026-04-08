@@ -11,6 +11,7 @@
 local M = {}
 
 local log = require("vault.log").scope("bases.views.grid")
+local utils = require("vault.utils")
 local shared = require("vault.views.shared")
 local state = require("vault.core.state")
 local grid_config = require("vault.views.grid_config")
@@ -522,12 +523,16 @@ end
 ---@return table<string, vault.Note>
 local function collect_current_notes_map(st)
     local Note = require("vault.notes.note")
+    local Scanner = require("vault.scanner")
+    local raw_paths = Scanner.paths()
     local notes_map = {}
     local dead_slugs = {}
 
     for slug, path in pairs(st.note_paths) do
         if vim.fn.filereadable(path) == 1 then
-            local ok, note = pcall(Note, path)
+            local current_slug = utils.path_to_slug(path)
+            local note_input = raw_paths[current_slug] or path
+            local ok, note = pcall(Note, note_input)
             if ok and note and should_keep_note(st, note) then
                 notes_map[note.data.slug] = note
             end
