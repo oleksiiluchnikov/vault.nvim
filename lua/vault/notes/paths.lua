@@ -17,7 +17,8 @@ end
 --- @param slug vault.slug
 --- @return vault.path
 function M.for_slug(slug)
-    local derived = config.options.obsidian or obsidian.read(M.root())
+    local derived = obsidian.read(M.root())
+    config.options.obsidian = derived
     local current = vim.api.nvim_buf_get_name(0)
     return obsidian.new_note_path(M.root(), M.ext(), slug, derived, current)
 end

@@ -43,6 +43,11 @@ local function filtered_occurrences(path, occurrences, keep_frontmatter_tags)
 end
 
 local function ensure_note_for_slug(note_slug)
+    local existing = require("vault.scanner").paths()[note_slug]
+    if existing and type(existing.path) == "string" and vim.fn.filereadable(existing.path) == 1 then
+        return existing.path, false
+    end
+
     local path = require("vault.notes.paths").for_slug(note_slug)
     if vim.fn.filereadable(path) == 1 then
         return path, false

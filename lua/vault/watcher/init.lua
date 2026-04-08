@@ -7,6 +7,7 @@ local config = require("vault.config")
 local utils = require("vault.utils")
 local state = require("vault.core.state")
 local log = require("vault.log").scope("watcher")
+local SAVE_PROFILE_KEY = "vault.process_save_profile.current"
 
 --- @class vault.Watcher: vault.Object
 local Watcher = require("vault.core.object")("VaultWatcher")
@@ -38,6 +39,19 @@ function Watcher:init()
     --- Suppression flag: when true, on_event ignores fs events.
     --- Set during wikilink patching to avoid the watcher reacting to its own writes.
     self._writing = false
+end
+
+---@param phase string
+---@param elapsed_ms number
+local function record_active_save_phase(phase, elapsed_ms)
+    local profile = state.get_global_key(SAVE_PROFILE_KEY)
+    if type(profile) ~= "table" then
+        return
+    end
+    profile.phases = profile.phases or {}
+    profile.phase_counts = profile.phase_counts or {}
+    profile.phases[phase] = (profile.phases[phase] or 0) + elapsed_ms
+    profile.phase_counts[phase] = (profile.phase_counts[phase] or 0) + 1
 end
 
 --- Normalize filename reported by fs_event into an absolute path
@@ -575,6 +589,7 @@ function Watcher:_do_rename_update(
     paths,
     wikilinks_map
 )
+    local t0 = uv.hrtime()
     local renames = {
         {
             old_path = old_path,
@@ -598,7 +613,9 @@ function Watcher:_do_rename_update(
 
     -- Fast path: no prompt needed (disabled or no files to patch)
     if not prompt or total == 0 then
-        return apply_renames(self, pending, renames, silent)
+        local updated = apply_renames(self, pending, renames, silent)
+        record_active_save_phase("watcher.handle_rename", (uv.hrtime() - t0) / 1e6)
+        return updated
     end
 
     -- Async path: show non-blocking confirm popup, apply on "yes"
@@ -619,6 +636,7 @@ function Watcher:_do_rename_update(
             end
         end,
     })
+    record_active_save_phase("watcher.handle_rename", (uv.hrtime() - t0) / 1e6)
     return 0
 end
 

@@ -20,6 +20,7 @@ local uv = vim.uv or vim.loop
 --- @field note_mtimes table<string, integer>
 --- @field save_mode any
 --- @field saving boolean|string
+--- @field last_save_profile? table
 
 --- @param path string
 --- @return string[]
@@ -181,6 +182,7 @@ local function make_save_state(ge, path, slug, bufnr)
         note_mtimes = { [slug] = ge._get_mtime(path) },
         save_mode = nil,
         saving = false,
+        last_save_profile = nil,
     }
 end
 
@@ -193,6 +195,7 @@ local function reset_save_state(st, path, slug, ge)
     st.note_paths = { [slug] = path }
     st.note_mtimes = { [slug] = ge._get_mtime(path) }
     st.saving = false
+    st.last_save_profile = nil
 end
 
 --- @param name string
@@ -207,6 +210,42 @@ local function add_metric(name, results, bench, fn, iterations, warmup, hooks)
     io.stderr:write(string.format("Measuring: %s...\n", name))
     local samples = bench.measure(fn, iterations, warmup, hooks)
     results[#results + 1] = bench.result(name, samples)
+end
+
+local SAVE_PHASE_KEYS = {
+    "snapshot_for_undo",
+    "apply_structural_ops",
+    "watcher.handle_rename",
+    "post_save_refresh",
+}
+
+--- @return table<string, number[]>
+local function new_phase_samples()
+    local samples = {}
+    for _, phase in ipairs(SAVE_PHASE_KEYS) do
+        samples[phase] = {}
+    end
+    return samples
+end
+
+--- @param phase_samples table<string, number[]>
+--- @param profile table|nil
+local function record_phase_samples(phase_samples, profile)
+    local phases = type(profile) == "table" and profile.phases or {}
+    for _, phase in ipairs(SAVE_PHASE_KEYS) do
+        local bucket = phase_samples[phase]
+        bucket[#bucket + 1] = tonumber(phases[phase] or 0) or 0
+    end
+end
+
+--- @param results bench.Result[]
+--- @param bench bench.Utils
+--- @param prefix string
+--- @param phase_samples table<string, number[]>
+local function add_phase_metrics(results, bench, prefix, phase_samples)
+    for _, phase in ipairs(SAVE_PHASE_KEYS) do
+        results[#results + 1] = bench.result(prefix .. " phase " .. phase, phase_samples[phase])
+    end
 end
 
 local function main()
@@ -484,11 +523,11 @@ local function main()
         local bufnr = vim.api.nvim_create_buf(false, true)
         local state = make_save_state(grid, note_path, "note-0001", bufnr)
         local on_save = grid._make_on_save(state)
+        local phase_samples = new_phase_samples()
+        local capture_profile = false
 
-        add_metric(
-            "grid on_save update",
-            results,
-            bench,
+        io.stderr:write("Measuring: grid on_save update...\n")
+        local total_samples = bench.measure(
             function()
                 local done_err = "PENDING"
                 on_save({
@@ -505,11 +544,15 @@ local function main()
                 if done_err ~= false then
                     error(tostring(done_err))
                 end
+                if capture_profile then
+                    record_phase_samples(phase_samples, state.last_save_profile)
+                end
             end,
             10,
             1,
             {
-                before_each = function()
+                before_each = function(_, is_warmup)
+                    capture_profile = not is_warmup
                     write_lines(note_path, original_lines)
                     reset_save_state(state, note_path, "note-0001", grid)
                     grid._vt_undo.clear(bufnr)
@@ -518,6 +561,8 @@ local function main()
                 end,
             }
         )
+        results[#results + 1] = bench.result("grid on_save update", total_samples)
+        add_phase_metrics(results, bench, "grid on_save update", phase_samples)
 
         delete_buffer(bufnr)
         delete_path(update_root)
@@ -538,11 +583,11 @@ local function main()
         local bufnr = vim.api.nvim_create_buf(false, true)
         local state = make_save_state(grid, old_path, old_slug, bufnr)
         local on_save = grid._make_on_save(state)
+        local phase_samples = new_phase_samples()
+        local capture_profile = false
 
-        add_metric(
-            "grid on_save rename",
-            results,
-            bench,
+        io.stderr:write("Measuring: grid on_save rename...\n")
+        local total_samples = bench.measure(
             function()
                 local done_err = "PENDING"
                 on_save({
@@ -566,11 +611,15 @@ local function main()
                 if done_err ~= false then
                     error(tostring(done_err))
                 end
+                if capture_profile then
+                    record_phase_samples(phase_samples, state.last_save_profile)
+                end
             end,
             10,
             1,
             {
-                before_each = function()
+                before_each = function(_, is_warmup)
+                    capture_profile = not is_warmup
                     delete_path(new_path)
                     write_lines(old_path, old_lines)
                     write_lines(ref_path, ref_lines)
@@ -581,6 +630,8 @@ local function main()
                 end,
             }
         )
+        results[#results + 1] = bench.result("grid on_save rename", total_samples)
+        add_phase_metrics(results, bench, "grid on_save rename", phase_samples)
 
         delete_buffer(bufnr)
         delete_path(rename_root)

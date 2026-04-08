@@ -122,6 +122,34 @@ describe("vault.obsidian", function()
         )
     end)
 
+    it("refreshes note creation paths when Obsidian app settings change on disk", function()
+        write(root .. "/.obsidian/app.json", {
+            "{",
+            '  "newFileLocation": "folder",',
+            '  "newFileFolderPath": "Drafts"',
+            "}",
+        })
+
+        require("vault").setup({
+            root = root,
+            ext = ".md",
+            features = { cmp = false, commands = false, watcher = false },
+        })
+
+        package.loaded["vault.notes.paths"] = nil
+        local paths = require("vault.notes.paths")
+        assert.are.equal(vim.fs.normalize(root .. "/Drafts/foo.md"), paths.for_slug("foo"))
+
+        write(root .. "/.obsidian/app.json", {
+            "{",
+            '  "newFileLocation": "folder",',
+            '  "newFileFolderPath": "Inbox"',
+            "}",
+        })
+
+        assert.are.equal(vim.fs.normalize(root .. "/Inbox/bar.md"), paths.for_slug("bar"))
+    end)
+
     it("applies app alwaysUpdateLinks to config when user did not override it", function()
         write(root .. "/.obsidian/app.json", {
             "{",
