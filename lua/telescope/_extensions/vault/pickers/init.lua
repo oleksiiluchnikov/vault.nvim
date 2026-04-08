@@ -1,4 +1,3 @@
--- TODO: Add support for custom pickers from config
 local cfg = require("vault.config").options or {}
 local telescope_opts = (cfg.telescope and cfg.telescope.pickers) or {}
 
@@ -37,16 +36,13 @@ return setmetatable(
     {
         __index = function(_, key)
             return function(opts)
-                local ok, picker =
-                    pcall(require, string.format("telescope._extensions.vault.pickers.%s", key))
+                local mod_path = string.format("telescope._extensions.vault.pickers.%s", key)
+                local ok, picker = pcall(require, mod_path)
                 if not ok then
-                    -- Fallback to vault picker if module not found
-                    local vault_picker = require("telescope._extensions.vault.pickers.vault")
-                    if vault_picker == nil then
-                        error("Failed to load default vault picker")
-                        return
-                    end
-                    return vault_picker(opts):find()
+                    local log = require("vault.log").scope("telescope")
+                    log.error("Unknown picker '%s' (failed to require '%s'): %s", key, mod_path, tostring(picker))
+                    error(string.format("vault: unknown picker '%s'", key))
+                    return
                 end
                 return picker(opts)
             end

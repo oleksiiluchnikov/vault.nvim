@@ -5,6 +5,8 @@
 vim.env.NVIM_APPNAME = vim.env.VAULT_TEST_APPNAME or vim.env.NVIM_APPNAME or "nvim-test"
 vim.opt.runtimepath:remove(vim.fn.expand("~/.config/nvim"))
 vim.opt.packpath:remove(vim.fn.expand("~/.local/share/nvim/site"))
+vim.g.loaded_netrw = 1
+vim.g.loaded_netrwPlugin = 1
 
 -- 2. DEPENDENCY MANAGEMENT
 -- Define a local directory for test dependencies

@@ -16,6 +16,7 @@ return function(opts)
     local pickers = require("telescope.pickers")
     local sorters = require("telescope.sorters")
     local vault_previewers = require("telescope._extensions.vault.previewers")
+    local layouts = require("telescope._extensions.vault.layouts")
     local VaultWikilinks = require("vault.wikilinks")
     local wikilinks = opts.wikilinks or VaultWikilinks()
     local vault_state = require("vault.core.state")
@@ -32,10 +33,7 @@ return function(opts)
     end
 
     -- Compute UI dimensions
-    local ui_height = vim.o.lines
-    if #vim.api.nvim_list_uis() > 0 then
-        ui_height = vim.api.nvim_list_uis()[1].height
-    end
+    local ui_height, _ = layouts.ui_size()
     local steps = math.min(ui_height, vim.tbl_count(results))
 
     -- Gradient-based highlighting (best-effort)

@@ -91,4 +91,25 @@ describe("vault.e2e note lifecycle", function()
             end, { timeout_ms = 10000 }))
         end)
     end)
+
+    it("creates new notes in Obsidian's configured new file folder", function()
+        local source_root = make_vault("vault-e2e-note-lifecycle-folder", {
+            [".obsidian/app.json"] = {
+                "{",
+                '  "newFileLocation": "folder",',
+                '  "newFileFolderPath": "Inbox"',
+                "}",
+            },
+        })
+
+        with_session(source_root, "note-lifecycle-folder", function(session)
+            driver.command(session, "Vault note new app-folder-note")
+
+            assert.is_true(driver.wait_for(session, function()
+                local path = session.root .. "/Inbox/app-folder-note.md"
+                local bufname = driver.current_buffer_name(session)
+                return vim.fn.filereadable(path) == 1 and bufname == path
+            end, { timeout_ms = 10000 }))
+        end)
+    end)
 end)

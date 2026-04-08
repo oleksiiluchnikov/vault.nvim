@@ -29,10 +29,7 @@ return function(opts)
         return a.data.count > b.data.count
     end)
 
-    local ui_height = vim.o.lines
-    if #vim.api.nvim_list_uis() > 0 then
-        ui_height = vim.api.nvim_list_uis()[1].height
-    end
+    local ui_height, _ = vault_layouts.ui_size()
     local steps = math.min(ui_height, vim.tbl_count(tags_list))
 
     local hl_name = "VaultTag"

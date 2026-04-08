@@ -5,9 +5,15 @@
 
 local M = {}
 
----@param notes vault.Note[]
----@return table<string, vault.telescope.NoteLinkCounts>
-function M.collect(notes)
+--- Collect per-note link counts from a pre-loaded wikilinks collection.
+---
+--- When `wikilinks_map` is nil, falls back to scanning (expensive).
+--- Callers should pre-load wikilinks once and pass them in.
+---
+--- @param notes vault.Note[]
+--- @param wikilinks_map? table<string, vault.Wikilink>  Pre-loaded wikilinks map (avoids rescan)
+--- @return table<string, vault.telescope.NoteLinkCounts>
+function M.collect(notes, wikilinks_map)
     local counts = {}
     local inbound_sources = {}
 
@@ -23,8 +29,13 @@ function M.collect(notes)
         end
     end
 
-    local wikilinks = require("vault.wikilinks")()
-    for _, wikilink in pairs(wikilinks.map or {}) do
+    -- Use pre-loaded wikilinks if provided; otherwise scan (slow fallback)
+    if not wikilinks_map then
+        local wl = require("vault.wikilinks")()
+        wikilinks_map = wl.map or {}
+    end
+
+    for _, wikilink in pairs(wikilinks_map) do
         local target = wikilink.data.target
         local unresolved = target == nil or target == ""
         for source_slug, _ in pairs(wikilink.data.sources or {}) do

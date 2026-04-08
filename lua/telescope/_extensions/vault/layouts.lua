@@ -1,7 +1,9 @@
 local Layouts = {}
 
 --- Get UI dimensions with fallback for headless/startup race
-local function ui_size()
+--- @return integer height
+--- @return integer width
+function Layouts.ui_size()
     local uis = vim.api.nvim_list_uis()
     if uis[1] then
         return uis[1].height, uis[1].width
@@ -23,7 +25,7 @@ function Layouts.mini()
 end
 
 function Layouts.notes()
-    local h, w = ui_size()
+    local h, w = Layouts.ui_size()
     return {
         sorting_strategy = "ascending",
         layout_config = {
@@ -35,7 +37,7 @@ function Layouts.notes()
 end
 
 function Layouts.tags()
-    local h, w = ui_size()
+    local h, w = Layouts.ui_size()
     return {
         sorting_strategy = "ascending",
         layout_config = {
@@ -47,7 +49,7 @@ function Layouts.tags()
 end
 
 function Layouts.bases()
-    local h, w = ui_size()
+    local h, w = Layouts.ui_size()
     return {
         sorting_strategy = "ascending",
         layout_config = {

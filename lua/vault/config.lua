@@ -41,6 +41,7 @@
 --- @field notify? table Notification settings and preferences. Example: { on_write = true }
 --- @field log? vault.LogConfig Centralized logging configuration. Example: { level = "debug", file = true }
 --- @field features? { cmp: boolean, commands: boolean, blink: boolean } Feature toggles for plugin components. Example: { cmp = true, commands = true, blink = true }
+--- @field obsidian? vault.ObsidianSettings Derived Obsidian settings loaded from `.obsidian/*.json` when present.
 --- @field frontmatter? table YAML frontmatter configuration. Example: { keys = { tags = "tags" } }
 --- @field check_duplicate_basename? boolean Enable duplicate filename detection. Example: true
 --- @field wikilinks? { confirm_rewrite?: boolean, confirm_merge?: boolean, confirm_create?: boolean } Wikilink action confirmation settings
@@ -50,7 +51,7 @@
 --- @field tasks? { dir?: string, fields?: { status?: string, priority?: string, blocked_by?: string }, defaults?: { status?: string, executor?: string, category?: string, priority?: string }, status_order?: string[], priority_order?: string[], completed_statuses?: string[], aliases?: table<string, string>, transitions?: table<string, table<string, true>> } Task-note policy settings
 --- @field views? { grid?: { default_columns?: string[], identity_mode?: "conceal"|"extmark"|"visible", delete_hard_cap?: integer, create_hard_cap?: integer, row_hl?: vault.RowHlRule[]|fun(record: table, row_idx: integer): string|nil } } Shared view settings
 ---
---- @field telescope? table Telescope configuration. Example:
+--- @field telescope? { notes?: { columns?: (string|vault.TelescopeNotesColumnSpec)[] }, pickers?: table } Telescope configuration. Example:
 ---   ```lua
 ---   {
 ---     pickers = {
@@ -336,6 +337,16 @@ local DEFAULT_OPTIONS = {
     },
     previewer = "glow", -- The previewer to use. Default: "glow"
     telescope = {
+        notes = {
+            columns = {
+                "color",
+                "outlinks",
+                "inlinks",
+                "dangling",
+                { key = "directory", min_width = 8, max_width = 24 },
+                { key = "stem", flex = 1, min_width = 12 },
+            },
+        },
         pickers = {
             -- custom = function(opts)
             --     require("telescope._extensions.vault.pickers.notes")(
@@ -636,6 +647,17 @@ function Config.setup(options)
     -- Only expand the root if user provided a custom root explicitly
     if user_options.root ~= nil then
         merged.root = expand_root(merged.root)
+    end
+
+    local obsidian = require("vault.obsidian").read(merged.root)
+    merged.obsidian = obsidian
+
+    local user_watcher = user_options.watcher or {}
+    if
+        user_watcher.auto_update_links == nil
+        and type(obsidian.app.always_update_links) == "boolean"
+    then
+        merged.watcher.auto_update_links = obsidian.app.always_update_links
     end
 
     merged.dirs = expand_dirs(merged.root, merged.dirs)

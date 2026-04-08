@@ -76,3 +76,6 @@ BACKLOG.md
 
 # Local scratch lua files
 lua/vault/_*.lua
+
+# Benchmark fixture vaults (generated, not committed)
+benchmarks/fixture-vault-*/

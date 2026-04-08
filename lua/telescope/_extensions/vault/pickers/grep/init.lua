@@ -4,9 +4,9 @@
 return function(opts)
     opts = opts or {}
     local config = require("vault.config")
+    local layouts = require("telescope._extensions.vault.layouts")
     local root_dir = vim.fn.expand(config.options.root)
-    local screen_width = vim.api.nvim_list_uis()[1].width
-    local screen_height = vim.api.nvim_list_uis()[1].height
+    local screen_height, screen_width = layouts.ui_size()
     local default_opts = {
         prompt_title = "Search in notes",
         -- layout_strategy = "vertical",

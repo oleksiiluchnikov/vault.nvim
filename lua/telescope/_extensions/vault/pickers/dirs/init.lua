@@ -22,8 +22,7 @@ return function(opts)
         require("vault.log").scope("telescope").info("No directories found in vault")
     end
 
-    local uis = vim.api.nvim_list_uis()
-    local ui_height = (uis[1] and uis[1].height) or 40
+    local ui_height, _ = vault_layouts.ui_size()
     local steps = math.min(ui_height, vim.tbl_count(dirs_list))
     local hl_name = dirs.class.name
     local colors = vault_hl.setup(hl_name, steps, { "Comment", "Normal", "String" })

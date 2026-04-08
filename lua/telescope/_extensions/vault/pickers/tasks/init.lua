@@ -10,6 +10,8 @@ return function(opts)
     local sorters = require("telescope.sorters")
     local vault_mappings = require("telescope._extensions.vault.mappings")
     local vault_hl = require("telescope._extensions.vault.highlights")
+    local layouts = require("telescope._extensions.vault.layouts")
+    local ui_height, ui_width = layouts.ui_size()
     --- Constants for task display configuration
     local DISPLAY_CONFIG = {
         WIDTHS = {
@@ -22,7 +24,7 @@ return function(opts)
         },
         COLORS = {
             GRADIENT = {
-                STEPS = vim.api.nvim_list_uis()[1].height,
+                STEPS = ui_height,
                 START = "Comment",
                 END = "Normal",
                 TYPE = "String",
@@ -84,7 +86,7 @@ return function(opts)
 
     local make_display = function(entry)
         local task = entry.value
-        local window_width = vim.api.nvim_list_uis()[1].width
+        local _, window_width = layouts.ui_size()
         local status_info = DISPLAY_CONFIG.COLORS.STATUS[task.data.status]
             or { symbol = "?", hl = "Normal" }
 
@@ -134,11 +136,6 @@ return function(opts)
             value = task,
             ordinal = task.data.line,
             display = make_display,
-            -- display = task.data.line:gsub("^%s*(.-)%s*$", "%1"):gsub("^-%s*%[.]%s*", ""),
-            -- filename = config.options.root
-            --     .. "/"
-            --     .. task.data.sources[1].slug
-            --     .. config.options.ext,
         }
     end
 
@@ -151,8 +148,8 @@ return function(opts)
         sorter = sorters.get_generic_fuzzy_sorter(),
         sorting_strategy = "ascending",
         layout_config = {
-            height = vim.api.nvim_list_uis()[1].height - 4,
-            width = vim.api.nvim_list_uis()[1].width,
+            height = ui_height - 4,
+            width = ui_width,
         },
         attach_mappings = vault_hl.make_attach_mappings(vault_mappings.tasks, hl_name, colors),
     })

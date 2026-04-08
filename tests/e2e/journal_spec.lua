@@ -44,12 +44,15 @@ describe("vault.e2e journal commands", function()
     it("opens today's journal note", function()
         with_session(source_root, "journal-today", function(session)
             -- Configure journal daily directory
-            driver.lua(session, [[
+            driver.lua(
+                session,
+                [[
                 local config = require('vault.config')
                 config.options.dirs = config.options.dirs or {}
                 config.options.dirs.journal = config.options.dirs.journal or {}
                 config.options.dirs.journal.daily = 'Journal/Daily'
-            ]])
+            ]]
+            )
             driver.command(session, "Vault today")
             assert.is_true(driver.wait_for(session, function()
                 local bufname = driver.current_buffer_name(session)
@@ -61,17 +64,86 @@ describe("vault.e2e journal commands", function()
 
     it("opens yesterday's journal note", function()
         with_session(source_root, "journal-yesterday", function(session)
-            driver.lua(session, [[
+            driver.lua(
+                session,
+                [[
                 local config = require('vault.config')
                 config.options.dirs = config.options.dirs or {}
                 config.options.dirs.journal = config.options.dirs.journal or {}
                 config.options.dirs.journal.daily = 'Journal/Daily'
-            ]])
+            ]]
+            )
             driver.command(session, "Vault yesterday")
             assert.is_true(driver.wait_for(session, function()
                 local bufname = driver.current_buffer_name(session)
                 local yesterday = os.date("%Y-%m-%d", os.time() - 86400)
                 return bufname:find(yesterday, 1, true) ~= nil
+            end, { timeout_ms = 8000 }))
+        end)
+    end)
+
+    it("prefers Obsidian daily note format over legacy journal path", function()
+        write(source_root .. "/.obsidian/daily-notes.json", {
+            "{",
+            '  "format": "[journal] - YYYY-MM-DD dddd",',
+            '  "folder": "/"',
+            "}",
+        })
+
+        with_session(source_root, "journal-obsidian-format", function(session)
+            driver.lua(
+                session,
+                [[
+                local config = require('vault.config')
+                config.options.dirs = config.options.dirs or {}
+                config.options.dirs.journal = config.options.dirs.journal or {}
+                config.options.dirs.journal.daily = 'Journal/Daily'
+            ]]
+            )
+            driver.command(session, "Vault today")
+            assert.is_true(driver.wait_for(session, function()
+                local bufname = driver.current_buffer_name(session)
+                local expected = os.date("journal - %Y-%m-%d %A") .. ".md"
+                return vim.fn.fnamemodify(bufname, ":t") == expected
+            end, { timeout_ms = 8000 }))
+        end)
+    end)
+
+    it("creates today's journal from the Obsidian daily note template", function()
+        write(source_root .. "/.obsidian/daily-notes.json", {
+            "{",
+            '  "format": "[journal] - YYYY-MM-DD dddd",',
+            '  "folder": "/",',
+            '  "template": "template - journal"',
+            "}",
+        })
+        write(source_root .. "/.obsidian/templates.json", {
+            "{",
+            '  "timeFormat": "HH:mm:ss",',
+            '  "dateFormat": "YYYY-MM-DD dddd",',
+            '  "folder": ""',
+            "}",
+        })
+        write(source_root .. "/template - journal.md", {
+            "# {{title}}",
+            "- {{date}}",
+            "- {{time}}",
+            "{{cursor}}",
+        })
+
+        with_session(source_root, "journal-template", function(session)
+            driver.command(session, "Vault today")
+            assert.is_true(driver.wait_for(session, function()
+                local today = os.date("%Y-%m-%d")
+                local path = session.root .. "/" .. os.date("journal - %Y-%m-%d %A") .. ".md"
+                if vim.fn.filereadable(path) == 0 then
+                    return false
+                end
+                local lines = vim.fn.readfile(path)
+                return lines[1] == "# journal - " .. os.date("%Y-%m-%d %A")
+                    and lines[2] == "- " .. os.date("%Y-%m-%d %A")
+                    and lines[3] ~= nil
+                    and lines[3]:match("^%- %d%d:%d%d:%d%d$") ~= nil
             end, { timeout_ms = 8000 }))
         end)
     end)

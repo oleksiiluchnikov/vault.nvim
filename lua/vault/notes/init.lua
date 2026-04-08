@@ -396,6 +396,26 @@ function Notes:init()
     state.set_global_key("notes", self)
 end
 
+--- Build a Notes collection from pre-loaded paths data, skipping the scanner.
+--- Use this when paths have already been obtained (e.g. from Scanner.paths_and_wikilinks())
+--- to avoid a redundant full-vault scan.
+--- @param raw_paths table<string, table>  Raw path data from Scanner.paths() or Scanner.paths_and_wikilinks()
+--- @return vault.Notes
+function Notes.from_paths(raw_paths)
+    --- @type vault.Notes
+    local instance = setmetatable({ class = Notes }, Notes.__meta)
+    instance.map = {}
+    instance._map = {}
+    instance.groups = {}
+
+    for _, data in pairs(raw_paths) do
+        instance:push(Note(data))
+    end
+    instance._map = instance.map
+
+    return instance
+end
+
 --- Loads notes by scanning paths with ripgrep and creating Note objects.
 --- Paths that match configured ignore patterns are skipped.
 ---

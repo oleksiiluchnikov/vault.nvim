@@ -364,8 +364,154 @@ function Scanner.lines(opts)
     return lines_map
 end
 
+--- Scan wikilinks WITHOUT computing fuzzy suggestions (faster).
+--- Suitable for display/counting use cases (e.g. telescope picker link stats)
+--- where suggestions aren't needed.
+--- @param opts? { ignore: boolean|string[] }
+--- @return table<string, vault.Wikilink>
+function Scanner.wikilinks_no_suggest(opts)
+    local core = require("vault_core")
+    local root, ignores = get_scan_args(opts)
+
+    local handle = progress.start("Scanning wikilinks (no suggest)")
+    local raw_wikilinks = core.wikilinks_no_suggest(root, ignores)
+
+    local wikilinks_map = {}
+    for stem, wikilink_data in pairs(raw_wikilinks) do
+        local ok, wl = pcall(Wikilink, {
+            raw = "[[" .. stem .. "]]",
+            sources = wikilink_data.sources,
+        })
+
+        if not ok then
+            log.debug("Skipped malformed wikilink: [[%s]] — %s", stem, tostring(wl))
+            goto continue
+        end
+
+        wl.data.stem = wikilink_data.stem
+        wl.data.count = wikilink_data.count
+        wl.data.embedded = wikilink_data.embedded
+        wl.data.suggestions = {}
+
+        wikilinks_map[wl.data.slug] = wl
+        ::continue::
+    end
+
+    local wl_count = 0
+    for _ in pairs(wikilinks_map) do wl_count = wl_count + 1 end
+    handle:finish(("%d wikilinks"):format(wl_count))
+
+    return wikilinks_map
+end
+
+--- Single-pass scan returning both paths and wikilinks (without suggestions).
+--- Reads every .md file ONCE instead of twice when paths() and wikilinks()
+--- are called separately.
+--- @param opts? { ignore: boolean|string[] }
+--- @return table<string, table> paths, table<string, vault.Wikilink> wikilinks_map
+function Scanner.paths_and_wikilinks(opts)
+    local core = require("vault_core")
+    local root, ignores = get_scan_args(opts)
+
+    local handle = progress.start("Scanning paths + wikilinks")
+    local result = core.paths_and_wikilinks(root, ignores)
+
+    local raw_paths = result.paths or {}
+    local raw_wikilinks = result.wikilinks or {}
+
+    -- Count paths
+    local path_count = 0
+    for _ in pairs(raw_paths) do path_count = path_count + 1 end
+
+    -- Wrap wikilinks in Wikilink objects
+    local wikilinks_map = {}
+    for stem, wikilink_data in pairs(raw_wikilinks) do
+        local ok, wl = pcall(Wikilink, {
+            raw = "[[" .. stem .. "]]",
+            sources = wikilink_data.sources,
+        })
+
+        if not ok then
+            log.debug("Skipped malformed wikilink: [[%s]] — %s", stem, tostring(wl))
+            goto continue
+        end
+
+        wl.data.stem = wikilink_data.stem
+        wl.data.count = wikilink_data.count
+        wl.data.embedded = wikilink_data.embedded
+        wl.data.suggestions = {}
+
+        wikilinks_map[wl.data.slug] = wl
+        ::continue::
+    end
+
+    local wl_count = 0
+    for _ in pairs(wikilinks_map) do wl_count = wl_count + 1 end
+    handle:finish(("%d notes, %d wikilinks"):format(path_count, wl_count))
+
+    return raw_paths, wikilinks_map
+end
+
+--- Single-pass cached scan returning both paths and wikilinks.
+--- First call: full scan (~1.6s for 10k notes). Subsequent calls: incremental
+--- mtime check, only re-parses changed files (~50ms for 10k notes, 0 changed).
+--- @param opts? { ignore: boolean|string[] }
+--- @return table<string, table> paths, table<string, vault.Wikilink> wikilinks_map
+function Scanner.paths_and_wikilinks_cached(opts)
+    local core = require("vault_core")
+    local root, ignores = get_scan_args(opts)
+
+    local handle = progress.start("Scanning paths + wikilinks (cached)")
+    local result = core.paths_and_wikilinks_cached(root, ignores)
+
+    local raw_paths = result.paths or {}
+    local raw_wikilinks = result.wikilinks or {}
+
+    local path_count = 0
+    for _ in pairs(raw_paths) do path_count = path_count + 1 end
+
+    local wikilinks_map = {}
+    for stem, wikilink_data in pairs(raw_wikilinks) do
+        local ok, wl = pcall(Wikilink, {
+            raw = "[[" .. stem .. "]]",
+            sources = wikilink_data.sources,
+        })
+
+        if not ok then
+            log.debug("Skipped malformed wikilink: [[%s]] — %s", stem, tostring(wl))
+            goto continue
+        end
+
+        wl.data.stem = wikilink_data.stem
+        wl.data.count = wikilink_data.count
+        wl.data.embedded = wikilink_data.embedded
+        wl.data.suggestions = {}
+
+        wikilinks_map[wl.data.slug] = wl
+        ::continue::
+    end
+
+    local wl_count = 0
+    for _ in pairs(wikilinks_map) do wl_count = wl_count + 1 end
+    handle:finish(("%d notes, %d wikilinks"):format(path_count, wl_count))
+
+    return raw_paths, wikilinks_map
+end
+
+--- Clear the Rust-side incremental scan cache.
+--- Call this when the watcher detects filesystem changes or the user
+--- explicitly requests a refresh.
+--- @return nil
+function Scanner.clear_rust_cache()
+    local ok, core = pcall(require, "vault_core")
+    if ok and core.clear_cache then
+        core.clear_cache()
+    end
+end
+
 function Scanner.refresh()
     -- clear cache and state
+    Scanner.clear_rust_cache()
     state.clear_all()
 end
 -- refresh all data

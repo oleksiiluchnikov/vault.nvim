@@ -1,0 +1,32 @@
+name: Bench
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Neovim
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: nightly
+
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Run 500-note benchmark suite
+        run: NVIM_LISTEN_ADDRESS= nvim --headless -u tests/minimal_init.lua -l scripts/benchmark.lua -- --vault-size 500
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vault-bench-500
+          path: benchmarks/latest.json
+          if-no-files-found: error

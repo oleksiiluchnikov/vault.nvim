@@ -1,6 +1,7 @@
 --- @class telescope_popup_options.vault.Notes: telescope_popup_options
 --- @field notes? vault.Notes
 --- @field sort_by? string
+--- @field columns? (string|vault.TelescopeNotesColumnSpec)[]
 
 --- Search for notes in vault
 --- @param opts? telescope_popup_options.vault.Notes|table<string, any>
@@ -12,18 +13,33 @@ return function(opts)
     local pickers = require("telescope.pickers")
     local sorters = require("telescope.sorters")
     local log = require("vault.log").scope("telescope")
-    local utils = require("vault.utils")
     local vault_previewers = require("telescope._extensions.vault.previewers")
     local vault_mappings = require("telescope._extensions.vault.mappings")
     local vault_layouts = require("telescope._extensions.vault.layouts")
     local vault_hl = require("telescope._extensions.vault.highlights")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
     local note_stats = require("telescope._extensions.vault.pickers.notes.stats")
+    local note_columns = require("telescope._extensions.vault.pickers.notes.columns")
 
     opts = opts or {}
-    opts.notes = opts.notes or require("vault.notes")()
     opts.sort_by = opts.sort_by or "mtime"
     opts.prompt_title = opts.prompt_title or opts.sort_by
+
+    -- When no notes provided, use incremental cached scan for both paths
+    -- and wikilinks in a single pass. First open ~1.6s, subsequent <100ms.
+    local wikilinks_map = opts._wikilinks_map
+    if not opts.notes and not wikilinks_map then
+        local Scanner = require("vault.scanner")
+        local raw_paths, wl_map = Scanner.paths_and_wikilinks_cached()
+        opts.notes = require("vault.notes").from_paths(raw_paths)
+        wikilinks_map = wl_map
+    else
+        opts.notes = opts.notes or require("vault.notes")()
+        -- Load wikilinks once (no suggestions — picker only needs counts)
+        if not wikilinks_map then
+            wikilinks_map = require("vault.scanner").wikilinks_no_suggest()
+        end
+    end
 
     local results = opts.notes:list()
     if next(results) == nil then
@@ -31,77 +47,32 @@ return function(opts)
         return
     end
 
-    local ui_height = vim.o.lines
-    if #vim.api.nvim_list_uis() > 0 then
-        ui_height = vim.api.nvim_list_uis()[1].height
-    end
+    local layout = vault_layouts.notes()
+    local ui_height, ui_width = vault_layouts.ui_size()
     local steps = math.min(ui_height, vim.tbl_count(results))
 
     local hl_name = "VaultNoteContent"
     local colors = vault_hl.setup(hl_name, steps, { "Boolean", "Comment", "Normal", "String" })
 
-    local col_2_maxwidth = 0
-    local link_counts = note_stats.collect(results)
-    local out_col_width = 0
-    local in_col_width = 0
-    local dang_col_width = 0
-    for _, note in ipairs(results) do
-        local relpath = note.data.relpath
-        local col_2 = ""
-        if utils.match(relpath, "/", "contains", false) then
-            col_2 = string.match(relpath, "(.*/)") or ""
-        end
-        if col_2:len() > col_2_maxwidth then
-            col_2_maxwidth = col_2:len()
-        end
-
-        local out_text, in_text, dang_text = note_stats.columns(link_counts[note.data.slug])
-        out_col_width = math.max(out_col_width, out_text:len())
-        in_col_width = math.max(in_col_width, in_text:len())
-        dang_col_width = math.max(dang_col_width, dang_text:len())
-    end
+    local link_counts = note_stats.collect(results, wikilinks_map)
+    local columns = note_columns.resolve(opts.columns)
+    local render_ctx = {
+        colors = colors,
+        hl_name = hl_name,
+        link_counts = link_counts,
+        steps = steps,
+        ui_width = ui_width,
+        layout = layout,
+    }
+    local column_widths = note_columns.measure(results, columns, render_ctx)
+    local displayer = entry_display.create({
+        separator = " ",
+        items = note_columns.items(columns, column_widths),
+    })
 
     local make_display = function(entry)
-        local col_1_hl_name = "TelescopeResultsNormal"
         local note = entry.value
-        local content = note.data.content or ""
-
-        if colors then
-            local content_chars_count = #content
-            local index = math.min(math.floor(content_chars_count / 16), steps)
-            if index == 0 then
-                index = 1
-            end
-            col_1_hl_name = hl_name .. tostring(index)
-        end
-
-        local col_2 = vim.fn.fnamemodify(note.data.slug, ":h")
-        local col_3 = vim.fn.fnamemodify(note.data.path, ":t:r")
-        local counts = link_counts[note.data.slug]
-        local out_text, in_text, dang_text = note_stats.columns(counts)
-        local dang_hl = (counts and counts.dangling or 0) > 0 and "DiagnosticWarn"
-            or "TelescopeResultsComment"
-
-        local displayer = entry_display.create({
-            separator = " ",
-            items = {
-                { width = 2 },
-                { width = out_col_width },
-                { width = in_col_width },
-                { width = dang_col_width },
-                { width = col_2_maxwidth },
-                { remaining = true },
-            },
-        })
-
-        return displayer({
-            { "██", col_1_hl_name },
-            { out_text, "TelescopeResultsComment" },
-            { in_text, "TelescopeResultsComment" },
-            { dang_text, dang_hl },
-            { col_2, "TelescopeResultsComment" },
-            { col_3, col_1_hl_name },
-        })
+        return displayer(note_columns.cells(note, columns, render_ctx))
     end
 
     local entry_maker = function(note)
@@ -114,17 +85,26 @@ return function(opts)
         }
     end
 
-    if opts.sort_by == "title" then
+    if opts.sort_by == "ctime" then
+        -- Sort by semantic creation date from frontmatter (note.data.created).
         table.sort(results, function(a, b)
-            return a.data.title < b.data.title
-        end)
-    elseif opts.sort_by == "ctime" then
-        table.sort(results, function(a, b)
-            return vim.fn.getftime(a.data.path) < vim.fn.getftime(b.data.path)
+            local ac = a.data.created or ""
+            local bc = b.data.created or ""
+            return ac < bc
         end)
     elseif opts.sort_by == "mtime" then
+        -- Pre-compute file modification timestamps to avoid O(n log n) stat()
+        -- syscalls inside the comparator (getftime is a syscall per call).
+        local ftime = {} --- @type table<string, integer>
+        for _, note in ipairs(results) do
+            ftime[note.data.path] = vim.fn.getftime(note.data.path)
+        end
         table.sort(results, function(a, b)
-            return vim.fn.getftime(a.data.path) < vim.fn.getftime(b.data.path)
+            return ftime[a.data.path] < ftime[b.data.path]
+        end)
+    elseif opts.sort_by == "title" then
+        table.sort(results, function(a, b)
+            return a.data.title < b.data.title
         end)
     elseif opts.sort_by == "slug" then
         table.sort(results, function(a, b)
@@ -176,7 +156,7 @@ return function(opts)
         attach_mappings = vault_hl.make_attach_mappings(vault_mappings.notes, hl_name, colors),
         on_input_filter_cb = make_filter(results, entry_maker),
     }
-    local picker = pickers.new(vault_layouts.notes(), picker_opts)
+    local picker = pickers.new(layout, picker_opts)
     vault_state.set_global_key("picker", picker)
     return picker
 end

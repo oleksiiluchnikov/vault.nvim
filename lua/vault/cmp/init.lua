@@ -7,6 +7,7 @@
 -- - Smart context detection (frontmatter boundaries, property lines)
 local state = require("vault.core.state")
 local config = require("vault.config")
+local journal = require("vault.journal")
 
 local M = {}
 
@@ -129,14 +130,13 @@ local function register_date_source()
             local dates = Dates.get(typed_string)
             --- @type lsp.CompletionItem[]
             local items = {}
-            local journal_dir = config.dir("journal.daily")
-            if not journal_dir then
+            local daily_settings = journal.settings()
+            if not daily_settings then
                 callback({})
                 return
             end
             for _, date in ipairs(dates) do
-                local weekday = Dates.get_weekday(date)
-                local path = journal_dir .. "/" .. date .. " " .. weekday .. ".md"
+                local path = journal.path(date, daily_settings)
                 local content = ""
                 local file = io.open(path, "r")
                 if file then

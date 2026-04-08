@@ -6,7 +6,6 @@
 --- TODO: Add option to configure date format
 --- @return Picker
 return function(opts)
-    local config = require("vault.config")
     local utils = require("vault.utils")
     local log = require("vault.log").scope("telescope")
     local actions = require("telescope.actions")
@@ -18,6 +17,8 @@ return function(opts)
     local previewers = require("telescope.previewers")
     local vault_state = require("vault.core.state")
     local Dates = require("dates")
+    local journal = require("vault.journal")
+    local layouts = require("telescope._extensions.vault.layouts")
 
     opts = opts or {}
     --- @type string
@@ -27,21 +28,23 @@ return function(opts)
     opts.end_date = opts.end_date or tostring(os.date("%Y-%m-%d"))
 
     local date_values = Dates.from_to(opts.start_date, opts.end_date)
-    local daily_dir = config.dir("journal.daily")
-    if not daily_dir then
-        log.warn("Journal daily directory not configured")
+    local daily_settings = journal.settings()
+    if not daily_settings then
+        log.warn("Journal daily note path not configured")
         return
     end
 
     local daily_notes = {}
     for _, date in ipairs(date_values) do
-        -- local date_with_weekday = date .. " " .. Dates.get_weekday(date)
-        local date_with_weekday = string.format("%s %s", date, Dates.get_weekday(date))
+        local date_with_weekday = journal.basename(date, daily_settings)
+        local path = journal.path(date, daily_settings)
         local daily_note = {}
+        daily_note.iso = date
         daily_note.value = date_with_weekday
-        daily_note.path = string.format("%s/%s%s", daily_dir, date_with_weekday, config.options.ext)
+        daily_note.path = path
         daily_note.relpath = utils.path_to_relpath(daily_note.path)
         daily_note.basename = vim.fn.fnamemodify(daily_note.path, ":t")
+        daily_note.name = vim.fn.fnamemodify(daily_note.path, ":t:r")
         daily_note.exists = vim.fn.filereadable(daily_note.path) == 1
         table.insert(daily_notes, daily_note)
     end
@@ -56,14 +59,11 @@ return function(opts)
     local function enter(bufnr)
         local selection = actions_state.get_selected_entry()
         local path = selection.value.path
-        local content = "# " .. selection.value.name .. "\n"
         actions.close(bufnr)
-        vim.cmd("edit " .. vim.fn.fnameescape(path))
-        -- If daily note doesn't exist, create it and open it
         if selection.value.exists == false then
-            vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(content, "\n"))
-            vim.cmd("normal! Go")
+            path = select(1, journal.ensure(selection.value.iso, daily_settings))
         end
+        vim.cmd("edit " .. vim.fn.fnameescape(path))
     end
 
     local results_height = #daily_notes + 5
@@ -78,7 +78,8 @@ return function(opts)
     end
 
     results_width = results_width + 2
-    local bufwidth = math.floor(vim.api.nvim_list_uis()[1].width * 0.8) -- TODO: Make this configurable
+    local _, ui_width = layouts.ui_size()
+    local bufwidth = math.floor(ui_width * 0.8) -- TODO: Make this configurable
     local preview_width = bufwidth - results_width - 3
     local entry_width = 29
 
