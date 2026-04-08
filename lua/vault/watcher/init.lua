@@ -63,6 +63,7 @@ end
 ---@field match string
 ---@field gsub_pat string
 ---@field replacement string
+---@field lookup string
 
 ---@param paths table<vault.slug, table>
 ---@param renames vault.Watcher.RenameSpec[]
@@ -108,6 +109,7 @@ local function build_rename_patterns(paths, renames, rename)
             match = "%[%[" .. vim.pesc(rename.old_slug),
             gsub_pat = "%[%[" .. vim.pesc(rename.old_slug) .. "([^%]]*)%]%]",
             replacement = "[[" .. rename.new_slug .. "%1]]",
+            lookup = rename.old_slug,
         },
     }
 
@@ -116,10 +118,50 @@ local function build_rename_patterns(paths, renames, rename)
             match = "%[%[" .. vim.pesc(old_stem),
             gsub_pat = "%[%[" .. vim.pesc(old_stem) .. "([^%]]*)%]%]",
             replacement = "[[" .. new_stem .. "%1]]",
+            lookup = old_stem,
         })
     end
 
     return patterns
+end
+
+---@param paths table<string, table>
+---@param patterns_by_old_path table<string, vault.Watcher.RenamePattern[]>
+---@param renames vault.Watcher.RenameSpec[]
+---@param wikilinks_map? table<string, vault.Wikilink>
+---@return table<vault.path, true>|nil
+local function collect_candidate_paths(paths, patterns_by_old_path, renames, wikilinks_map)
+    if not wikilinks_map then
+        return nil
+    end
+
+    ---@type table<vault.path, true>
+    local candidates = {}
+    ---@type table<string, string>
+    local override_paths = {}
+
+    for _, rename in ipairs(renames) do
+        override_paths[rename.old_slug] = rename.new_path
+    end
+
+    for _, rename in ipairs(renames) do
+        local patterns = patterns_by_old_path[rename.old_path] or {}
+        for _, pat in ipairs(patterns) do
+            local wl = wikilinks_map[pat.lookup]
+            local sources = wl and wl.data and wl.data.sources or nil
+            if type(sources) == "table" then
+                for source_slug, _ in pairs(sources) do
+                    local entry = paths[source_slug]
+                    local note_path = override_paths[source_slug] or (entry and entry.path or nil)
+                    if type(note_path) == "string" and note_path ~= "" then
+                        candidates[note_path] = true
+                    end
+                end
+            end
+        end
+    end
+
+    return candidates
 end
 
 ---@class vault.Watcher.PendingUpdate
@@ -128,20 +170,23 @@ end
 
 ---@param paths table<string, table>
 ---@param renames vault.Watcher.RenameSpec[]
+---@param wikilinks_map? table<string, vault.Wikilink>
 ---@return table<vault.path, vault.Watcher.PendingUpdate>, integer
-local function collect_pending_updates(paths, renames)
+local function collect_pending_updates(paths, renames, wikilinks_map)
     --- @type table<string, vault.Watcher.RenamePattern[]>
     local patterns_by_old_path = {}
     for _, rename in ipairs(renames) do
         patterns_by_old_path[rename.old_path] = build_rename_patterns(paths, renames, rename)
     end
 
+    local candidate_paths =
+        collect_candidate_paths(paths, patterns_by_old_path, renames, wikilinks_map)
+
     --- @type table<vault.path, vault.Watcher.PendingUpdate>
     local pending = {}
     local total = 0
 
-    for _, entry in pairs(paths) do
-        local note_path = entry.path
+    local function process_path(note_path)
         local f = io.open(note_path, "r")
         if f then
             local content = f:read("*all")
@@ -167,6 +212,16 @@ local function collect_pending_updates(paths, renames)
                 pending[note_path] = { new_content = cur, count = total_n }
                 total = total + total_n
             end
+        end
+    end
+
+    if candidate_paths then
+        for note_path, _ in pairs(candidate_paths) do
+            process_path(note_path)
+        end
+    else
+        for _, entry in pairs(paths) do
+            process_path(entry.path)
         end
     end
 
@@ -361,9 +416,13 @@ function Watcher:start()
                 end
                 -- Reset trailing-edge debounce timer
                 self.debouncer:stop()
-                self.debouncer:start(debounce_ms, 0, vim.schedule_wrap(function()
-                    self:_flush_pending_events()
-                end))
+                self.debouncer:start(
+                    debounce_ms,
+                    0,
+                    vim.schedule_wrap(function()
+                        self:_flush_pending_events()
+                    end)
+                )
             end)
         )
     end)
@@ -505,8 +564,17 @@ end
 --- @param new_slug string
 --- @param silent? boolean  suppress notifications (default: honor config.watcher.notify_on_rename)
 --- @param paths? table<string, table> precomputed scanner paths map
+--- @param wikilinks_map? table<string, vault.Wikilink> precomputed wikilink map
 --- @return integer
-function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silent, paths)
+function Watcher:_do_rename_update(
+    old_path,
+    new_path,
+    old_slug,
+    new_slug,
+    silent,
+    paths,
+    wikilinks_map
+)
     local renames = {
         {
             old_path = old_path,
@@ -520,7 +588,7 @@ function Watcher:_do_rename_update(old_path, new_path, old_slug, new_slug, silen
         local scanner = require("vault.scanner")
         paths = scanner.paths()
     end
-    local pending, total = collect_pending_updates(paths, renames)
+    local pending, total = collect_pending_updates(paths, renames, wikilinks_map)
 
     local watcher_conf = (config.options and config.options.watcher) or {}
     local prompt = watcher_conf.prompt_on_rename
@@ -581,8 +649,9 @@ end
 --- @param new_path string absolute
 --- @param silent? boolean  suppress notifications (default: honor config.watcher.notify_on_rename)
 --- @param paths? table<string, table> precomputed scanner paths map
+--- @param wikilinks_map? table<string, vault.Wikilink> precomputed wikilink map
 --- @return integer
-function Watcher:handle_rename(old_path, new_path, silent, paths)
+function Watcher:handle_rename(old_path, new_path, silent, paths, wikilinks_map)
     if old_path == new_path or not old_path or not new_path then
         return 0
     end
@@ -607,12 +676,28 @@ function Watcher:handle_rename(old_path, new_path, silent, paths)
     -- Defer processing if oil is active to let it complete its operations
     if self.oil_guard_enabled and package.loaded["oil"] then
         vim.defer_fn(function()
-            self:_do_rename_update(old_path, new_path, old_slug, new_slug, silent, paths)
+            self:_do_rename_update(
+                old_path,
+                new_path,
+                old_slug,
+                new_slug,
+                silent,
+                paths,
+                wikilinks_map
+            )
         end, 1000)
         return 0
     end
 
-    return self:_do_rename_update(old_path, new_path, old_slug, new_slug, silent, paths)
+    return self:_do_rename_update(
+        old_path,
+        new_path,
+        old_slug,
+        new_slug,
+        silent,
+        paths,
+        wikilinks_map
+    )
 end
 
 --- Resolve all wiki-links that point to many renamed notes in a single scan.
@@ -620,8 +705,9 @@ end
 --- @param renames { old_path: string, new_path: string }[]
 --- @param silent? boolean suppress notifications
 --- @param paths? table<string, table> precomputed scanner paths map
+--- @param wikilinks_map? table<string, vault.Wikilink> precomputed wikilink map
 --- @return integer
-function Watcher:handle_renames(renames, silent, paths)
+function Watcher:handle_renames(renames, silent, paths, wikilinks_map)
     if type(renames) ~= "table" then
         error("Watcher:handle_renames() requires a table of renames")
     end
@@ -667,11 +753,13 @@ function Watcher:handle_renames(renames, silent, paths)
     if self.oil_guard_enabled and package.loaded["oil"] then
         vim.defer_fn(function()
             local deferred_paths = paths
+            local deferred_wikilinks = wikilinks_map
             if not deferred_paths then
                 local scanner = require("vault.scanner")
                 deferred_paths = scanner.paths()
             end
-            local pending = select(1, collect_pending_updates(deferred_paths, normalized))
+            local pending =
+                select(1, collect_pending_updates(deferred_paths, normalized, deferred_wikilinks))
             apply_renames(self, pending, normalized, silent)
         end, 1000)
         return 0
@@ -681,7 +769,7 @@ function Watcher:handle_renames(renames, silent, paths)
         local scanner = require("vault.scanner")
         paths = scanner.paths()
     end
-    local pending, total = collect_pending_updates(paths, normalized)
+    local pending, total = collect_pending_updates(paths, normalized, wikilinks_map)
     local watcher_conf = (config.options and config.options.watcher) or {}
     local prompt = watcher_conf.prompt_on_rename
     if prompt == nil then
