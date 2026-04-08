@@ -315,46 +315,24 @@ function Scanner.base_files(opts)
 end
 
 
---- Scan all vault notes for dash-prefixed lines (pure Lua — no Rust backend).
+--- Scan all vault notes for dash-prefixed lines using the Rust backend.
 --- Returns a map keyed by line content, each value is a Line object.
 --- @param opts? { ignore: boolean|string[] }
 --- @return table<string, vault.Line>
 function Scanner.lines(opts)
     local Line = require("vault.lines.line")
-    local paths = Scanner.paths(opts)
+    local core = require("vault_core")
+    local root, ignores = get_scan_args(opts)
 
-    local handle = progress.start("Scanning lines", "Reading files…")
+    local handle = progress.start("Scanning lines")
     local lines_map = {} --- @type table<string, vault.Line>
+    local raw_lines = core.lines(root, ignores)
 
-    for slug, note_data in pairs(paths) do
-        local path = note_data.path
-        local ok, file_lines = pcall(vim.fn.readfile, path)
-        if not ok then
-            log.debug("Skipped unreadable file: %s — %s", path, tostring(file_lines))
-        end
-        if ok then
-            for lnum, raw in ipairs(file_lines) do
-                -- Match lines starting with "- " (list items)
-                if raw:match("^%s*%- ") then
-                    local content = vim.trim(raw)
-                    if content ~= "" then
-                        local existing = lines_map[content]
-                        if existing then
-                            -- Add this source
-                            existing.data.sources[slug] = existing.data.sources[slug] or {}
-                            existing.data.sources[slug][lnum] = true
-                            existing.data.count = existing.data.count + 1
-                            existing.data.occurences = existing.data.occurences + 1
-                        else
-                            lines_map[content] = Line({
-                                content = content,
-                                sources = { [slug] = { [lnum] = true } },
-                            })
-                        end
-                    end
-                end
-            end
-        end
+    for content, line_data in pairs(raw_lines) do
+        lines_map[content] = Line({
+            content = line_data.content,
+            sources = line_data.sources,
+        })
     end
 
     local line_count = 0

@@ -61,10 +61,17 @@ struct FieldItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct LineItem {
+    line: usize,
+    content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ParsedNote {
     path: String,
     title: Option<String>,
     frontmatter: Option<serde_json::Value>,
+    lines: Vec<LineItem>,
     tasks: Vec<TaskItem>,
     wikilinks: Vec<LinkItem>,
     tags: Vec<TagItem>,
@@ -94,6 +101,7 @@ impl ParsedNote {
         let mut urls = Vec::new();
         let mut fields = Vec::new();
         let mut title = None;
+        let mut lines = Vec::new();
 
         let mut frontmatter_lines = Vec::new();
         let mut in_frontmatter = false;
@@ -149,6 +157,17 @@ impl ParsedNote {
                     content: caps[2].to_string(),
                     raw: line.clone(),
                 });
+            }
+
+            // Extract list-like lines (matches Lua's ^%s*%- )
+            if line.trim_start().starts_with("- ") {
+                let content = line.trim().to_string();
+                if !content.is_empty() {
+                    lines.push(LineItem {
+                        line: line_num,
+                        content,
+                    });
+                }
             }
 
             // Extract wikilinks (from stripped line to skip inline code)
@@ -209,6 +228,7 @@ impl ParsedNote {
             path: path.to_string_lossy().to_string(),
             title,
             frontmatter,
+            lines,
             tasks,
             wikilinks,
             tags,
@@ -277,6 +297,13 @@ struct WikilinkData {
 struct TaskData {
     description: String,
     status: String,
+    count: usize,
+    sources: HashMap<String, HashMap<usize, SourceOccurrence>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct LineData {
+    content: String,
     count: usize,
     sources: HashMap<String, HashMap<usize, SourceOccurrence>>,
 }
@@ -1203,6 +1230,42 @@ fn build_tasks_map(notes: &[ParsedNote], root: &str) -> HashMap<String, TaskData
     tasks_map
 }
 
+fn build_lines_map(notes: &[ParsedNote], root: &str) -> HashMap<String, LineData> {
+    let mut lines_map: HashMap<String, LineData> = HashMap::new();
+
+    for note in notes {
+        let slug = path_to_slug(&note.path, root);
+
+        for line_item in &note.lines {
+            let entry = lines_map
+                .entry(line_item.content.clone())
+                .or_insert_with(|| LineData {
+                    content: line_item.content.clone(),
+                    count: 0,
+                    sources: HashMap::new(),
+                });
+
+            entry.count += 1;
+            entry
+                .sources
+                .entry(slug.clone())
+                .or_insert_with(HashMap::new)
+                .insert(
+                    line_item.line,
+                    SourceOccurrence {
+                        lnum: line_item.line,
+                        line: None,
+                        col: Some(1),
+                        end_lnum: Some(line_item.line),
+                        end_col: None,
+                    },
+                );
+        }
+    }
+
+    lines_map
+}
+
 fn build_links_map(
     notes: &[ParsedNote],
     root: &str,
@@ -1602,6 +1665,20 @@ where
     lua.to_value(&data)
 }
 
+fn run_scanner_cached<T, F>(
+    lua: &Lua,
+    (root, ignores): (String, Vec<String>),
+    builder: F,
+) -> LuaResult<LuaValue>
+where
+    T: Serialize,
+    F: FnOnce(&[ParsedNote], &str) -> T,
+{
+    let notes = scan_all_notes_cached(&root, ignores);
+    let data = builder(&notes, &root);
+    lua.to_value(&data)
+}
+
 // 1. Define this helper function if you haven't already,
 //    or just use a closure in the module definition.
 fn vault_scan_raw(lua: &Lua, (root, ignores): (String, Vec<String>)) -> LuaResult<LuaValue> {
@@ -1638,19 +1715,25 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
     exports.set(
         "tags",
         lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
-            run_scanner(lua, (root, ignores), build_tags_map)
+            run_scanner_cached(lua, (root, ignores), build_tags_map)
         })?,
     )?;
     exports.set(
         "wikilinks",
         lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
-            run_scanner(lua, (root, ignores), build_wikilinks_map)
+            run_scanner_cached(lua, (root, ignores), build_wikilinks_map)
         })?,
     )?;
     exports.set(
         "tasks",
         lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
             run_scanner(lua, (root, ignores), build_tasks_map)
+        })?,
+    )?;
+    exports.set(
+        "lines",
+        lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
+            run_scanner(lua, (root, ignores), build_lines_map)
         })?,
     )?;
     exports.set(
@@ -1668,7 +1751,7 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
     exports.set(
         "properties",
         lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
-            run_scanner(lua, (root, ignores), build_properties_map)
+            run_scanner_cached(lua, (root, ignores), build_properties_map)
         })?,
     )?;
     exports.set(

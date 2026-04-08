@@ -744,7 +744,6 @@ function Note.get_methods(_)
     return methods
 end
 
-
 --- Move/rename note to a new path and update all wikilink references.
 ---
 --- This performs the filesystem rename, patches all [[wikilinks]] across the vault
@@ -758,7 +757,7 @@ end
 --- @param new_path string Absolute path for the new location.
 --- @param force? boolean Overwrite target if it exists (default false).
 --- @param verbose? boolean Show notification (default true).
---- @param opts? { update_links?: boolean, silent?: boolean } Extra options.
+--- @param opts? { update_links?: boolean, silent?: boolean, paths?: table<string, table>, wikilinks_map?: table<string, vault.Wikilink> } Extra options.
 ---   update_links: whether to patch wikilinks across the vault.
 ---     Defaults to `config.options.watcher.auto_update_links` (true).
 ---   silent: suppress watcher notifications (default false).
@@ -790,7 +789,11 @@ function Note:move(new_path, force, verbose, opts)
         local new_stat = uv.fs_stat(new_path)
         local same_inode = old_stat and new_stat and old_stat.ino == new_stat.ino
         if not same_inode then
-            error("Note:move() target already exists: " .. new_path .. " (use force=true to overwrite)")
+            error(
+                "Note:move() target already exists: "
+                    .. new_path
+                    .. " (use force=true to overwrite)"
+            )
         end
     end
 
@@ -812,7 +815,9 @@ function Note:move(new_path, force, verbose, opts)
     if update_links == nil then
         local watcher_conf = (config.options and config.options.watcher) or {}
         update_links = watcher_conf.auto_update_links
-        if update_links == nil then update_links = true end
+        if update_links == nil then
+            update_links = true
+        end
     end
 
     local patched = 0
@@ -821,7 +826,13 @@ function Note:move(new_path, force, verbose, opts)
         local watcher = Watcher()
         -- Disable prompts for programmatic moves and skip oil guard
         watcher:disable_oil_guard()
-        patched = watcher:handle_rename(old_path, new_path, opts.silent) or 0
+        patched = watcher:handle_rename(
+            old_path,
+            new_path,
+            opts.silent,
+            opts.paths,
+            opts.wikilinks_map
+        ) or 0
     end
 
     -- Update internal data to reflect the new path
@@ -831,10 +842,17 @@ function Note:move(new_path, force, verbose, opts)
 
     if verbose ~= false then
         local msg = update_links
-            and string.format("[vault] Moved note: %s -> %s (%d files patched)",
-                utils.path_to_slug(old_path), self.data.slug, patched)
-            or string.format("[vault] Moved note: %s -> %s (wikilink update skipped)",
-                utils.path_to_slug(old_path), self.data.slug)
+                and string.format(
+                    "[vault] Moved note: %s -> %s (%d files patched)",
+                    utils.path_to_slug(old_path),
+                    self.data.slug,
+                    patched
+                )
+            or string.format(
+                "[vault] Moved note: %s -> %s (wikilink update skipped)",
+                utils.path_to_slug(old_path),
+                self.data.slug
+            )
         log.info(msg)
     end
 
