@@ -54,6 +54,7 @@ coverage/
 
 # Test dependencies (auto-cloned by minimal_init.lua)
 .tests/
+tests/.artifacts/
 
 # Tooling caches
 .cache/
@@ -73,9 +74,12 @@ coverage/
 VAULT_PROCESS_BUGS.md
 PLAN.md
 BACKLOG.md
+AGENTS.md
+progress.txt
 
 # Local scratch lua files
 lua/vault/_*.lua
 
 # Benchmark fixture vaults (generated, not committed)
 benchmarks/fixture-vault-*/
+benchmarks/*.json
