@@ -43,6 +43,13 @@ function M.counted(opts)
     local get_count = opts.get_count
     local get_ordinal = opts.get_ordinal
     local name_width = opts.name_width or 29
+    local displayer = entry_display.create({
+        separator = " ",
+        items = {
+            { width = name_width },
+            { remaining = true },
+        },
+    })
 
     --- @param entry table
     --- @return table
@@ -54,17 +61,11 @@ function M.counted(opts)
         local name_hl = "TelescopeResultsNormal"
         if colors then
             local i = math.min(math.floor(count / 2), steps)
-            if i == 0 then i = 1 end
+            if i == 0 then
+                i = 1
+            end
             name_hl = hl_name .. tostring(i)
         end
-
-        local displayer = entry_display.create({
-            separator = " ",
-            items = {
-                { width = name_width },
-                { remaining = true },
-            },
-        })
 
         return displayer({
             { name, name_hl },

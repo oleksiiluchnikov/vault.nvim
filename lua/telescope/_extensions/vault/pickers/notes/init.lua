@@ -18,6 +18,7 @@ return function(opts)
     local vault_layouts = require("telescope._extensions.vault.layouts")
     local vault_hl = require("telescope._extensions.vault.highlights")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
+    local picker_cache = require("telescope._extensions.vault.pickers.cache")
     local note_stats = require("telescope._extensions.vault.pickers.notes.stats")
     local note_columns = require("telescope._extensions.vault.pickers.notes.columns")
 
@@ -25,14 +26,40 @@ return function(opts)
     opts.sort_by = opts.sort_by or "mtime"
     opts.prompt_title = opts.prompt_title or opts.sort_by
 
+    local prepared = nil
     -- When no notes provided, use incremental cached scan for both paths
     -- and wikilinks in a single pass. First open ~1.6s, subsequent <100ms.
     local wikilinks_map = opts._wikilinks_map
     if not opts.notes and not wikilinks_map then
-        local Scanner = require("vault.scanner")
-        local raw_paths, wl_map = Scanner.paths_and_wikilinks_cached()
-        opts.notes = require("vault.notes").from_paths(raw_paths)
-        wikilinks_map = wl_map
+        if opts.sort_by == "mtime" then
+            prepared = picker_cache.get_or_set("notes.default", function()
+                local Scanner = require("vault.scanner")
+                local raw_paths, wl_map = Scanner.paths_and_wikilinks_cached()
+                local notes = require("vault.notes").from_paths(raw_paths)
+                local results = notes:list()
+                local link_counts = note_stats.collect(results, wl_map)
+
+                local ftime = {} --- @type table<string, integer>
+                for _, note in ipairs(results) do
+                    ftime[note.data.path] = vim.fn.getftime(note.data.path)
+                end
+                table.sort(results, function(a, b)
+                    return ftime[a.data.path] < ftime[b.data.path]
+                end)
+
+                return {
+                    link_counts = link_counts,
+                    notes = notes,
+                    results = results,
+                }
+            end)
+            opts.notes = prepared.notes
+        else
+            local Scanner = require("vault.scanner")
+            local raw_paths, wl_map = Scanner.paths_and_wikilinks_cached()
+            opts.notes = require("vault.notes").from_paths(raw_paths)
+            wikilinks_map = wl_map
+        end
     else
         opts.notes = opts.notes or require("vault.notes")()
         -- Load wikilinks once (no suggestions — picker only needs counts)
@@ -41,7 +68,7 @@ return function(opts)
         end
     end
 
-    local results = opts.notes:list()
+    local results = prepared and prepared.results or opts.notes:list()
     if next(results) == nil then
         log.info("No notes found")
         return
@@ -54,7 +81,8 @@ return function(opts)
     local hl_name = "VaultNoteContent"
     local colors = vault_hl.setup(hl_name, steps, { "Boolean", "Comment", "Normal", "String" })
 
-    local link_counts = note_stats.collect(results, wikilinks_map)
+    local link_counts = prepared and prepared.link_counts
+        or note_stats.collect(results, wikilinks_map)
     local columns = note_columns.resolve(opts.columns)
     local render_ctx = {
         colors = colors,
@@ -92,7 +120,7 @@ return function(opts)
             local bc = b.data.created or ""
             return ac < bc
         end)
-    elseif opts.sort_by == "mtime" then
+    elseif opts.sort_by == "mtime" and not prepared then
         -- Pre-compute file modification timestamps to avoid O(n log n) stat()
         -- syscalls inside the comparator (getftime is a syscall per call).
         local ftime = {} --- @type table<string, integer>

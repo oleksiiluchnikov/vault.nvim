@@ -17,15 +17,133 @@ return function(opts)
     local sorters = require("telescope.sorters")
     local vault_previewers = require("telescope._extensions.vault.previewers")
     local layouts = require("telescope._extensions.vault.layouts")
-    local VaultWikilinks = require("vault.wikilinks")
-    local wikilinks = opts.wikilinks or VaultWikilinks()
+    local picker_cache = require("telescope._extensions.vault.pickers.cache")
     local vault_state = require("vault.core.state")
     local utils = require("vault.utils")
     local vault_hl = require("telescope._extensions.vault.highlights")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
     local wl_actions = require("telescope._extensions.vault.pickers.wikilinks.actions")
 
-    local results = opts._results or wikilinks:list() or {}
+    --- @param items any[]
+    --- @return any[]
+    local function copy_list(items)
+        local copy = {}
+        for i = 1, #items do
+            copy[i] = items[i]
+        end
+        return copy
+    end
+
+    --- @param results vault.Wikilink[]
+    --- @return table<vault.Wikilink, { backlinks_count: integer, filename: string|nil, resolved: boolean }>, integer
+    local function build_wikilink_meta(results)
+        local meta = {}
+        local slug_max = 0
+
+        for _, wikilink in ipairs(results) do
+            local slug = (wikilink.data and wikilink.data.slug) or ""
+            if #slug > slug_max then
+                slug_max = #slug
+            end
+
+            local resolved = type(wikilink.data.target) == "string" and wikilink.data.target ~= ""
+            local filename = nil
+            if resolved then
+                filename = utils.slug_to_path(wikilink.data.target)
+            else
+                local first_source_slug = type(wikilink.data.sources) == "table"
+                        and next(wikilink.data.sources)
+                    or nil
+                if first_source_slug then
+                    filename = utils.slug_to_path(first_source_slug)
+                end
+            end
+
+            meta[wikilink] = {
+                backlinks_count = type(wikilink.data.sources) == "table" and vim.tbl_count(
+                    wikilink.data.sources
+                ) or 0,
+                filename = filename,
+                resolved = resolved,
+            }
+        end
+
+        return meta, slug_max
+    end
+
+    --- @param results vault.Wikilink[]
+    --- @param meta table<vault.Wikilink, { backlinks_count: integer, filename: string|nil, resolved: boolean }>
+    --- @return vault.Wikilink[]
+    local function sort_by_slug(results, meta)
+        local sorted = copy_list(results)
+        table.sort(sorted, function(a, b)
+            local a_slug = (a.data and a.data.slug) or ""
+            local b_slug = (b.data and b.data.slug) or ""
+            if a_slug == b_slug then
+                return (meta[a] and meta[a].backlinks_count or 0)
+                    > (meta[b] and meta[b].backlinks_count or 0)
+            end
+            return a_slug < b_slug
+        end)
+        return sorted
+    end
+
+    --- @param results vault.Wikilink[]
+    --- @param meta table<vault.Wikilink, { backlinks_count: integer, filename: string|nil, resolved: boolean }>
+    --- @param show_resolved boolean
+    --- @return vault.Wikilink[]
+    local function sort_by_resolved(results, meta, show_resolved)
+        local sorted = copy_list(results)
+        table.sort(sorted, function(a, b)
+            local ra = meta[a] and meta[a].resolved and 1 or 0
+            local rb = meta[b] and meta[b].resolved and 1 or 0
+            if ra == rb then
+                return ((a.data and a.data.slug) or "") < ((b.data and b.data.slug) or "")
+            end
+            if show_resolved then
+                return ra > rb
+            end
+            return ra < rb
+        end)
+        return sorted
+    end
+
+    local prepared = nil
+    local wikilinks = opts.wikilinks
+    local results = opts._results
+    local meta
+    local slug_max
+
+    if not wikilinks and not results and (opts.sort_by == "resolved" or opts.sort_by == "slug") then
+        prepared = picker_cache.get_or_set("wikilinks.default", function()
+            local collection = require("vault.wikilinks")()
+            local prepared_results = collection:list() or {}
+            local prepared_meta, prepared_slug_max = build_wikilink_meta(prepared_results)
+
+            return {
+                meta = prepared_meta,
+                resolved_first = sort_by_resolved(prepared_results, prepared_meta, true),
+                slug_max = prepared_slug_max,
+                slug_sorted = sort_by_slug(prepared_results, prepared_meta),
+                unresolved_first = sort_by_resolved(prepared_results, prepared_meta, false),
+                wikilinks = collection,
+            }
+        end)
+        wikilinks = prepared.wikilinks
+        meta = prepared.meta
+        slug_max = prepared.slug_max
+        if opts.sort_by == "slug" then
+            results = copy_list(prepared.slug_sorted)
+        elseif opts.show_resolved then
+            results = copy_list(prepared.resolved_first)
+        else
+            results = copy_list(prepared.unresolved_first)
+        end
+    else
+        wikilinks = wikilinks or require("vault.wikilinks")()
+        results = results or wikilinks:list() or {}
+        meta, slug_max = build_wikilink_meta(results)
+    end
 
     -- Early exit if empty
     if next(results) == nil then
@@ -40,30 +158,30 @@ return function(opts)
     local hl_base = "VaultWikilink"
     local colors = vault_hl.setup(hl_base, steps, { "Boolean", "Comment", "Normal", "String" })
 
-    -- Compute column widths
-    local slug_max = 0
-    for _, w in ipairs(results) do
-        local slug = (w.data and w.data.slug) or ""
-        if #slug > slug_max then
-            slug_max = #slug
-        end
-    end
+    local displayer = entry_display.create({
+        separator = " ",
+        items = {
+            { width = 2 }, -- mark (resolved/unresolved)
+            { width = 4 }, -- source count
+            { width = slug_max + 2 },
+            { remaining = true },
+        },
+    })
 
     -- Make the display for each entry
     local make_display = function(entry)
         local wikilink = (entry and entry.value) and entry.value or entry
+        local info = meta[wikilink] or { backlinks_count = 0, resolved = false }
         local slug = wikilink.data and wikilink.data.slug or "<unknown>"
         local context = wikilink.data and (wikilink.data.context or wikilink.data.excerpt or "")
             or ""
 
-        local resolved = wikilink:is_resolved_on_disk()
+        local resolved = info.resolved
 
         local mark = resolved and "✓" or "○"
         local mark_hl = resolved and "TelescopeResultsDiffAdd" or "TelescopeResultsDiffChange"
 
-        local backlinks_count = (wikilink.data and type(wikilink.data.sources) == "table")
-                and vim.tbl_count(wikilink.data.sources)
-            or 0
+        local backlinks_count = info.backlinks_count
 
         local slug_hl = resolved and "TelescopeResultsNormal" or "TelescopeResultsComment"
         if resolved and colors then
@@ -71,16 +189,6 @@ return function(opts)
             local idx = math.min(math.max(1, math.floor(chars / 16)), steps)
             slug_hl = hl_base .. tostring(idx)
         end
-
-        local displayer = entry_display.create({
-            separator = " ",
-            items = {
-                { width = 2 }, -- mark (resolved/unresolved)
-                { width = 4 }, -- source count
-                { width = slug_max + 2 },
-                { remaining = true },
-            },
-        })
 
         return displayer({
             { mark, mark_hl },
@@ -91,31 +199,20 @@ return function(opts)
     end
 
     local entry_maker = function(entry)
+        local info = meta[entry] or { filename = nil }
         local slug = (entry.data and entry.data.slug) or ""
         local context = (entry.data and (entry.data.context or entry.data.excerpt or "")) or ""
-
-        local filename = nil
-        if entry:is_resolved_on_disk() then
-            filename = utils.slug_to_path(entry.data.target)
-        else
-            if entry.data and type(entry.data.sources) == "table" then
-                local first_source_slug = next(entry.data.sources)
-                if first_source_slug then
-                    filename = utils.slug_to_path(first_source_slug)
-                end
-            end
-        end
 
         return {
             value = entry,
             ordinal = slug .. " " .. context,
             display = make_display,
-            filename = filename,
+            filename = info.filename,
         }
     end
 
     -- Sorting: support resolved, slug, path, mtime
-    if opts.sort_by == "slug" then
+    if opts.sort_by == "slug" and not prepared then
         table.sort(results, function(a, b)
             return (a.data.slug or "") < (b.data.slug or "")
         end)
@@ -133,10 +230,10 @@ return function(opts)
             end
             return a_m < b_m
         end)
-    elseif opts.sort_by == "resolved" then
+    elseif opts.sort_by == "resolved" and not prepared then
         table.sort(results, function(a, b)
-            local ra = a:is_resolved_on_disk() and 1 or 0
-            local rb = b:is_resolved_on_disk() and 1 or 0
+            local ra = meta[a] and meta[a].resolved and 1 or 0
+            local rb = meta[b] and meta[b].resolved and 1 or 0
             if ra == rb then
                 return (a.data.slug or "") < (b.data.slug or "")
             end

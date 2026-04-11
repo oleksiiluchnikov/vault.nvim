@@ -13,6 +13,11 @@ local PropertyValue = require("vault.properties.property.value")
 local log = require("vault.log").scope("scanner")
 local progress = require("vault.progress")
 local PROCESS_SAVE_DEPTH_KEY = "vault.process_save_depth"
+local PATHS_CACHE_KEY = "cache.notes.paths"
+local SLUGS_CACHE_KEY = "cache.notes.slugs"
+local BASENAME_INDEX_CACHE_KEY = "cache.notes.basename_index"
+local PATHS_AND_WIKILINKS_CACHE_KEY = "cache.notes.paths_and_wikilinks_cached"
+local PICKER_CACHE_KEY = "cache.telescope._extensions.vault.pickers"
 
 ---@class vault.Scanner
 ---@field paths fun(opts?: { ignore: boolean|string[] }): table<string, table>
@@ -29,10 +34,22 @@ local PROCESS_SAVE_DEPTH_KEY = "vault.process_save_depth"
 ---@type vault.Scanner
 local Scanner = {}
 
+---@class vault.ScannerCachedPathsAndWikilinks
+---@field generation integer
+---@field paths table<string, table>
+---@field wikilinks table<string, vault.Wikilink>
+
 function Scanner.invalidate_notes_cache()
-    state.set_global_key("cache.notes.paths", nil)
-    state.set_global_key("cache.notes.slugs", nil)
-    state.set_global_key("cache.notes.basename_index", nil)
+    state.set_global_key(PATHS_CACHE_KEY, nil)
+    state.set_global_key(SLUGS_CACHE_KEY, nil)
+    state.set_global_key(BASENAME_INDEX_CACHE_KEY, nil)
+    state.set_global_key(PATHS_AND_WIKILINKS_CACHE_KEY, nil)
+    state.set_global_key(PICKER_CACHE_KEY, nil)
+    state.set_global_key("notes", nil)
+    state.set_global_key("tags", nil)
+    state.set_global_key("properties", nil)
+    state.set_global_key("dirs", nil)
+    state.set_global_key("wikilinks", nil)
 end
 
 --- Helper to determine root and ignore patterns based on options
@@ -57,6 +74,104 @@ local function get_scan_args(opts)
     return root, ignores
 end
 
+---@param cached_wikilinks? table<string, vault.Wikilink>
+---@return table<string, vault.Wikilink>
+local function index_cached_wikilinks_by_stem(cached_wikilinks)
+    ---@type table<string, vault.Wikilink>
+    local cached_by_stem = {}
+    for _, wl in pairs(cached_wikilinks or {}) do
+        if type(wl) == "table" and type(wl.data) == "table" and type(wl.data.stem) == "string" then
+            cached_by_stem[wl.data.stem] = wl
+        end
+    end
+
+    return cached_by_stem
+end
+
+---@param wikilinks_map table<string, vault.Wikilink>
+---@param cached_by_stem table<string, vault.Wikilink>
+---@param stem string
+---@param wikilink_data table
+---@return boolean
+local function upsert_cached_wikilink(wikilinks_map, cached_by_stem, stem, wikilink_data)
+    local wl = cached_by_stem[stem]
+    if wl then
+        wl.data.stem = wikilink_data.stem
+        wl.data.count = wikilink_data.count
+        wl.data.embedded = wikilink_data.embedded
+        wl.data.sources = wikilink_data.sources
+        wl.data.suggestions = {}
+        wikilinks_map[wl.data.slug] = wl
+        return true
+    end
+
+    local ok, new_wl = pcall(Wikilink, {
+        raw = "[[" .. stem .. "]]",
+        sources = wikilink_data.sources,
+    })
+
+    if not ok then
+        log.debug("Skipped malformed wikilink: [[%s]] — %s", stem, tostring(new_wl))
+        return false
+    end
+
+    new_wl.data.stem = wikilink_data.stem
+    new_wl.data.count = wikilink_data.count
+    new_wl.data.embedded = wikilink_data.embedded
+    new_wl.data.suggestions = {}
+    wikilinks_map[new_wl.data.slug] = new_wl
+    cached_by_stem[new_wl.data.stem] = new_wl
+    return true
+end
+
+---@param raw_wikilinks table<string, table>
+---@param cached_wikilinks? table<string, vault.Wikilink>
+---@return table<string, vault.Wikilink>
+local function wrap_cached_wikilinks(raw_wikilinks, cached_wikilinks)
+    ---@type table<string, vault.Wikilink>
+    local wikilinks_map = {}
+    local cached_by_stem = index_cached_wikilinks_by_stem(cached_wikilinks)
+
+    for stem, wikilink_data in pairs(raw_wikilinks) do
+        upsert_cached_wikilink(wikilinks_map, cached_by_stem, stem, wikilink_data)
+    end
+
+    return wikilinks_map
+end
+
+---@param cached vault.ScannerCachedPathsAndWikilinks
+---@param result table
+---@return table<string, table>, table<string, vault.Wikilink>
+local function apply_paths_and_wikilinks_delta(cached, result)
+    local paths = cached.paths or {}
+    for _, slug in ipairs(result.paths_removed or {}) do
+        paths[slug] = nil
+    end
+    for slug, info in pairs(result.paths_updated or {}) do
+        paths[slug] = info
+    end
+
+    local wikilinks = cached.wikilinks or {}
+    local cached_by_stem = index_cached_wikilinks_by_stem(wikilinks)
+    for _, stem in ipairs(result.wikilinks_removed or {}) do
+        local existing = cached_by_stem[stem]
+        if existing and existing.data and existing.data.slug then
+            wikilinks[existing.data.slug] = nil
+        else
+            wikilinks[stem] = nil
+        end
+        cached_by_stem[stem] = nil
+    end
+    for stem, wikilink_data in pairs(result.wikilinks_updated or {}) do
+        upsert_cached_wikilink(wikilinks, cached_by_stem, stem, wikilink_data)
+    end
+
+    cached.generation = tonumber(result.generation) or cached.generation
+    cached.paths = paths
+    cached.wikilinks = wikilinks
+    return paths, wikilinks
+end
+
 --- @param opts? { ignore: boolean|string[] }
 --- @return table<string, table>
 function Scanner.paths(opts)
@@ -65,7 +180,7 @@ function Scanner.paths(opts)
 
     local save_depth = tonumber(state.get_global_key(PROCESS_SAVE_DEPTH_KEY) or 0) or 0
     if save_depth > 0 then
-        local cached = state.get_global_key("cache.notes.paths")
+        local cached = state.get_global_key(PATHS_CACHE_KEY)
         if type(cached) == "table" then
             log.debug("Scanning notes: using cached paths during process save")
             return cached
@@ -76,11 +191,13 @@ function Scanner.paths(opts)
     local map = core.paths(root, ignores)
 
     local count = 0
-    for _ in pairs(map) do count = count + 1 end
+    for _ in pairs(map) do
+        count = count + 1
+    end
     handle:finish(("%d notes"):format(count))
 
     if not opts then
-        state.set_global_key("cache.notes.paths", map)
+        state.set_global_key(PATHS_CACHE_KEY, map)
     end
 
     return map
@@ -94,11 +211,13 @@ function Scanner.slugs()
     local handle = progress.start("Scanning slugs")
     local slugs = core.slugs(root, ignores)
     local count = 0
-    for _ in pairs(slugs) do count = count + 1 end
+    for _ in pairs(slugs) do
+        count = count + 1
+    end
     handle:finish(("%d slugs"):format(count))
 
-    state.set_global_key("cache.notes.slugs", slugs)
-    state.set_global_key("cache.notes.basename_index", nil)
+    state.set_global_key(SLUGS_CACHE_KEY, slugs)
+    state.set_global_key(BASENAME_INDEX_CACHE_KEY, nil)
     return slugs
 end
 
@@ -124,7 +243,9 @@ function Scanner.tags(opts)
     end
 
     local count = 0
-    for _ in pairs(tags_map) do count = count + 1 end
+    for _ in pairs(tags_map) do
+        count = count + 1
+    end
     handle:finish(("%d tags"):format(count))
 
     return tags_map
@@ -165,7 +286,9 @@ function Scanner.wikilinks(opts)
     end
 
     local wl_count = 0
-    for _ in pairs(wikilinks_map) do wl_count = wl_count + 1 end
+    for _ in pairs(wikilinks_map) do
+        wl_count = wl_count + 1
+    end
     handle:finish(("%d wikilinks"):format(wl_count))
 
     return wikilinks_map
@@ -192,7 +315,9 @@ function Scanner.tasks(opts)
     end
 
     local task_count = 0
-    for _ in pairs(tasks_map) do task_count = task_count + 1 end
+    for _ in pairs(tasks_map) do
+        task_count = task_count + 1
+    end
     handle:finish(("%d tasks"):format(task_count))
 
     return tasks_map
@@ -207,7 +332,9 @@ function Scanner.links(opts)
     local handle = progress.start("Scanning links")
     local result = core.links(root, ignores)
     local count = 0
-    for _ in pairs(result) do count = count + 1 end
+    for _ in pairs(result) do
+        count = count + 1
+    end
     handle:finish(("%d links"):format(count))
 
     return result
@@ -222,7 +349,9 @@ function Scanner.fields(opts)
     local handle = progress.start("Scanning fields")
     local result = core.fields(root, ignores)
     local count = 0
-    for _ in pairs(result) do count = count + 1 end
+    for _ in pairs(result) do
+        count = count + 1
+    end
     handle:finish(("%d fields"):format(count))
 
     return result
@@ -260,7 +389,9 @@ function Scanner.properties(opts)
     end
 
     local prop_count = 0
-    for _ in pairs(properties_map) do prop_count = prop_count + 1 end
+    for _ in pairs(properties_map) do
+        prop_count = prop_count + 1
+    end
     handle:finish(("%d properties"):format(prop_count))
 
     return properties_map
@@ -286,7 +417,9 @@ function Scanner.dirs(opts)
     end
 
     local dir_count = 0
-    for _ in pairs(dirs_map) do dir_count = dir_count + 1 end
+    for _ in pairs(dirs_map) do
+        dir_count = dir_count + 1
+    end
     handle:finish(("%d directories"):format(dir_count))
 
     state.set_global_key("dirs", dirs_map)
@@ -314,7 +447,6 @@ function Scanner.base_files(opts)
     return raw
 end
 
-
 --- Scan all vault notes for dash-prefixed lines using the Rust backend.
 --- Returns a map keyed by line content, each value is a Line object.
 --- @param opts? { ignore: boolean|string[] }
@@ -336,7 +468,9 @@ function Scanner.lines(opts)
     end
 
     local line_count = 0
-    for _ in pairs(lines_map) do line_count = line_count + 1 end
+    for _ in pairs(lines_map) do
+        line_count = line_count + 1
+    end
     handle:finish(("%d unique lines"):format(line_count))
 
     return lines_map
@@ -354,29 +488,12 @@ function Scanner.wikilinks_no_suggest(opts)
     local handle = progress.start("Scanning wikilinks (no suggest)")
     local raw_wikilinks = core.wikilinks_no_suggest(root, ignores)
 
-    local wikilinks_map = {}
-    for stem, wikilink_data in pairs(raw_wikilinks) do
-        local ok, wl = pcall(Wikilink, {
-            raw = "[[" .. stem .. "]]",
-            sources = wikilink_data.sources,
-        })
-
-        if not ok then
-            log.debug("Skipped malformed wikilink: [[%s]] — %s", stem, tostring(wl))
-            goto continue
-        end
-
-        wl.data.stem = wikilink_data.stem
-        wl.data.count = wikilink_data.count
-        wl.data.embedded = wikilink_data.embedded
-        wl.data.suggestions = {}
-
-        wikilinks_map[wl.data.slug] = wl
-        ::continue::
-    end
+    local wikilinks_map = wrap_cached_wikilinks(raw_wikilinks, cached and cached.wikilinks or nil)
 
     local wl_count = 0
-    for _ in pairs(wikilinks_map) do wl_count = wl_count + 1 end
+    for _ in pairs(wikilinks_map) do
+        wl_count = wl_count + 1
+    end
     handle:finish(("%d wikilinks"):format(wl_count))
 
     return wikilinks_map
@@ -399,7 +516,9 @@ function Scanner.paths_and_wikilinks(opts)
 
     -- Count paths
     local path_count = 0
-    for _ in pairs(raw_paths) do path_count = path_count + 1 end
+    for _ in pairs(raw_paths) do
+        path_count = path_count + 1
+    end
 
     -- Wrap wikilinks in Wikilink objects
     local wikilinks_map = {}
@@ -424,7 +543,9 @@ function Scanner.paths_and_wikilinks(opts)
     end
 
     local wl_count = 0
-    for _ in pairs(wikilinks_map) do wl_count = wl_count + 1 end
+    for _ in pairs(wikilinks_map) do
+        wl_count = wl_count + 1
+    end
     handle:finish(("%d notes, %d wikilinks"):format(path_count, wl_count))
 
     return raw_paths, wikilinks_map
@@ -438,40 +559,77 @@ end
 function Scanner.paths_and_wikilinks_cached(opts)
     local core = require("vault_core")
     local root, ignores = get_scan_args(opts)
+    local cached = not opts and state.get_global_key(PATHS_AND_WIKILINKS_CACHE_KEY) or nil
+    local known_generation = type(cached) == "table" and cached.generation or nil
 
     local handle = progress.start("Scanning paths + wikilinks (cached)")
-    local result = core.paths_and_wikilinks_cached(root, ignores)
+    local result = core.paths_and_wikilinks_cached(root, ignores, known_generation)
+
+    if type(result) == "table" and result.changed == false then
+        if type(cached) == "table" and cached.paths and cached.wikilinks then
+            local path_count = 0
+            for _ in pairs(cached.paths) do
+                path_count = path_count + 1
+            end
+            local wl_count = 0
+            for _ in pairs(cached.wikilinks) do
+                wl_count = wl_count + 1
+            end
+            handle:finish(
+                ("%d notes, %d wikilinks (cached Lua result)"):format(path_count, wl_count)
+            )
+            return cached.paths, cached.wikilinks
+        end
+
+        error("paths_and_wikilinks_cached returned unchanged result without a Lua cache")
+    end
+
+    if type(result) == "table" and result.changed == true and result.full == false then
+        if type(cached) ~= "table" or not cached.paths or not cached.wikilinks then
+            error("paths_and_wikilinks_cached returned delta result without a Lua cache")
+        end
+
+        local paths, wikilinks = apply_paths_and_wikilinks_delta(cached, result)
+        local path_count = 0
+        for _ in pairs(paths) do
+            path_count = path_count + 1
+        end
+        local wl_count = 0
+        for _ in pairs(wikilinks) do
+            wl_count = wl_count + 1
+        end
+        handle:finish(("%d notes, %d wikilinks (delta)"):format(path_count, wl_count))
+
+        if not opts then
+            state.set_global_key(PATHS_AND_WIKILINKS_CACHE_KEY, cached)
+        end
+
+        return paths, wikilinks
+    end
 
     local raw_paths = result.paths or {}
     local raw_wikilinks = result.wikilinks or {}
 
     local path_count = 0
-    for _ in pairs(raw_paths) do path_count = path_count + 1 end
-
-    local wikilinks_map = {}
-    for stem, wikilink_data in pairs(raw_wikilinks) do
-        local ok, wl = pcall(Wikilink, {
-            raw = "[[" .. stem .. "]]",
-            sources = wikilink_data.sources,
-        })
-
-        if not ok then
-            log.debug("Skipped malformed wikilink: [[%s]] — %s", stem, tostring(wl))
-            goto continue
-        end
-
-        wl.data.stem = wikilink_data.stem
-        wl.data.count = wikilink_data.count
-        wl.data.embedded = wikilink_data.embedded
-        wl.data.suggestions = {}
-
-        wikilinks_map[wl.data.slug] = wl
-        ::continue::
+    for _ in pairs(raw_paths) do
+        path_count = path_count + 1
     end
 
+    local wikilinks_map = wrap_cached_wikilinks(raw_wikilinks, cached and cached.wikilinks or nil)
+
     local wl_count = 0
-    for _ in pairs(wikilinks_map) do wl_count = wl_count + 1 end
+    for _ in pairs(wikilinks_map) do
+        wl_count = wl_count + 1
+    end
     handle:finish(("%d notes, %d wikilinks"):format(path_count, wl_count))
+
+    if not opts then
+        state.set_global_key(PATHS_AND_WIKILINKS_CACHE_KEY, {
+            generation = tonumber(result.generation) or 0,
+            paths = raw_paths,
+            wikilinks = wikilinks_map,
+        })
+    end
 
     return raw_paths, wikilinks_map
 end
@@ -482,6 +640,7 @@ end
 --- @return nil
 function Scanner.clear_rust_cache()
     local ok, core = pcall(require, "vault_core")
+    state.set_global_key(PATHS_AND_WIKILINKS_CACHE_KEY, nil)
     if ok and core.clear_cache then
         core.clear_cache()
     end

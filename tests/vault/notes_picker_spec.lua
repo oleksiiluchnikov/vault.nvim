@@ -35,6 +35,8 @@ describe("vault notes picker", function()
             highlights = package.loaded["telescope._extensions.vault.highlights"],
             filter = package.loaded["telescope._extensions.vault.on_input_filter"],
             stats = package.loaded["telescope._extensions.vault.pickers.notes.stats"],
+            notes = package.loaded["vault.notes"],
+            scanner = package.loaded["vault.scanner"],
         }
         package.loaded[MODULE] = nil
         package.loaded[COLUMNS_MODULE] = nil
@@ -56,6 +58,8 @@ describe("vault notes picker", function()
         package.loaded["telescope._extensions.vault.highlights"] = originals.highlights
         package.loaded["telescope._extensions.vault.on_input_filter"] = originals.filter
         package.loaded["telescope._extensions.vault.pickers.notes.stats"] = originals.stats
+        package.loaded["vault.notes"] = originals.notes
+        package.loaded["vault.scanner"] = originals.scanner
     end)
 
     local function stub_deps(config)
@@ -64,8 +68,15 @@ describe("vault notes picker", function()
             finder = nil,
         }
 
+        local state_store = {}
+
         package.loaded["vault.core.state"] = {
-            set_global_key = function() end,
+            get_global_key = function(key)
+                return state_store[key]
+            end,
+            set_global_key = function(key, value)
+                state_store[key] = value
+            end,
         }
         package.loaded["vault.config"] = {
             options = config or {},
@@ -224,5 +235,56 @@ describe("vault notes picker", function()
 
         assert.are.equal(1, #captured.items)
         assert.are.equal("Readable Title", cells[1][1])
+    end)
+
+    it("reuses cached default note prep between openings", function()
+        stub_deps({ root = "/tmp/vault" })
+
+        local scanner_calls = 0
+        local notes_from_paths_calls = 0
+        local stats_collect_calls = 0
+
+        package.loaded["vault.scanner"] = {
+            paths_and_wikilinks_cached = function()
+                scanner_calls = scanner_calls + 1
+                return {
+                    [sample_note().data.slug] = sample_note().data,
+                }, {}
+            end,
+        }
+        package.loaded["vault.notes"] = {
+            from_paths = function(raw_paths)
+                notes_from_paths_calls = notes_from_paths_calls + 1
+                return {
+                    list = function()
+                        return {
+                            {
+                                data = raw_paths[sample_note().data.slug],
+                            },
+                        }
+                    end,
+                }
+            end,
+        }
+        package.loaded["telescope._extensions.vault.pickers.notes.stats"] = {
+            collect = function()
+                stats_collect_calls = stats_collect_calls + 1
+                return {
+                    [sample_note().data.slug] = {
+                        outlinks = 0,
+                        inlinks = 0,
+                        dangling = 0,
+                    },
+                }
+            end,
+        }
+
+        local picker = require(MODULE)
+        picker({})
+        picker({})
+
+        assert.are.equal(1, scanner_calls)
+        assert.are.equal(1, notes_from_paths_calls)
+        assert.are.equal(1, stats_collect_calls)
     end)
 end)
