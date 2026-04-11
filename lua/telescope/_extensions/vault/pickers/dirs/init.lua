@@ -3,53 +3,90 @@
 --- @param opts? table
 --- @return Picker
 return function(opts)
-    local dirs = require("vault.dirs")()
-    local utils = require("vault.utils")
     local finders = require("telescope.finders")
     local sorters = require("telescope.sorters")
     local vault_state = require("vault.core.state")
     local Scanner = require("vault.scanner")
     local pickers = require("telescope.pickers")
     local vault_layouts = require("telescope._extensions.vault.layouts")
+    local picker_cache = require("telescope._extensions.vault.pickers.cache")
     local vault_hl = require("telescope._extensions.vault.highlights")
     local vault_mappings = require("telescope._extensions.vault.mappings")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
 
+    --- @param items any[]
+    --- @return any[]
+    local function copy_list(items)
+        local copy = {}
+        for i = 1, #items do
+            copy[i] = items[i]
+        end
+        return copy
+    end
+
+    --- @param slugs table<string, string>
+    --- @param dir_counts table<string, integer>
+    --- @return nil
+    local function count_notes_per_dir(slugs, dir_counts)
+        for slug, _ in pairs(slugs) do
+            local start = 1
+            while true do
+                local slash = string.find(slug, "/", start, true)
+                if not slash then
+                    break
+                end
+
+                local relpath = string.sub(slug, 1, slash - 1)
+                if dir_counts[relpath] ~= nil then
+                    dir_counts[relpath] = dir_counts[relpath] + 1
+                end
+                start = slash + 1
+            end
+        end
+    end
+
     opts = opts or {}
 
-    local dirs_list = dirs:list()
+    local prepared = picker_cache.get_or_set("dirs.default", function()
+        local list = require("vault.dirs")():list()
+        local counts = {} --- @type table<string, integer>
+        for _, d in ipairs(list) do
+            counts[d.data.relpath] = 0
+        end
+        count_notes_per_dir(Scanner.slugs(), counts)
+
+        return {
+            by_count = list,
+            dir_counts = counts,
+        }
+    end)
+
+    local dirs_list = copy_list(prepared.by_count)
     if next(dirs_list) == nil then
         require("vault.log").scope("telescope").info("No directories found in vault")
     end
 
     local ui_height, _ = vault_layouts.ui_size()
     local steps = math.min(ui_height, vim.tbl_count(dirs_list))
-    local hl_name = dirs.class.name
+    local hl_name = (dirs_list[1] and dirs_list[1].class and dirs_list[1].class.name) or "VaultDirs"
     local colors = vault_hl.setup(hl_name, steps, { "Comment", "Normal", "String" })
 
-    local slugs = Scanner.slugs()
-
-    -- Pre-compute counts per directory for display + sorting
-    local dir_counts = {} --- @type table<string, integer>
-    for _, d in ipairs(dirs_list) do
-        local rp = d.data.relpath
-        local count = 0
-        for slug, _ in pairs(slugs) do
-            if utils.match(slug, rp, "startswith", false) then
-                count = count + 1
-            end
-        end
-        dir_counts[rp] = count
-    end
+    local dir_counts = prepared.dir_counts --- @type table<string, integer>
 
     local vault_em = require("telescope._extensions.vault.entry_maker")
     local _, entry_maker = vault_em.counted({
         hl_name = hl_name,
         colors = colors,
         steps = steps,
-        get_name = function(d) return d.data.relpath end,
-        get_count = function(d) return dir_counts[d.data.relpath] or 0 end,
-        get_ordinal = function(d) return d.data.relpath end,
+        get_name = function(d)
+            return d.data.relpath
+        end,
+        get_count = function(d)
+            return dir_counts[d.data.relpath] or 0
+        end,
+        get_ordinal = function(d)
+            return d.data.relpath
+        end,
     })
 
     local finder = finders.new_table({
@@ -67,8 +104,12 @@ return function(opts)
         table.sort(dirs_list, function(a, b)
             local an = a.data.name or ""
             local bn = b.data.name or ""
-            if bn:sub(1, 1) == "_" then return false end
-            if an:sub(1, 1) == "_" then return true end
+            if bn:sub(1, 1) == "_" then
+                return false
+            end
+            if an:sub(1, 1) == "_" then
+                return true
+            end
             return an < bn
         end)
     end
@@ -78,7 +119,11 @@ return function(opts)
         finder = finder,
         sorter = sorters.get_fzy_sorter(),
         on_input_filter_cb = make_filter(dirs_list, entry_maker),
-        attach_mappings = vault_hl.make_attach_mappings(vault_mappings.directories, hl_name, colors),
+        attach_mappings = vault_hl.make_attach_mappings(
+            vault_mappings.directories,
+            hl_name,
+            colors
+        ),
     })
 
     vault_state.set_global_key("picker", picker)

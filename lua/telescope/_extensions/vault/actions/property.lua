@@ -90,9 +90,7 @@ local function rename_property_values(property_name, selections, lines)
     state.set_global_key("properties", nil)
     state.set_global_key("notes", nil)
     state.set_global_key("wikilinks", nil)
-    state.set_global_key("cache.notes.paths", nil)
-    state.set_global_key("cache.notes.slugs", nil)
-    state.set_global_key("cache.notes.basename_index", nil)
+    require("vault.scanner").invalidate_notes_cache()
     log.info("Renamed %d value(s) for property %s", #lines, tostring(property_name or "<unknown>"))
 end
 

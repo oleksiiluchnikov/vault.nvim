@@ -55,7 +55,9 @@ function M.plan()
         end
     end
 
-    table.sort(moves, function(a, b) return a.old_path < b.old_path end)
+    table.sort(moves, function(a, b)
+        return a.old_path < b.old_path
+    end)
     return moves
 end
 
@@ -97,16 +99,24 @@ function M.run(apply)
         local tmp_path = move.old_path .. ".__vault_rename_tmp__"
         local ok1, err1 = uv.fs_rename(move.old_path, tmp_path)
         if not ok1 then
-            log.error("fs_rename to tmp failed: %s -> %s: %s",
-                move.old_path, tmp_path, tostring(err1))
+            log.error(
+                "fs_rename to tmp failed: %s -> %s: %s",
+                move.old_path,
+                tmp_path,
+                tostring(err1)
+            )
             goto continue
         end
         local ok2, err2 = uv.fs_rename(tmp_path, move.new_path)
         if not ok2 then
             -- Roll back
             uv.fs_rename(tmp_path, move.old_path)
-            log.error("fs_rename from tmp failed: %s -> %s: %s",
-                tmp_path, move.new_path, tostring(err2))
+            log.error(
+                "fs_rename from tmp failed: %s -> %s: %s",
+                tmp_path,
+                move.new_path,
+                tostring(err2)
+            )
             goto continue
         end
         renamed = renamed + 1
@@ -136,12 +146,8 @@ function M.run(apply)
     end
 
     -- Phase 3: invalidate caches
-    local state = require("vault.core.state")
     pcall(function()
-        state.set_global_key("cache.notes.paths", nil)
-        state.set_global_key("cache.notes.slugs", nil)
-        state.set_global_key("cache.notes.basename_index", nil)
-        state.set_global_key("notes", nil)
+        require("vault.scanner").invalidate_notes_cache()
     end)
 
     log.info("Done. %d files renamed, wikilinks patched.", renamed)

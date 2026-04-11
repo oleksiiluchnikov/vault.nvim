@@ -13,21 +13,32 @@ return function(opts)
     local vault_previewers = require("telescope._extensions.vault.previewers")
     local vault_mappings = require("telescope._extensions.vault.mappings")
     local vault_layouts = require("telescope._extensions.vault.layouts")
+    local picker_cache = require("telescope._extensions.vault.pickers.cache")
     local vault_hl = require("telescope._extensions.vault.highlights")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
 
     opts = opts or {}
-    opts.tags = opts.tags or require("vault.tags")()
 
-    local tags_list = opts.tags:list()
+    local tags_list
+    if opts.tags then
+        tags_list = opts.tags:list()
+        table.sort(tags_list, function(a, b)
+            return a.data.count > b.data.count
+        end)
+    else
+        tags_list = picker_cache.get_or_set("tags.default", function()
+            local list = require("vault.tags")():list()
+            table.sort(list, function(a, b)
+                return a.data.count > b.data.count
+            end)
+            return list
+        end)
+    end
+
     if next(tags_list) == nil then
         log.info("No tags found in vault")
         return
     end
-
-    table.sort(tags_list, function(a, b)
-        return a.data.count > b.data.count
-    end)
 
     local ui_height, _ = vault_layouts.ui_size()
     local steps = math.min(ui_height, vim.tbl_count(tags_list))
@@ -40,8 +51,12 @@ return function(opts)
         hl_name = hl_name,
         colors = colors,
         steps = steps,
-        get_name = function(t) return t.data.name end,
-        get_count = function(t) return t.data.count or 0 end,
+        get_name = function(t)
+            return t.data.name
+        end,
+        get_count = function(t)
+            return t.data.count or 0
+        end,
     })
 
     local finder = finders.new_table({
