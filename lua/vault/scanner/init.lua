@@ -18,6 +18,7 @@ local SLUGS_CACHE_KEY = "cache.notes.slugs"
 local BASENAME_INDEX_CACHE_KEY = "cache.notes.basename_index"
 local PATHS_AND_WIKILINKS_CACHE_KEY = "cache.notes.paths_and_wikilinks_cached"
 local PICKER_CACHE_KEY = "cache.telescope._extensions.vault.pickers"
+local NOTES_LINK_INDEX_CACHE_KEY = "notes.link_index"
 
 ---@class vault.Scanner
 ---@field paths fun(opts?: { ignore: boolean|string[] }): table<string, table>
@@ -45,7 +46,12 @@ function Scanner.invalidate_notes_cache()
     state.set_global_key(BASENAME_INDEX_CACHE_KEY, nil)
     state.set_global_key(PATHS_AND_WIKILINKS_CACHE_KEY, nil)
     state.set_global_key(PICKER_CACHE_KEY, nil)
+    state.set_global_key(NOTES_LINK_INDEX_CACHE_KEY, nil)
     state.set_global_key("notes", nil)
+    state.set_global_key("notes.linked", nil)
+    state.set_global_key("notes.internals", nil)
+    state.set_global_key("notes.leaves", nil)
+    state.set_global_key("notes.orphans", nil)
     state.set_global_key("tags", nil)
     state.set_global_key("properties", nil)
     state.set_global_key("dirs", nil)
@@ -484,6 +490,7 @@ end
 function Scanner.wikilinks_no_suggest(opts)
     local core = require("vault_core")
     local root, ignores = get_scan_args(opts)
+    local cached = not opts and state.get_global_key(PATHS_AND_WIKILINKS_CACHE_KEY) or nil
 
     local handle = progress.start("Scanning wikilinks (no suggest)")
     local raw_wikilinks = core.wikilinks_no_suggest(root, ignores)
@@ -641,6 +648,7 @@ end
 function Scanner.clear_rust_cache()
     local ok, core = pcall(require, "vault_core")
     state.set_global_key(PATHS_AND_WIKILINKS_CACHE_KEY, nil)
+    state.set_global_key(NOTES_LINK_INDEX_CACHE_KEY, nil)
     if ok and core.clear_cache then
         core.clear_cache()
     end

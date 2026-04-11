@@ -14,10 +14,21 @@ local Note = require("vault.notes.note")
 local VaultNotesStats = require("vault.notes.stats")
 local config = require("vault.config")
 local log = require("vault.log").scope("notes")
+local link_index = require("vault.notes.link_index")
 
 ---@alias vault.Notes.map table<vault.slug, vault.Note>
 ---@alias vault.Notes.path_map table<vault.path, vault.Note>
 ---@alias vault.Notes.groups.map table<vault.slug, vault.Notes.Group>
+
+---@param notes_map vault.Notes.map
+---@return vault.Notes.map
+local function copy_notes_map(notes_map)
+    local copy = {}
+    for slug, note in pairs(notes_map or {}) do
+        copy[slug] = note
+    end
+    return copy
+end
 
 ---@class vault.Notes.MoveSpec
 ---@field from vault.path
@@ -373,13 +384,13 @@ local Notes = Collection:extend("VaultNotes")
 --- ```
 --- @return nil
 function Notes:init()
-    -- Only clear note-specific caches, NOT the entire global state.
-    -- state.clear_all() was wiping class registrations, tags, wikilinks, etc.
-    state.set_global_key("notes", nil)
-    state.set_global_key("notes.linked", nil)
-    state.set_global_key("notes.internals", nil)
-    state.set_global_key("notes.leaves", nil)
-    state.set_global_key("notes.orphans", nil)
+    local cached_notes = state.get_global_key("notes")
+    if type(cached_notes) == "table" and type(cached_notes.map) == "table" then
+        self.map = copy_notes_map(cached_notes.map)
+        self._map = copy_notes_map(cached_notes._map or cached_notes.map)
+        self.groups = {}
+        return
+    end
 
     --- @type vault.Notes.map
     self.map = {}
@@ -435,7 +446,7 @@ end
 --- @return vault.Notes - Returns self for method chaining
 function Notes:load()
     --- @type vault.EntryInfoMap
-    local paths = scanner().paths()
+    local paths = link_index.paths()
     -- Example of paths structure:
     -- ["Example Note"] = {
     --   basename = "Example Note",
@@ -792,12 +803,11 @@ end
 --- assert(links ~= nil)
 --- @return vault.Notes.Group
 function Notes:linked()
+    local index = link_index.get()
     local linked = self:to_group()
 
-    for slug, note in pairs(linked.map) do
-        local outlinks = note.data.outlinks or {}
-        local inlinks = note.data.inlinks or {}
-        if next(outlinks) == nil and next(inlinks) == nil then
+    for slug, _ in pairs(linked.map) do
+        if not index.has_outlinks[slug] and not index.has_inlinks[slug] then
             linked.map[slug] = nil
         end
     end
@@ -820,12 +830,11 @@ end
 --- ```
 --- @return vault.Notes.Group
 function Notes:internals()
+    local index = link_index.get()
     local internals = self:to_group()
 
-    for slug, note in pairs(internals.map) do
-        local outlinks = note.data.outlinks or {}
-        local inlinks = note.data.inlinks or {}
-        if next(outlinks) == nil or next(inlinks) == nil then
+    for slug, _ in pairs(internals.map) do
+        if not index.has_outlinks[slug] or not index.has_inlinks[slug] then
             internals.map[slug] = nil
         end
     end
@@ -849,23 +858,18 @@ end
 --- ```
 --- @return vault.Notes.Group
 function Notes:leaves()
-    --- @type vault.Wikilinks
-    local wikilinks = self:wikilinks()
-    --- @type vault.Notes.Data.slugs
-    local targets = wikilinks:targets()
+    local index = link_index.get()
     local leaves = self:to_group()
 
-    for slug, note in pairs(self.map) do
+    for slug, _ in pairs(self.map) do
         -- if note in targets then it is linked.
-        if not targets[slug] then
+        if not index.targets[slug] then
             leaves.map[slug] = nil
             goto continue
         end
-        local outlinks = note.data.outlinks or {}
 
         -- if note has outlinks then it is not a leaf
-        if outlinks and next(outlinks) then
-            -- self.map[slug] = nil
+        if index.has_outlinks[slug] then
             leaves.map[slug] = nil
         end
         ::continue::
@@ -891,19 +895,15 @@ end
 --- @see VaultWikilink
 --- @return vault.Notes.Group
 function Notes:orphans()
-    --- @type vault.Wikilinks
-    local wikilinks = self:wikilinks()
-    --- @type vault.Notes.Data.slugs
-    local targets = wikilinks:targets()
+    local index = link_index.get()
     local orphans = self:to_group()
 
-    for slug, note in pairs(self.map) do
-        local outlinks = note.data.outlinks or {}
-        if outlinks and next(outlinks) then
+    for slug, _ in pairs(self.map) do
+        if index.has_outlinks[slug] then
             orphans.map[slug] = nil
             goto continue
         end
-        if targets[slug] then
+        if index.targets[slug] then
             orphans.map[slug] = nil
         end
         ::continue::
@@ -929,21 +929,13 @@ end
 function Notes:with_outlinks_resolved_only()
     -- Exclude notes that have unresolved links
     -- Exclude notes that have no links
+    local index = link_index.get()
     local resolved = self:to_group()
 
-    for slug, note in pairs(resolved.map) do
-        -- Should have outlinks
-        local outlinks = note.data.outlinks or {}
-        if not outlinks or next(outlinks) == nil then
+    for slug, _ in pairs(resolved.map) do
+        if not index.has_outlinks[slug] or index.has_unresolved_outlinks[slug] then
             resolved.map[slug] = nil
             goto continue
-        end
-        -- Should have only resolved links
-        for _, wikilink in pairs(outlinks) do
-            if not wikilink.data.target or wikilink.data.target == "" then
-                resolved.map[slug] = nil
-                goto continue
-            end
         end
         ::continue::
     end
@@ -964,23 +956,11 @@ end
 --- ```
 --- @return vault.Notes.Group
 function Notes:with_outlinks_unresolved()
+    local index = link_index.get()
     local unresolved = self:to_group()
 
-    for slug, note in pairs(unresolved.map) do
-        local outlinks = note.data.outlinks
-        if not outlinks or next(outlinks) == nil then
-            unresolved.map[slug] = nil
-            goto continue
-        end
-        -- Keep only notes that have at least one unresolved link
-        local has_unresolved = false
-        for _, wikilink in pairs(outlinks) do
-            if not wikilink.data.target then
-                has_unresolved = true
-                break
-            end
-        end
-        if not has_unresolved then
+    for slug, _ in pairs(unresolved.map) do
+        if not index.has_unresolved_outlinks[slug] then
             unresolved.map[slug] = nil
         end
         ::continue::
@@ -1070,7 +1050,8 @@ function Notes:without_property(property_name)
     local notes_without_property = {}
     for slug, note in pairs(self.map) do
         local fm = note.data.frontmatter
-        local value = type(fm) == "table" and (fm[property_name] or (type(fm.data) == "table" and fm.data[property_name]))
+        local value = type(fm) == "table"
+                and (fm[property_name] or (type(fm.data) == "table" and fm.data[property_name]))
             or nil
         if is_missing_frontmatter_value(value) then
             notes_without_property[slug] = note

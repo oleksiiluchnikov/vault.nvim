@@ -81,6 +81,56 @@ local utils = require("vault.utils")
 --- @field rust_links
 
 local Data = {}
+local link_index = nil
+
+local function notes_link_index()
+    link_index = link_index or require("vault.notes.link_index")
+    return link_index
+end
+
+---@param note_data vault.Note.Data
+---@return vault.Wikilinks.map
+local function parse_outlinks(note_data)
+    local slug = note_data.slug
+    local content = note_data.content
+    if not content then
+        return {}
+    end
+
+    content = strip_code_from_content(content)
+
+    --- @type vault.Wikilinks.map
+    local outlinks = {}
+    for raw_link in content:gmatch("%[%[([^%[%]]-)%]%]") do
+        if raw_link == "" then
+            goto continue
+        end
+
+        local ok, wikilink = pcall(Wikilink, raw_link)
+        if not ok then
+            goto continue
+        end
+
+        local wikilink_data = wikilink.data
+        if not outlinks[wikilink_data.slug] then
+            outlinks[wikilink_data.slug] = wikilink
+        end
+
+        local data = outlinks[wikilink_data.slug].data
+        data.sources = data.sources or {}
+        data.sources[slug] = data.sources[slug] or {}
+        data.variants = data.variants or {}
+        data.variants[wikilink_data.slug] = true
+        data.aliases = data.aliases or {}
+        if wikilink_data.alias then
+            data.aliases[wikilink_data.alias] = true
+        end
+
+        ::continue::
+    end
+
+    return outlinks
+end
 
 --- @param note_Data vault.Note.Data
 --- @return integer
@@ -280,79 +330,28 @@ local function strip_code_from_content(content)
 end
 
 Data.outlinks = function(note_data)
-    local slug = note_data.slug
-    local content = note_data.content
-    if not content then
-        return {}
-    end
-    -- Strip fenced code blocks and inline code to avoid bash/code false positives
-    content = strip_code_from_content(content)
-    local wikilink_pattern = "%[%[([^%[%]]-)%]%]"
-
-    --- @type vault.Wikilinks.map
-    local outlinks = {}
-    for raw_link in content:gmatch(wikilink_pattern) do
-        if raw_link == "" then
-            goto continue
-        end
-        local ok, wikilink = pcall(Wikilink, raw_link)
-        if not ok then
-            -- Skip malformed wikilinks (e.g. mismatched brackets, empty slugs)
-            goto continue
-        end
-        local wikilink_data = wikilink.data
-
-        if not outlinks[wikilink_data.slug] then
-            outlinks[wikilink_data.slug] = wikilink
-        end
-
-        local data = outlinks[wikilink_data.slug].data
-
-        if not data.sources then
-            data.sources = {}
-        end
-
-        if not data.sources[slug] then
-            data.sources[slug] = {}
-        end
-
-        if not data.variants then
-            data.variants = {}
-        end
-
-        if not data.variants[wikilink_data.slug] then
-            data.variants[wikilink_data.slug] = true
-        end
-
-        if not data.aliases then
-            data.aliases = {}
-        end
-
-        if wikilink_data.alias then
-            if not data.aliases[wikilink_data.alias] then
-                data.aliases[wikilink_data.alias] = true
-            end
-        end
-        ::continue::
+    local index = notes_link_index().get()
+    if index.paths[note_data.slug] ~= nil or index.outlinks_by_source[note_data.slug] ~= nil then
+        return index.outlinks_by_source[note_data.slug] or {}
     end
 
-    return outlinks
+    return parse_outlinks(note_data)
 end
 
 --- @param note_Data vault.Note.Data
 --- @return vault.Wikilinks.map
 Data.inlinks = function(note_data)
+    local index = notes_link_index().get()
+    if index.paths[note_data.slug] ~= nil or index.has_inlinks[note_data.slug] then
+        return index.inlinks_by_target[note_data.slug] or {}
+    end
+
     local wikilinks = state.get_global_key("wikilinks") or require("vault.wikilinks")()
     local inlinks = {}
-    -- Iterate the full map instead of calling wikilinks:resolved() which
-    -- destructively mutates self.map and corrupts the shared global cache.
-    -- The target == slug check already excludes unresolved wikilinks (target is nil).
     for _, wikilink in pairs(wikilinks.map) do
         if wikilink.data.target == note_data.slug then
             for source, _ in pairs(wikilink.data.sources) do
-                if not inlinks[source] then
-                    inlinks[source] = {}
-                end
+                inlinks[source] = inlinks[source] or {}
                 table.insert(inlinks[source], wikilink)
             end
         end
