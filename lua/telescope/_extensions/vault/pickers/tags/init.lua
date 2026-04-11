@@ -13,7 +13,7 @@ return function(opts)
     local vault_previewers = require("telescope._extensions.vault.previewers")
     local vault_mappings = require("telescope._extensions.vault.mappings")
     local vault_layouts = require("telescope._extensions.vault.layouts")
-    local picker_cache = require("telescope._extensions.vault.pickers.cache")
+    local default_prep = require("telescope._extensions.vault.pickers.tags.default_prep")
     local vault_hl = require("telescope._extensions.vault.highlights")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
 
@@ -26,13 +26,7 @@ return function(opts)
             return a.data.count > b.data.count
         end)
     else
-        tags_list = picker_cache.get_or_set("tags.default", function()
-            local list = require("vault.tags")():list()
-            table.sort(list, function(a, b)
-                return a.data.count > b.data.count
-            end)
-            return list
-        end)
+        tags_list = default_prep.get_or_prepare()
     end
 
     if next(tags_list) == nil then

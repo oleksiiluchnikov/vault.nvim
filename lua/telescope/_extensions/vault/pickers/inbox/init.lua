@@ -8,7 +8,8 @@
 --- @return Picker
 return function(opts)
     local config = require("vault.config")
-    local inbox_dir = config.options.dirs.inbox or config.options.root
+    local dirs = config.options.dirs or {}
+    local inbox_dir = dirs.inbox or config.options.root
     if not inbox_dir or vim.fn.isdirectory(inbox_dir) == 0 then
         error("Inbox directory does not exist")
     end

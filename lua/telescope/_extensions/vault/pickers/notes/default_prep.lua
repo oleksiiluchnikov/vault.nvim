@@ -1,4 +1,6 @@
 local picker_cache = require("telescope._extensions.vault.pickers.cache")
+local state = require("vault.core.state")
+local link_index = require("vault.notes.link_index")
 local note_stats = require("telescope._extensions.vault.pickers.notes.stats")
 
 local CACHE_KEY = "notes.default"
@@ -7,9 +9,8 @@ local M = {}
 
 ---@return { link_counts: table<string, vault.NotePickerLinkCounts>, notes: vault.Notes, results: vault.Note[] }
 local function build_default_prep()
-    local Scanner = require("vault.scanner")
-    local raw_paths, wikilinks_map = Scanner.paths_and_wikilinks_cached()
-    local notes = require("vault.notes").from_paths(raw_paths)
+    local notes = state.get_global_key("notes") or require("vault.notes")()
+    local wikilinks_map = link_index.wikilinks()
     local results = notes:list()
     local link_counts = note_stats.collect(results, wikilinks_map)
 

@@ -5,6 +5,16 @@ local function scanner()
 end
 local Collection = require("vault.core.collection")
 
+---@param map vault.Dirs.map|nil
+---@return vault.Dirs.map
+local function copy_map(map)
+    local copy = {}
+    for key, value in pairs(map or {}) do
+        copy[key] = value
+    end
+    return copy
+end
+
 -- Aliases
 --- @alias vault.Dirs.map table<vault.relpath, vault.Dir> - Map of directories by vault-relative path.
 --- @alias vault.Dirs.list table<integer, vault.Dir> - Ordered list of directories.
@@ -25,6 +35,12 @@ local Dirs = Collection:extend("VaultDirs")
 --- Sets the dirs map and registers the dirs globally.
 --- @return nil
 function Dirs:init()
+    local cached = state.get_global_key("dirs")
+    if type(cached) == "table" and type(cached.map) == "table" then
+        self.map = copy_map(cached.map)
+        return
+    end
+
     self.map = scanner().dirs()
     state.set_global_key("dirs", self)
 end

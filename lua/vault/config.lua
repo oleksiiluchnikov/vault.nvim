@@ -51,7 +51,7 @@
 --- @field tasks? { dir?: string, fields?: { status?: string, priority?: string, blocked_by?: string }, defaults?: { status?: string, executor?: string, category?: string, priority?: string }, status_order?: string[], priority_order?: string[], completed_statuses?: string[], aliases?: table<string, string>, transitions?: table<string, table<string, true>> } Task-note policy settings
 --- @field views? { grid?: { default_columns?: string[], identity_mode?: "conceal"|"extmark"|"visible", delete_hard_cap?: integer, create_hard_cap?: integer, row_hl?: vault.RowHlRule[]|fun(record: table, row_idx: integer): string|nil } } Shared view settings
 ---
---- @field telescope? { notes?: { columns?: (string|vault.TelescopeNotesColumnSpec)[] }, prewarm?: { notes?: boolean, delay_ms?: integer }, pickers?: table } Telescope configuration. Example:
+--- @field telescope? { notes?: { columns?: (string|vault.TelescopeNotesColumnSpec)[] }, prewarm?: { notes?: boolean, properties?: boolean, tags?: boolean, dirs?: boolean, delay_ms?: integer }, pickers?: table } Telescope configuration. Example:
 ---   ```lua
 ---   {
 ---     pickers = {
@@ -349,6 +349,9 @@ local DEFAULT_OPTIONS = {
         },
         prewarm = {
             notes = true,
+            properties = true,
+            tags = true,
+            dirs = true,
             delay_ms = 2000,
         },
         pickers = {
