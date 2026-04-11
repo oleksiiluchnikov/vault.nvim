@@ -46,6 +46,18 @@ local Collection = require("vault.core.collection")
 --- @type vault.Wikilinks|vault.WikilinksConstructor
 local Wikilinks = Collection:extend("VaultWikilinks")
 
+--- Create a Wikilinks collection from an already-built map.
+--- @param map? vault.Wikilinks.map
+--- @return vault.Wikilinks
+function Wikilinks.from_map(map)
+    --- @type vault.Wikilinks
+    local instance = setmetatable({ class = Wikilinks }, Wikilinks.__meta)
+    instance.map = map or {}
+    instance.groups = {}
+    state.set_global_key("wikilinks", instance)
+    return instance
+end
+
 --- Initialise the Wikilinks collection.
 ---
 --- When `notes` is provided, outlinks are collected directly from each note's
@@ -164,7 +176,6 @@ function Wikilinks:by_target(slug, match_opt, case_sensitive)
 
     return wikilinks
 end
-
 
 --- Return a subset of the map containing only embedded wikilinks (e.g. ![[image.png]]).
 --- Keyed by `wikilink.data.slug`, not by the map key from `self.map`.

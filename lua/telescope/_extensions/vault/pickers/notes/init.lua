@@ -19,6 +19,7 @@ return function(opts)
     local vault_hl = require("telescope._extensions.vault.highlights")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
     local default_prep = require("telescope._extensions.vault.pickers.notes.default_prep")
+    local link_index = require("vault.notes.link_index")
     local note_stats = require("telescope._extensions.vault.pickers.notes.stats")
     local note_columns = require("telescope._extensions.vault.pickers.notes.columns")
 
@@ -44,7 +45,7 @@ return function(opts)
         opts.notes = opts.notes or require("vault.notes")()
         -- Load wikilinks once (no suggestions — picker only needs counts)
         if not wikilinks_map then
-            wikilinks_map = require("vault.scanner").wikilinks_no_suggest()
+            wikilinks_map = link_index.wikilinks()
         end
     end
 

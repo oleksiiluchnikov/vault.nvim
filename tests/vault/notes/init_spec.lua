@@ -63,6 +63,26 @@ describe("VaultNotes", function()
             end
             assert.are.equal("VaultNote", note.class.name)
         end)
+
+        it("should reuse cached global notes without rescanning on module reload", function()
+            local first = Notes()
+            assert.is_true(first:count() > 0)
+
+            package.loaded["vault.notes"] = nil
+            package.loaded["vault.notes.link_index"] = {
+                paths = function()
+                    error("notes cache should be reused before rescanning")
+                end,
+            }
+
+            local reloaded = require("vault.notes")
+            local second = reloaded()
+            assert.are.equal(first:count(), second:count())
+
+            package.loaded["vault.notes"] = nil
+            package.loaded["vault.notes.link_index"] = nil
+            Notes = require("vault.notes")
+        end)
     end)
 
     describe("VaultNotes:to_group", function()
@@ -197,7 +217,8 @@ describe("VaultNotes", function()
 
             for _, note in pairs(notes.map) do
                 local fm = note.data.frontmatter
-                local value = type(fm) == "table" and (fm.categories or (type(fm.data) == "table" and fm.data.categories))
+                local value = type(fm) == "table"
+                        and (fm.categories or (type(fm.data) == "table" and fm.data.categories))
                     or nil
                 local missing = value == nil
                     or value == vim.NIL

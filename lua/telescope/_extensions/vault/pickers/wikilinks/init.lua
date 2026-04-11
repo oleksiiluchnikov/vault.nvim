@@ -17,6 +17,7 @@ return function(opts)
     local sorters = require("telescope.sorters")
     local vault_previewers = require("telescope._extensions.vault.previewers")
     local layouts = require("telescope._extensions.vault.layouts")
+    local link_index = require("vault.notes.link_index")
     local picker_cache = require("telescope._extensions.vault.pickers.cache")
     local vault_state = require("vault.core.state")
     local utils = require("vault.utils")
@@ -113,10 +114,11 @@ return function(opts)
     local results = opts._results
     local meta
     local slug_max
+    local VaultWikilinks = require("vault.wikilinks")
 
     if not wikilinks and not results and (opts.sort_by == "resolved" or opts.sort_by == "slug") then
         prepared = picker_cache.get_or_set("wikilinks.default", function()
-            local collection = require("vault.wikilinks")()
+            local collection = VaultWikilinks.from_map(link_index.wikilinks())
             local prepared_results = collection:list() or {}
             local prepared_meta, prepared_slug_max = build_wikilink_meta(prepared_results)
 
@@ -140,7 +142,7 @@ return function(opts)
             results = copy_list(prepared.unresolved_first)
         end
     else
-        wikilinks = wikilinks or require("vault.wikilinks")()
+        wikilinks = wikilinks or VaultWikilinks.from_map(link_index.wikilinks())
         results = results or wikilinks:list() or {}
         meta, slug_max = build_wikilink_meta(results)
     end
