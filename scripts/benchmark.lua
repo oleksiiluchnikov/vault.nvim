@@ -10,6 +10,10 @@ local uv = vim.uv or vim.loop
 
 --- @class bench.VaultArgs
 --- @field vault_size integer
+--- @field filter string|nil
+--- @field out string
+--- @field list_metrics boolean
+--- @field top integer
 
 --- @class bench.VaultConfigOpts
 --- @field features? table<string, boolean>
@@ -133,7 +137,13 @@ end
 --- @return bench.VaultArgs
 local function parse_args()
     --- @type bench.VaultArgs
-    local args = { vault_size = 500 }
+    local args = {
+        vault_size = 15000,
+        filter = nil,
+        out = "benchmarks/latest.json",
+        list_metrics = false,
+        top = 10,
+    }
 
     local argv = vim.v.argv or {}
     local after_sep = false
@@ -141,7 +151,15 @@ local function parse_args()
         if arg == "--" then
             after_sep = true
         elseif after_sep and arg == "--vault-size" and argv[i + 1] then
-            args.vault_size = tonumber(argv[i + 1]) or 500
+            args.vault_size = tonumber(argv[i + 1]) or 15000
+        elseif after_sep and arg == "--filter" and argv[i + 1] then
+            args.filter = argv[i + 1]
+        elseif after_sep and arg == "--out" and argv[i + 1] then
+            args.out = argv[i + 1]
+        elseif after_sep and arg == "--top" and argv[i + 1] then
+            args.top = tonumber(argv[i + 1]) or args.top
+        elseif after_sep and arg == "--list-metrics" then
+            args.list_metrics = true
         end
     end
 
@@ -164,6 +182,63 @@ local function delete_buffer(bufnr)
     end
 
     pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+end
+
+--- @param ids integer[]
+--- @return table<integer, boolean>
+local function id_set(ids)
+    local set = {}
+    for _, id in ipairs(ids) do
+        set[id] = true
+    end
+    return set
+end
+
+--- @param existing_wins table<integer, boolean>
+--- @return nil
+local function close_new_windows(existing_wins)
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if not existing_wins[win] and vim.api.nvim_win_is_valid(win) then
+            pcall(vim.api.nvim_win_close, win, true)
+        end
+    end
+end
+
+--- @param existing_bufs table<integer, boolean>
+--- @return nil
+local function delete_new_buffers(existing_bufs)
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+        if not existing_bufs[bufnr] then
+            delete_buffer(bufnr)
+        end
+    end
+end
+
+--- @param picker Picker|nil
+--- @return nil
+local function open_picker_and_close(picker)
+    if not picker then
+        return
+    end
+
+    local existing_wins = id_set(vim.api.nvim_list_wins())
+    local existing_bufs = id_set(vim.api.nvim_list_bufs())
+
+    vim.schedule(function()
+        close_new_windows(existing_wins)
+    end)
+
+    picker:find()
+
+    close_new_windows(existing_wins)
+    delete_new_buffers(existing_bufs)
+    ensure_scratch_buffer()
+end
+
+local function clear_picker_caches()
+    local Scanner = require("vault.scanner")
+    Scanner.invalidate_notes_cache()
+    Scanner.clear_rust_cache()
 end
 
 --- @param ge any
@@ -198,6 +273,76 @@ local function reset_save_state(st, path, slug, ge)
     st.last_save_profile = nil
 end
 
+--- @param st bench.GridSaveState
+--- @param paths table<string, { path: string }>|table<string, string>
+--- @param ge any
+--- @return nil
+local function reset_full_save_state(st, paths, ge)
+    st.note_paths = {}
+    st.note_mtimes = {}
+    for slug, entry in pairs(paths) do
+        local path = type(entry) == "table" and entry.path or entry
+        if type(path) == "string" and path ~= "" then
+            st.note_paths[slug] = path
+            st.note_mtimes[slug] = ge._get_mtime(path)
+        end
+    end
+    st.saving = false
+    st.last_save_profile = nil
+end
+
+--- @param ge any
+--- @param paths table<string, { path: string }>|table<string, string>
+--- @param bufnr integer
+--- @param label string
+--- @return bench.GridSaveState
+local function make_full_save_state(ge, paths, bufnr, label)
+    --- @type bench.GridSaveState
+    local st = {
+        grid = {
+            bufnr = function()
+                return bufnr
+            end,
+            reload = function() end,
+        },
+        note_paths = {},
+        note_mtimes = {},
+        save_mode = nil,
+        saving = false,
+        last_save_profile = nil,
+        columns = { "slug", "title", "status", "tags" },
+        filter_desc = label,
+    }
+    reset_full_save_state(st, paths, ge)
+    return st
+end
+
+--- @param rename_count integer
+--- @return table
+local function make_batch_rename_diff(rename_count)
+    local diff = {
+        updates = {},
+        deletes = {},
+        creates = {},
+        custom = {},
+        errors = {},
+    }
+
+    for i = 1, rename_count do
+        local slug = string.format("note-%04d", i)
+        diff.custom[#diff.custom + 1] = {
+            type = "rename",
+            extra = {
+                old_slug = slug,
+                new_slug = "renamed/" .. slug,
+                source_field = "slug",
+            },
+        }
+    end
+
+    return diff
+end
+
 --- @param name string
 --- @param results bench.Result[]
 --- @param bench bench.Utils
@@ -218,6 +363,159 @@ local SAVE_PHASE_KEYS = {
     "watcher.handle_rename",
     "post_save_refresh",
 }
+
+local METRIC_NAMES = {
+    "setup()",
+    "commands module load",
+    "Scanner.paths() cold",
+    "Scanner.slugs() cold",
+    "Scanner.tags()",
+    "Scanner.wikilinks()",
+    "Scanner.properties()",
+    "Scanner.lines() (pure Lua)",
+    "Scanner.paths_and_wikilinks_cached() cold",
+    "Scanner.paths_and_wikilinks_cached() warm",
+    "Scanner.paths_and_wikilinks_cached() 1 file changed",
+    "Config.setup()",
+    "picker notes() open [cold]",
+    "picker notes() open [warm]",
+    "picker notes() open [preloaded]",
+    "picker tags() open [cold]",
+    "picker tags() open [warm]",
+    "picker properties() open [cold]",
+    "picker properties() open [warm]",
+    "picker dirs() open [cold]",
+    "picker dirs() open [warm]",
+    "picker wikilinks() open [cold]",
+    "picker wikilinks() open [warm]",
+    "Notes.from_paths()",
+    "grid build_records()",
+    "grid open() [preloaded]",
+    "grid save no-op (:w)",
+    "grid on_save update",
+    "grid on_save rename",
+    "grid on_save rename batch",
+    "Watcher.handle_rename()",
+}
+
+--- @param prefix string
+--- @return string[]
+local function phase_metric_names(prefix)
+    local names = { prefix }
+    for _, phase in ipairs(SAVE_PHASE_KEYS) do
+        names[#names + 1] = prefix .. " phase " .. phase
+    end
+    return names
+end
+
+for _, name in ipairs(phase_metric_names("grid on_save update")) do
+    if name ~= "grid on_save update" then
+        METRIC_NAMES[#METRIC_NAMES + 1] = name
+    end
+end
+for _, name in ipairs(phase_metric_names("grid on_save rename")) do
+    if name ~= "grid on_save rename" then
+        METRIC_NAMES[#METRIC_NAMES + 1] = name
+    end
+end
+for _, name in ipairs(phase_metric_names("grid on_save rename batch")) do
+    if name ~= "grid on_save rename batch" then
+        METRIC_NAMES[#METRIC_NAMES + 1] = name
+    end
+end
+
+local SCANNER_METRICS = {
+    "Scanner.paths() cold",
+    "Scanner.slugs() cold",
+    "Scanner.tags()",
+    "Scanner.wikilinks()",
+    "Scanner.properties()",
+    "Scanner.lines() (pure Lua)",
+    "Scanner.paths_and_wikilinks_cached() cold",
+    "Scanner.paths_and_wikilinks_cached() warm",
+    "Scanner.paths_and_wikilinks_cached() 1 file changed",
+}
+
+local GRID_METRICS = {
+    "Notes.from_paths()",
+    "grid build_records()",
+    "grid open() [preloaded]",
+    "grid save no-op (:w)",
+}
+
+local PICKER_METRICS = {
+    "picker notes() open [cold]",
+    "picker notes() open [warm]",
+    "picker notes() open [preloaded]",
+    "picker tags() open [cold]",
+    "picker tags() open [warm]",
+    "picker properties() open [cold]",
+    "picker properties() open [warm]",
+    "picker dirs() open [cold]",
+    "picker dirs() open [warm]",
+    "picker wikilinks() open [cold]",
+    "picker wikilinks() open [warm]",
+}
+
+local UPDATE_METRICS = phase_metric_names("grid on_save update")
+local RENAME_METRICS = phase_metric_names("grid on_save rename")
+local RENAME_BATCH_METRICS = phase_metric_names("grid on_save rename batch")
+
+--- @param filter string|nil
+--- @param name string
+--- @return boolean
+local function matches_metric_filter(filter, name)
+    if type(filter) ~= "string" or filter == "" then
+        return true
+    end
+
+    return string.find(string.lower(name), string.lower(filter), 1, true) ~= nil
+end
+
+--- @param args bench.VaultArgs
+--- @param names string[]
+--- @return boolean
+local function wants_metric(args, names)
+    if type(args.filter) ~= "string" or args.filter == "" then
+        return true
+    end
+
+    for _, name in ipairs(names) do
+        if matches_metric_filter(args.filter, name) then
+            return true
+        end
+    end
+
+    return false
+end
+
+--- @param filter string|nil
+--- @return boolean
+local function has_matching_metric(filter)
+    for _, name in ipairs(METRIC_NAMES) do
+        if matches_metric_filter(filter, name) then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function print_metric_names()
+    for _, name in ipairs(METRIC_NAMES) do
+        io.stdout:write(name .. "\n")
+    end
+end
+
+local function ensure_vault_core_available()
+    local ok, err = pcall(require, "vault_core")
+    if not ok then
+        error(
+            "vault_core is not built. Run `just build` before benchmarks. Original error: "
+                .. tostring(err)
+        )
+    end
+end
 
 --- @return table<string, number[]>
 local function new_phase_samples()
@@ -240,11 +538,15 @@ end
 
 --- @param results bench.Result[]
 --- @param bench bench.Utils
+--- @param args bench.VaultArgs
 --- @param prefix string
 --- @param phase_samples table<string, number[]>
-local function add_phase_metrics(results, bench, prefix, phase_samples)
+local function add_phase_metrics(results, bench, args, prefix, phase_samples)
     for _, phase in ipairs(SAVE_PHASE_KEYS) do
-        results[#results + 1] = bench.result(prefix .. " phase " .. phase, phase_samples[phase])
+        local metric_name = prefix .. " phase " .. phase
+        if wants_metric(args, { metric_name }) then
+            results[#results + 1] = bench.result(metric_name, phase_samples[phase])
+        end
     end
 end
 
@@ -252,7 +554,21 @@ local function main()
     local args = parse_args()
     local bench = dofile(vim.fn.getcwd() .. "/scripts/bench_utils.lua")
 
+    if args.list_metrics then
+        print_metric_names()
+        return
+    end
+
+    if not has_matching_metric(args.filter) then
+        error(string.format("no benchmark metrics matched filter: %s", tostring(args.filter)))
+    end
+
+    ensure_vault_core_available()
+
     io.stderr:write(string.format("vault.nvim benchmark — vault_size=%d\n", args.vault_size))
+    if type(args.filter) == "string" and args.filter ~= "" then
+        io.stderr:write(string.format("Filter: %s\n", args.filter))
+    end
 
     local fixture_dir = vim.fn.getcwd() .. "/benchmarks/fixture-vault-" .. args.vault_size
     if vim.fn.isdirectory(fixture_dir) == 0 then
@@ -274,18 +590,20 @@ local function main()
 
     io.stderr:write("\n== Startup & scanner ==\n")
 
-    add_metric("setup()", results, bench, function()
-        clear_vault_modules()
-        require("vault").setup({
-            root = fixture_dir,
-            ext = ".md",
-            features = { commands = false, watcher = false, cmp = false },
-            notify = { on_write = false },
-            log = { level = "error", file = false },
-        })
-    end, 10, 2)
+    if wants_metric(args, { "setup()" }) then
+        add_metric("setup()", results, bench, function()
+            clear_vault_modules()
+            require("vault").setup({
+                root = fixture_dir,
+                ext = ".md",
+                features = { commands = false, watcher = false, cmp = false },
+                notify = { on_write = false },
+                log = { level = "error", file = false },
+            })
+        end, 10, 2)
+    end
 
-    do
+    if wants_metric(args, { "commands module load" }) then
         clear_vault_modules()
         require("vault").setup({
             root = fixture_dir,
@@ -308,82 +626,98 @@ local function main()
         end, 10, 2)
     end
 
-    do
+    if wants_metric(args, SCANNER_METRICS) then
         setup_vault(fixture_dir)
         local Scanner = require("vault.scanner")
 
-        add_metric(
-            "Scanner.paths() cold",
-            results,
-            bench,
-            function()
-                Scanner.paths()
-            end,
-            10,
-            2,
-            {
-                before_each = function()
-                    Scanner.invalidate_notes_cache()
+        if wants_metric(args, { "Scanner.paths() cold" }) then
+            add_metric(
+                "Scanner.paths() cold",
+                results,
+                bench,
+                function()
+                    Scanner.paths()
                 end,
-            }
-        )
+                10,
+                2,
+                {
+                    before_each = function()
+                        Scanner.invalidate_notes_cache()
+                    end,
+                }
+            )
+        end
 
-        add_metric(
-            "Scanner.slugs() cold",
-            results,
-            bench,
-            function()
-                Scanner.slugs()
-            end,
-            10,
-            2,
-            {
-                before_each = function()
-                    require("vault.core.state").set_global_key("cache.notes.slugs", nil)
+        if wants_metric(args, { "Scanner.slugs() cold" }) then
+            add_metric(
+                "Scanner.slugs() cold",
+                results,
+                bench,
+                function()
+                    Scanner.slugs()
                 end,
-            }
-        )
+                10,
+                2,
+                {
+                    before_each = function()
+                        require("vault.core.state").set_global_key("cache.notes.slugs", nil)
+                    end,
+                }
+            )
+        end
 
-        add_metric("Scanner.tags()", results, bench, function()
-            Scanner.tags()
-        end, 5, 1)
+        if wants_metric(args, { "Scanner.tags()" }) then
+            add_metric("Scanner.tags()", results, bench, function()
+                Scanner.tags()
+            end, 5, 1)
+        end
 
-        add_metric("Scanner.wikilinks()", results, bench, function()
-            Scanner.wikilinks()
-        end, 5, 1)
+        if wants_metric(args, { "Scanner.wikilinks()" }) then
+            add_metric("Scanner.wikilinks()", results, bench, function()
+                Scanner.wikilinks()
+            end, 5, 1)
+        end
 
-        add_metric("Scanner.properties()", results, bench, function()
-            Scanner.properties()
-        end, 5, 1)
+        if wants_metric(args, { "Scanner.properties()" }) then
+            add_metric("Scanner.properties()", results, bench, function()
+                Scanner.properties()
+            end, 5, 1)
+        end
 
-        add_metric("Scanner.lines() (pure Lua)", results, bench, function()
-            Scanner.lines()
-        end, 5, 1)
+        if wants_metric(args, { "Scanner.lines() (pure Lua)" }) then
+            add_metric("Scanner.lines() (pure Lua)", results, bench, function()
+                Scanner.lines()
+            end, 5, 1)
+        end
 
-        add_metric(
-            "Scanner.paths_and_wikilinks_cached() cold",
-            results,
-            bench,
-            function()
-                Scanner.paths_and_wikilinks_cached()
-            end,
-            10,
-            2,
-            {
-                before_each = function()
-                    Scanner.clear_rust_cache()
+        if wants_metric(args, { "Scanner.paths_and_wikilinks_cached() cold" }) then
+            add_metric(
+                "Scanner.paths_and_wikilinks_cached() cold",
+                results,
+                bench,
+                function()
+                    Scanner.paths_and_wikilinks_cached()
                 end,
-            }
-        )
+                10,
+                2,
+                {
+                    before_each = function()
+                        Scanner.clear_rust_cache()
+                    end,
+                }
+            )
+        end
 
-        Scanner.clear_rust_cache()
-        Scanner.paths_and_wikilinks_cached()
-        add_metric("Scanner.paths_and_wikilinks_cached() warm", results, bench, function()
+        if wants_metric(args, { "Scanner.paths_and_wikilinks_cached() warm" }) then
+            Scanner.clear_rust_cache()
             Scanner.paths_and_wikilinks_cached()
-        end, 20, 2)
+            add_metric("Scanner.paths_and_wikilinks_cached() warm", results, bench, function()
+                Scanner.paths_and_wikilinks_cached()
+            end, 20, 2)
+        end
     end
 
-    do
+    if wants_metric(args, { "Scanner.paths_and_wikilinks_cached() 1 file changed" }) then
         local scan_root = new_temp_vault_copy(fixture_dir, "bench-scan")
         setup_vault(scan_root)
         local Scanner = require("vault.scanner")
@@ -424,7 +758,7 @@ local function main()
 
     io.stderr:write("\n== Config & workflow ==\n")
 
-    do
+    if wants_metric(args, { "Config.setup()" }) then
         setup_vault(fixture_dir)
         local Config = require("vault.config")
 
@@ -439,7 +773,154 @@ local function main()
         end, 50, 5)
     end
 
-    do
+    if wants_metric(args, PICKER_METRICS) then
+        setup_vault(fixture_dir)
+
+        local Scanner = require("vault.scanner")
+        local Notes = require("vault.notes")
+        local notes_picker = require("telescope._extensions.vault.pickers.notes")
+        local tags_picker = require("telescope._extensions.vault.pickers.tags")
+        local properties_picker = require("telescope._extensions.vault.pickers.properties")
+        local dirs_picker = require("telescope._extensions.vault.pickers.dirs")
+        local wikilinks_picker = require("telescope._extensions.vault.pickers.wikilinks")
+
+        io.stderr:write("\n== Pickers ==\n")
+
+        if wants_metric(args, { "picker notes() open [cold]" }) then
+            add_metric(
+                "picker notes() open [cold]",
+                results,
+                bench,
+                function()
+                    open_picker_and_close(notes_picker({ sort_by = "mtime" }))
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker notes() open [warm]" }) then
+            add_metric("picker notes() open [warm]", results, bench, function()
+                open_picker_and_close(notes_picker({ sort_by = "mtime" }))
+            end, 10, 1)
+        end
+
+        if wants_metric(args, { "picker notes() open [preloaded]" }) then
+            local raw_paths, wikilinks_map = Scanner.paths_and_wikilinks_cached()
+            local notes = Notes.from_paths(raw_paths)
+
+            add_metric("picker notes() open [preloaded]", results, bench, function()
+                open_picker_and_close(notes_picker({
+                    notes = notes,
+                    _wikilinks_map = wikilinks_map,
+                    sort_by = "mtime",
+                }))
+            end, 10, 1)
+        end
+
+        if wants_metric(args, { "picker tags() open [warm]" }) then
+            add_metric("picker tags() open [warm]", results, bench, function()
+                open_picker_and_close(tags_picker())
+            end, 10, 1)
+        end
+
+        if wants_metric(args, { "picker tags() open [cold]" }) then
+            add_metric(
+                "picker tags() open [cold]",
+                results,
+                bench,
+                function()
+                    open_picker_and_close(tags_picker())
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker properties() open [cold]" }) then
+            add_metric(
+                "picker properties() open [cold]",
+                results,
+                bench,
+                function()
+                    open_picker_and_close(properties_picker())
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker properties() open [warm]" }) then
+            add_metric("picker properties() open [warm]", results, bench, function()
+                open_picker_and_close(properties_picker())
+            end, 10, 1)
+        end
+
+        if wants_metric(args, { "picker dirs() open [cold]" }) then
+            add_metric(
+                "picker dirs() open [cold]",
+                results,
+                bench,
+                function()
+                    open_picker_and_close(dirs_picker())
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker dirs() open [warm]" }) then
+            add_metric("picker dirs() open [warm]", results, bench, function()
+                open_picker_and_close(dirs_picker())
+            end, 10, 1)
+        end
+
+        if wants_metric(args, { "picker wikilinks() open [cold]" }) then
+            add_metric(
+                "picker wikilinks() open [cold]",
+                results,
+                bench,
+                function()
+                    open_picker_and_close(wikilinks_picker())
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker wikilinks() open [warm]" }) then
+            add_metric("picker wikilinks() open [warm]", results, bench, function()
+                open_picker_and_close(wikilinks_picker())
+            end, 10, 1)
+        end
+    end
+
+    if wants_metric(args, GRID_METRICS) then
         setup_vault(fixture_dir)
         local Scanner = require("vault.scanner")
         local Notes = require("vault.notes")
@@ -447,15 +928,19 @@ local function main()
         local raw_paths = Scanner.paths()
         local notes = Notes.from_paths(raw_paths)
 
-        add_metric("Notes.from_paths()", results, bench, function()
-            Notes.from_paths(raw_paths)
-        end, 20, 2)
+        if wants_metric(args, { "Notes.from_paths()" }) then
+            add_metric("Notes.from_paths()", results, bench, function()
+                Notes.from_paths(raw_paths)
+            end, 20, 2)
+        end
 
-        add_metric("grid build_records()", results, bench, function()
-            grid._build_records(notes.map, { "slug", "title", "status", "tags" }, nil)
-        end, 20, 2)
+        if wants_metric(args, { "grid build_records()" }) then
+            add_metric("grid build_records()", results, bench, function()
+                grid._build_records(notes.map, { "slug", "title", "status", "tags" }, nil)
+            end, 20, 2)
+        end
 
-        do
+        if wants_metric(args, { "grid open() [preloaded]" }) then
             local open_index = 0
             local current_bufnr = nil
             add_metric(
@@ -482,7 +967,7 @@ local function main()
             )
         end
 
-        do
+        if wants_metric(args, { "grid save no-op (:w)" }) then
             local open_index = 0
             local current_bufnr = nil
             add_metric(
@@ -513,7 +998,7 @@ local function main()
         end
     end
 
-    do
+    if wants_metric(args, UPDATE_METRICS) then
         local update_root = new_temp_vault_copy(fixture_dir, "bench-grid-update")
         setup_vault(update_root)
         local Scanner = require("vault.scanner")
@@ -561,14 +1046,16 @@ local function main()
                 end,
             }
         )
-        results[#results + 1] = bench.result("grid on_save update", total_samples)
-        add_phase_metrics(results, bench, "grid on_save update", phase_samples)
+        if wants_metric(args, { "grid on_save update" }) then
+            results[#results + 1] = bench.result("grid on_save update", total_samples)
+        end
+        add_phase_metrics(results, bench, args, "grid on_save update", phase_samples)
 
         delete_buffer(bufnr)
         delete_path(update_root)
     end
 
-    do
+    if wants_metric(args, RENAME_METRICS) then
         local rename_root = new_temp_vault_copy(fixture_dir, "bench-grid-rename")
         setup_vault(rename_root)
         local Scanner = require("vault.scanner")
@@ -630,14 +1117,72 @@ local function main()
                 end,
             }
         )
-        results[#results + 1] = bench.result("grid on_save rename", total_samples)
-        add_phase_metrics(results, bench, "grid on_save rename", phase_samples)
+        if wants_metric(args, { "grid on_save rename" }) then
+            results[#results + 1] = bench.result("grid on_save rename", total_samples)
+        end
+        add_phase_metrics(results, bench, args, "grid on_save rename", phase_samples)
 
         delete_buffer(bufnr)
         delete_path(rename_root)
     end
 
-    do
+    if wants_metric(args, RENAME_BATCH_METRICS) then
+        local rename_root = new_temp_vault_copy(fixture_dir, "bench-grid-rename-batch")
+        setup_vault(rename_root)
+        local Scanner = require("vault.scanner")
+        local grid = require("vault.views.grid")
+        local raw_paths = Scanner.paths()
+        local bufnr = vim.api.nvim_create_buf(false, true)
+        local state = make_full_save_state(grid, raw_paths, bufnr, "bench-grid-rename-batch")
+        local on_save = grid._make_on_save(state)
+        local phase_samples = new_phase_samples()
+        local capture_profile = false
+        local rename_count = math.min(100, math.max(10, math.floor(args.vault_size / 10)))
+
+        grid._buf_states[bufnr] = state
+        io.stderr:write("Measuring: grid on_save rename batch...\n")
+        local total_samples = bench.measure(
+            function()
+                local done_err = "PENDING"
+                on_save(make_batch_rename_diff(rename_count), function(err)
+                    done_err = err or false
+                end)
+                if done_err ~= false then
+                    error(tostring(done_err))
+                end
+                if capture_profile then
+                    record_phase_samples(phase_samples, state.last_save_profile)
+                end
+            end,
+            10,
+            1,
+            {
+                before_each = function(_, is_warmup)
+                    capture_profile = not is_warmup
+                    reset_full_save_state(state, raw_paths, grid)
+                    grid._vt_undo.clear(bufnr)
+                    Scanner.invalidate_notes_cache()
+                    Scanner.clear_rust_cache()
+                end,
+                after_each = function()
+                    local snap = grid._vt_undo.restore(bufnr)
+                    if snap then
+                        grid._apply_undo(bufnr, snap)
+                    end
+                end,
+            }
+        )
+        if wants_metric(args, { "grid on_save rename batch" }) then
+            results[#results + 1] = bench.result("grid on_save rename batch", total_samples)
+        end
+        add_phase_metrics(results, bench, args, "grid on_save rename batch", phase_samples)
+
+        grid._buf_states[bufnr] = nil
+        delete_buffer(bufnr)
+        delete_path(rename_root)
+    end
+
+    if wants_metric(args, { "Watcher.handle_rename()" }) then
         local watcher_root = new_temp_vault_copy(fixture_dir, "bench-watcher")
         setup_vault(watcher_root)
         local Scanner = require("vault.scanner")
@@ -687,23 +1232,20 @@ local function main()
         delete_path(watcher_root)
     end
 
+    if #results == 0 then
+        error("benchmark run completed without collecting any metrics")
+    end
+
+    bench.print_hotspots(results, args.top)
     bench.print_table(results)
 
     local report = bench.build_report(results)
     report.vault_size = args.vault_size
+    report.filter = args.filter or vim.NIL
 
-    local json = bench.json_encode(report)
+    local json = bench.write_report(report, args.out)
     io.stdout:write(json .. "\n")
-
-    local out_dir = vim.fn.getcwd() .. "/benchmarks"
-    vim.fn.mkdir(out_dir, "p")
-    local out_path = out_dir .. "/latest.json"
-    local f = io.open(out_path, "w")
-    if f then
-        f:write(json .. "\n")
-        f:close()
-        io.stderr:write("Results saved to " .. out_path .. "\n")
-    end
+    io.stderr:write("Results saved to " .. args.out .. "\n")
 end
 
 main()

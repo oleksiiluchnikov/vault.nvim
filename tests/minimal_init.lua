@@ -1,5 +1,7 @@
 -- tests/minimal_init.lua
 
+vim.env.VAULT_TEST_DISABLE_PREWARM = vim.env.VAULT_TEST_DISABLE_PREWARM or "1"
+
 -- 1. ISOLATION
 -- Prevent loading user's personal config
 vim.env.NVIM_APPNAME = vim.env.VAULT_TEST_APPNAME or vim.env.NVIM_APPNAME or "nvim-test"
@@ -70,7 +72,8 @@ end
 _G.assert = require("luassert")
 
 -- 4. SETUP VAULT WITH FIXTURES
-local fixture_root = vim.fn.expand(vim.env.VAULT_TEST_ROOT or (root_cwd .. "/tests/fixtures/demo-vault"))
+local fixture_root =
+    vim.fn.expand(vim.env.VAULT_TEST_ROOT or (root_cwd .. "/tests/fixtures/demo-vault"))
 
 -- Ensure the fixture directory actually exists to prevent crashes
 if vim.fn.isdirectory(fixture_root) == 0 then

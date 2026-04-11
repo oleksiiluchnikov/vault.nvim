@@ -18,7 +18,7 @@ return function(opts)
     local vault_layouts = require("telescope._extensions.vault.layouts")
     local vault_hl = require("telescope._extensions.vault.highlights")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
-    local picker_cache = require("telescope._extensions.vault.pickers.cache")
+    local default_prep = require("telescope._extensions.vault.pickers.notes.default_prep")
     local note_stats = require("telescope._extensions.vault.pickers.notes.stats")
     local note_columns = require("telescope._extensions.vault.pickers.notes.columns")
 
@@ -32,27 +32,7 @@ return function(opts)
     local wikilinks_map = opts._wikilinks_map
     if not opts.notes and not wikilinks_map then
         if opts.sort_by == "mtime" then
-            prepared = picker_cache.get_or_set("notes.default", function()
-                local Scanner = require("vault.scanner")
-                local raw_paths, wl_map = Scanner.paths_and_wikilinks_cached()
-                local notes = require("vault.notes").from_paths(raw_paths)
-                local results = notes:list()
-                local link_counts = note_stats.collect(results, wl_map)
-
-                local ftime = {} --- @type table<string, integer>
-                for _, note in ipairs(results) do
-                    ftime[note.data.path] = vim.fn.getftime(note.data.path)
-                end
-                table.sort(results, function(a, b)
-                    return ftime[a.data.path] < ftime[b.data.path]
-                end)
-
-                return {
-                    link_counts = link_counts,
-                    notes = notes,
-                    results = results,
-                }
-            end)
+            prepared = default_prep.get_or_prepare()
             opts.notes = prepared.notes
         else
             local Scanner = require("vault.scanner")

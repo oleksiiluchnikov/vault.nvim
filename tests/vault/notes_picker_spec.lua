@@ -1,5 +1,6 @@
 local MODULE = "telescope._extensions.vault.pickers.notes"
 local COLUMNS_MODULE = "telescope._extensions.vault.pickers.notes.columns"
+local DEFAULT_PREP_MODULE = "telescope._extensions.vault.pickers.notes.default_prep"
 
 ---@return table
 local function sample_note()
@@ -35,11 +36,13 @@ describe("vault notes picker", function()
             highlights = package.loaded["telescope._extensions.vault.highlights"],
             filter = package.loaded["telescope._extensions.vault.on_input_filter"],
             stats = package.loaded["telescope._extensions.vault.pickers.notes.stats"],
+            default_prep = package.loaded[DEFAULT_PREP_MODULE],
             notes = package.loaded["vault.notes"],
             scanner = package.loaded["vault.scanner"],
         }
         package.loaded[MODULE] = nil
         package.loaded[COLUMNS_MODULE] = nil
+        package.loaded[DEFAULT_PREP_MODULE] = nil
     end)
 
     after_each(function()
@@ -58,6 +61,7 @@ describe("vault notes picker", function()
         package.loaded["telescope._extensions.vault.highlights"] = originals.highlights
         package.loaded["telescope._extensions.vault.on_input_filter"] = originals.filter
         package.loaded["telescope._extensions.vault.pickers.notes.stats"] = originals.stats
+        package.loaded[DEFAULT_PREP_MODULE] = originals.default_prep
         package.loaded["vault.notes"] = originals.notes
         package.loaded["vault.scanner"] = originals.scanner
     end)
@@ -243,39 +247,32 @@ describe("vault notes picker", function()
         local scanner_calls = 0
         local notes_from_paths_calls = 0
         local stats_collect_calls = 0
+        local prepared = nil
 
-        package.loaded["vault.scanner"] = {
-            paths_and_wikilinks_cached = function()
-                scanner_calls = scanner_calls + 1
-                return {
-                    [sample_note().data.slug] = sample_note().data,
-                }, {}
-            end,
-        }
-        package.loaded["vault.notes"] = {
-            from_paths = function(raw_paths)
-                notes_from_paths_calls = notes_from_paths_calls + 1
-                return {
-                    list = function()
-                        return {
-                            {
-                                data = raw_paths[sample_note().data.slug],
+        package.loaded[DEFAULT_PREP_MODULE] = {
+            get_or_prepare = function()
+                if prepared == nil then
+                    scanner_calls = scanner_calls + 1
+                    notes_from_paths_calls = notes_from_paths_calls + 1
+                    stats_collect_calls = stats_collect_calls + 1
+                    prepared = {
+                        link_counts = {
+                            [sample_note().data.slug] = {
+                                outlinks = 0,
+                                inlinks = 0,
+                                dangling = 0,
                             },
-                        }
-                    end,
-                }
-            end,
-        }
-        package.loaded["telescope._extensions.vault.pickers.notes.stats"] = {
-            collect = function()
-                stats_collect_calls = stats_collect_calls + 1
-                return {
-                    [sample_note().data.slug] = {
-                        outlinks = 0,
-                        inlinks = 0,
-                        dangling = 0,
-                    },
-                }
+                        },
+                        notes = {
+                            list = function()
+                                return { sample_note() }
+                            end,
+                        },
+                        results = { sample_note() },
+                    }
+                end
+
+                return prepared
             end,
         }
 
