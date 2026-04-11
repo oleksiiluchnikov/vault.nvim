@@ -6,10 +6,9 @@ return function(opts)
     local finders = require("telescope.finders")
     local sorters = require("telescope.sorters")
     local vault_state = require("vault.core.state")
-    local Scanner = require("vault.scanner")
     local pickers = require("telescope.pickers")
     local vault_layouts = require("telescope._extensions.vault.layouts")
-    local picker_cache = require("telescope._extensions.vault.pickers.cache")
+    local default_prep = require("telescope._extensions.vault.pickers.dirs.default_prep")
     local vault_hl = require("telescope._extensions.vault.highlights")
     local vault_mappings = require("telescope._extensions.vault.mappings")
     local make_filter = require("telescope._extensions.vault.on_input_filter")
@@ -24,42 +23,9 @@ return function(opts)
         return copy
     end
 
-    --- @param slugs table<string, string>
-    --- @param dir_counts table<string, integer>
-    --- @return nil
-    local function count_notes_per_dir(slugs, dir_counts)
-        for slug, _ in pairs(slugs) do
-            local start = 1
-            while true do
-                local slash = string.find(slug, "/", start, true)
-                if not slash then
-                    break
-                end
-
-                local relpath = string.sub(slug, 1, slash - 1)
-                if dir_counts[relpath] ~= nil then
-                    dir_counts[relpath] = dir_counts[relpath] + 1
-                end
-                start = slash + 1
-            end
-        end
-    end
-
     opts = opts or {}
 
-    local prepared = picker_cache.get_or_set("dirs.default", function()
-        local list = require("vault.dirs")():list()
-        local counts = {} --- @type table<string, integer>
-        for _, d in ipairs(list) do
-            counts[d.data.relpath] = 0
-        end
-        count_notes_per_dir(Scanner.slugs(), counts)
-
-        return {
-            by_count = list,
-            dir_counts = counts,
-        }
-    end)
+    local prepared = default_prep.get_or_prepare()
 
     local dirs_list = copy_list(prepared.by_count)
     if next(dirs_list) == nil then

@@ -15,7 +15,7 @@ function vault.setup(opts)
     local config = require("vault.config")
     config.setup(opts)
 
-    require("vault.prewarm").schedule_notes()
+    require("vault.prewarm").schedule()
 
     if config.options.features.commands == true then
         -- Lazy-load: register a lightweight :Vault stub that loads the real

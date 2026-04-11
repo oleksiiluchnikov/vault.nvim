@@ -7,6 +7,16 @@ local function scanner()
     return require("vault.scanner")
 end
 
+---@param map vault.Tags.map|nil
+---@return vault.Tags.map
+local function copy_map(map)
+    local copy = {}
+    for key, value in pairs(map or {}) do
+        copy[key] = value
+    end
+    return copy
+end
+
 -- Aliases
 --- @alias vault.Tags.map table<vault.Tag.Data.name, vault.Tag> - Map of tags by canonical tag name.
 --- @alias vault.Tags.list table<integer, vault.Tag> - Ordered list of tag objects.
@@ -34,6 +44,12 @@ local Tags = Collection:extend("VaultTags")
 --- Sets the tags map and registers the tags globally.
 --- @return nil
 function Tags:init()
+    local cached = state.get_global_key("tags")
+    if type(cached) == "table" and type(cached.map) == "table" then
+        self.map = copy_map(cached.map)
+        return
+    end
+
     self.map = scanner().tags()
     state.set_global_key("tags", self)
 end
@@ -85,12 +101,20 @@ function Tags:filter(opts, value, match_opt, case_sensitive)
     --- @param match_result boolean
     --- @param match_opt vault.enum.MatchOpts.key Match option
     --- @param case_sensitive boolean Case sensitive
-    local function apply_filter(tag_name, queries, match_result, rule_match_opt, rule_case_sensitive)
+    local function apply_filter(
+        tag_name,
+        queries,
+        match_result,
+        rule_match_opt,
+        rule_case_sensitive
+    )
         if not queries then
             return
         end
         for _, query in ipairs(queries) do
-            if utils.match(tag_name, query, rule_match_opt, rule_case_sensitive) == match_result then
+            if
+                utils.match(tag_name, query, rule_match_opt, rule_case_sensitive) == match_result
+            then
                 if self.map[tag_name] then
                     self.map[tag_name] = nil
                 end

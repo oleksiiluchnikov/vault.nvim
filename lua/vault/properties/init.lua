@@ -7,6 +7,16 @@ end
 
 local Collection = require("vault.core.collection")
 
+---@param map vault.Properties.map|nil
+---@return vault.Properties.map
+local function copy_map(map)
+    local copy = {}
+    for key, value in pairs(map or {}) do
+        copy[key] = value
+    end
+    return copy
+end
+
 --- @alias vault.Properties.map  table<string, vault.Property>
 --- @alias vault.Properties.list table<integer, vault.Property>
 --- @alias vault.Properties.sources table<string, table>
@@ -21,6 +31,12 @@ local Properties = Collection:extend("VaultProperties")
 --- Initialises the `vault.Properties` object by scanning all properties from the vault.
 --- Sets the properties map and registers the collection globally.
 function Properties:init()
+    local cached = state.get_global_key("properties")
+    if type(cached) == "table" and type(cached.map) == "table" then
+        self.map = copy_map(cached.map)
+        return
+    end
+
     self.map = scanner().properties()
     state.set_global_key("properties", self)
 end

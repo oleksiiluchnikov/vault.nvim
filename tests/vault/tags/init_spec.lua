@@ -5,6 +5,23 @@ vim.opt.runtimepath:append(vim.fn.getenv("HOME") .. "/.local/share/nvim/lazy/**"
 
 -- Import required modules
 local assert = require("luassert")
+local fixture_root = vim.fn.getcwd() .. "/tests/fixtures/demo-vault"
+
+require("vault").setup({
+    root = fixture_root,
+    ext = ".md",
+    features = {
+        cmp = false,
+        commands = true,
+        watcher = false,
+    },
+    tags = {
+        valid = { hex = true },
+    },
+    search_tool = "rg",
+})
+
+package.loaded["vault.tags"] = nil
 local VaultTags = require("vault.tags")
 
 describe("VaultTags", function()

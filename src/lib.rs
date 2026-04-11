@@ -4,7 +4,7 @@ use once_cell::sync::Lazy;
 use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
@@ -242,7 +242,7 @@ impl ParsedNote {
 // Aggregated Data Structures (matching Fetcher output)
 // ============================================================================
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PathInfo {
     path: String,
     slug: String,
@@ -254,7 +254,7 @@ struct PathInfo {
     title: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SourceOccurrence {
     lnum: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -267,7 +267,7 @@ struct SourceOccurrence {
     end_col: Option<usize>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct TagData {
     name: String,
     count: usize,
@@ -277,13 +277,13 @@ struct TagData {
     sources: HashMap<String, HashMap<usize, SourceOccurrence>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SuggestionCandidate {
     slug: String,
     score: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct WikilinkData {
     stem: String,
     count: usize,
@@ -291,9 +291,11 @@ struct WikilinkData {
     sources: HashMap<String, HashMap<usize, SourceOccurrence>>,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     suggestions: HashMap<String, Vec<SuggestionCandidate>>,
+    #[serde(skip)]
+    embedded_count: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct TaskData {
     description: String,
     status: String,
@@ -301,21 +303,21 @@ struct TaskData {
     sources: HashMap<String, HashMap<usize, SourceOccurrence>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct LineData {
     content: String,
     count: usize,
     sources: HashMap<String, HashMap<usize, SourceOccurrence>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ExternalLinkData {
     line: String,
     text: String,
     url: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct FieldValueData {
     key: String,
     value: String,
@@ -323,14 +325,14 @@ struct FieldValueData {
     sources: HashMap<String, HashMap<usize, SourceOccurrence>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PropertyValueData {
     name: String,
     count: usize,
     sources: HashMap<String, HashMap<usize, bool>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct PropertyData {
     name: String,
     count: usize,
@@ -527,10 +529,57 @@ struct CachedNote {
 struct ScanCache {
     root: String,
     ignores_hash: u64,
+    generation: u64,
     entries: HashMap<PathBuf, CachedNote>,
+    paths_map: HashMap<String, PathInfo>,
+    wikilinks_map_no_suggest: HashMap<String, WikilinkData>,
+    last_diff_from_generation: u64,
+    last_paths_updated: HashMap<String, PathInfo>,
+    last_paths_removed: Vec<String>,
+    last_wikilinks_updated: HashMap<String, WikilinkData>,
+    last_wikilinks_removed: Vec<String>,
 }
 
 static SCAN_CACHE: Lazy<Mutex<Option<ScanCache>>> = Lazy::new(|| Mutex::new(None));
+
+fn cached_paths_and_wikilinks_response<'lua>(
+    lua: &'lua Lua,
+    generation: u64,
+    changed: bool,
+    full: bool,
+    paths: Option<&HashMap<String, PathInfo>>,
+    wikilinks: Option<&HashMap<String, WikilinkData>>,
+    paths_updated: Option<&HashMap<String, PathInfo>>,
+    paths_removed: Option<&Vec<String>>,
+    wikilinks_updated: Option<&HashMap<String, WikilinkData>>,
+    wikilinks_removed: Option<&Vec<String>>,
+) -> LuaResult<LuaValue<'lua>> {
+    let table = lua.create_table()?;
+    table.set("generation", generation)?;
+    table.set("changed", changed)?;
+    table.set("full", full)?;
+
+    if let Some(paths) = paths {
+        table.set("paths", lua.to_value(paths)?)?;
+    }
+    if let Some(wikilinks) = wikilinks {
+        table.set("wikilinks", lua.to_value(wikilinks)?)?;
+    }
+    if let Some(paths_updated) = paths_updated {
+        table.set("paths_updated", lua.to_value(paths_updated)?)?;
+    }
+    if let Some(paths_removed) = paths_removed {
+        table.set("paths_removed", lua.to_value(paths_removed)?)?;
+    }
+    if let Some(wikilinks_updated) = wikilinks_updated {
+        table.set("wikilinks_updated", lua.to_value(wikilinks_updated)?)?;
+    }
+    if let Some(wikilinks_removed) = wikilinks_removed {
+        table.set("wikilinks_removed", lua.to_value(wikilinks_removed)?)?;
+    }
+
+    Ok(LuaValue::Table(table))
+}
 
 /// Simple hash for ignore patterns so we can detect config changes.
 fn hash_ignores(ignores: &[String]) -> u64 {
@@ -547,12 +596,20 @@ fn hash_ignores(ignores: &[String]) -> u64 {
 }
 
 /// Incremental scan: reuse cached ParsedNotes for unchanged files.
-/// Returns the full set of notes (like scan_all_notes) but only re-parses
-/// files whose mtime has changed since the last scan.
-fn scan_all_notes_cached(root: &str, ignore_patterns: Vec<String>) -> Vec<ParsedNote> {
+/// When `collect_notes` is false, the cache is refreshed without rebuilding an
+/// owned `Vec<ParsedNote>` from the cache.
+fn scan_all_notes_cached(
+    root: &str,
+    ignore_patterns: Vec<String>,
+    collect_notes: bool,
+) -> Option<Vec<ParsedNote>> {
     let root_path = Path::new(root);
     if !root_path.exists() {
-        return Vec::new();
+        return if collect_notes {
+            Some(Vec::new())
+        } else {
+            None
+        };
     }
 
     let ignores_hash = hash_ignores(&ignore_patterns);
@@ -591,29 +648,51 @@ fn scan_all_notes_cached(root: &str, ignore_patterns: Vec<String>) -> Vec<Parsed
 
     if !cache_valid {
         // Cold start: parse everything in parallel, populate cache
-        let notes: Vec<ParsedNote> = current_files
+        let parsed: Vec<(PathBuf, SystemTime, ParsedNote)> = current_files
             .par_iter()
-            .filter_map(|(path, _)| ParsedNote::from_path(path))
+            .filter_map(|(path, mtime)| {
+                ParsedNote::from_path(path).map(|note| (path.clone(), mtime.clone(), note))
+            })
             .collect();
 
-        let mut entries = HashMap::with_capacity(notes.len());
-        for note in &notes {
-            let path = PathBuf::from(&note.path);
-            if let Ok(mtime) = fs::metadata(&path).and_then(|m| m.modified()) {
-                entries.insert(
-                    path,
-                    CachedNote {
-                        mtime,
-                        note: note.clone(),
-                    },
-                );
+        let mut entries = HashMap::with_capacity(parsed.len());
+        let mut paths_map = HashMap::with_capacity(parsed.len());
+        let mut wikilinks_map_no_suggest = HashMap::new();
+        let mut notes = if collect_notes {
+            Some(Vec::with_capacity(parsed.len()))
+        } else {
+            None
+        };
+
+        for (path, mtime, note) in parsed {
+            if let Some(collected) = notes.as_mut() {
+                collected.push(note.clone());
             }
+
+            entries.insert(
+                path,
+                CachedNote {
+                    mtime,
+                    note: note.clone(),
+                },
+            );
+
+            insert_note_path(&mut paths_map, &note, root);
+            insert_note_wikilinks_no_suggest(&mut wikilinks_map_no_suggest, &note, root);
         }
 
         *cache = Some(ScanCache {
             root: root.to_string(),
             ignores_hash: ignores_hash,
+            generation: 1,
             entries,
+            paths_map,
+            wikilinks_map_no_suggest,
+            last_diff_from_generation: 0,
+            last_paths_updated: HashMap::new(),
+            last_paths_removed: Vec::new(),
+            last_wikilinks_updated: HashMap::new(),
+            last_wikilinks_removed: Vec::new(),
         });
 
         return notes;
@@ -635,8 +714,27 @@ fn scan_all_notes_cached(root: &str, ignore_patterns: Vec<String>) -> Vec<Parsed
         .map(|(path, _)| path)
         .collect();
 
-    // Remove deleted files from cache
-    sc.entries.retain(|path, _| current_set.contains_key(path));
+    let previous_generation = sc.generation;
+    let mut changed = false;
+    let mut dirty_path_keys: HashSet<String> = HashSet::new();
+    let mut dirty_wikilink_keys: HashSet<String> = HashSet::new();
+
+    // Remove deleted files from cache and incremental maps
+    let deleted_paths: Vec<PathBuf> = sc
+        .entries
+        .keys()
+        .filter(|path| !current_set.contains_key(*path))
+        .cloned()
+        .collect();
+    for path in deleted_paths {
+        if let Some(cached) = sc.entries.remove(&path) {
+            dirty_path_keys.insert(path_to_slug(&cached.note.path, root));
+            mark_note_wikilink_stems(&cached.note, &mut dirty_wikilink_keys);
+            remove_note_path(&mut sc.paths_map, &cached.note, root);
+            remove_note_wikilinks_no_suggest(&mut sc.wikilinks_map_no_suggest, &cached.note, root);
+            changed = true;
+        }
+    }
 
     // Re-parse changed/new files in parallel
     if !to_reparse.is_empty() {
@@ -650,12 +748,62 @@ fn scan_all_notes_cached(root: &str, ignore_patterns: Vec<String>) -> Vec<Parsed
             .collect();
 
         for (path, cached) in reparsed {
+            if let Some(previous) = sc.entries.get(&path) {
+                dirty_path_keys.insert(path_to_slug(&previous.note.path, root));
+                mark_note_wikilink_stems(&previous.note, &mut dirty_wikilink_keys);
+                remove_note_path(&mut sc.paths_map, &previous.note, root);
+                remove_note_wikilinks_no_suggest(
+                    &mut sc.wikilinks_map_no_suggest,
+                    &previous.note,
+                    root,
+                );
+            }
+
+            dirty_path_keys.insert(path_to_slug(&cached.note.path, root));
+            mark_note_wikilink_stems(&cached.note, &mut dirty_wikilink_keys);
+            insert_note_path(&mut sc.paths_map, &cached.note, root);
+            insert_note_wikilinks_no_suggest(&mut sc.wikilinks_map_no_suggest, &cached.note, root);
             sc.entries.insert(path, cached);
+            changed = true;
         }
     }
 
-    // Collect all notes from cache
-    sc.entries.values().map(|c| c.note.clone()).collect()
+    if changed {
+        let mut last_paths_updated = HashMap::new();
+        let mut last_paths_removed = Vec::new();
+        for slug in dirty_path_keys {
+            if let Some(info) = sc.paths_map.get(&slug) {
+                last_paths_updated.insert(slug, info.clone());
+            } else {
+                last_paths_removed.push(slug);
+            }
+        }
+
+        let mut last_wikilinks_updated = HashMap::new();
+        let mut last_wikilinks_removed = Vec::new();
+        for stem in dirty_wikilink_keys {
+            if let Some(info) = sc.wikilinks_map_no_suggest.get(&stem) {
+                last_wikilinks_updated.insert(stem, info.clone());
+            } else {
+                last_wikilinks_removed.push(stem);
+            }
+        }
+
+        last_paths_removed.sort();
+        last_wikilinks_removed.sort();
+        sc.last_diff_from_generation = previous_generation;
+        sc.last_paths_updated = last_paths_updated;
+        sc.last_paths_removed = last_paths_removed;
+        sc.last_wikilinks_updated = last_wikilinks_updated;
+        sc.last_wikilinks_removed = last_wikilinks_removed;
+        sc.generation = sc.generation.wrapping_add(1);
+    }
+
+    if collect_notes {
+        Some(sc.entries.values().map(|c| c.note.clone()).collect())
+    } else {
+        None
+    }
 }
 
 /// Clear the scan cache (called from Lua when the watcher detects changes
@@ -666,23 +814,119 @@ fn clear_scan_cache() {
 }
 
 fn build_paths_map(notes: &[ParsedNote], root: &str) -> HashMap<String, PathInfo> {
-    notes
-        .iter()
-        .map(|note| {
-            let slug = path_to_slug(&note.path, root);
-            (
-                slug.clone(),
-                PathInfo {
-                    path: note.path.clone(),
-                    slug,
-                    relpath: path_to_relpath(&note.path, root),
-                    basename: path_to_basename(&note.path),
-                    frontmatter: note.frontmatter.clone(),
-                    title: note.title.clone(),
+    let mut paths_map = HashMap::with_capacity(notes.len());
+    for note in notes {
+        insert_note_path(&mut paths_map, note, root);
+    }
+    paths_map
+}
+
+fn build_path_info(note: &ParsedNote, root: &str) -> (String, PathInfo) {
+    let slug = path_to_slug(&note.path, root);
+    let info = PathInfo {
+        path: note.path.clone(),
+        slug: slug.clone(),
+        relpath: path_to_relpath(&note.path, root),
+        basename: path_to_basename(&note.path),
+        frontmatter: note.frontmatter.clone(),
+        title: note.title.clone(),
+    };
+
+    (slug, info)
+}
+
+fn insert_note_path(paths_map: &mut HashMap<String, PathInfo>, note: &ParsedNote, root: &str) {
+    let (slug, info) = build_path_info(note, root);
+    paths_map.insert(slug, info);
+}
+
+fn remove_note_path(paths_map: &mut HashMap<String, PathInfo>, note: &ParsedNote, root: &str) {
+    let slug = path_to_slug(&note.path, root);
+    paths_map.remove(&slug);
+}
+
+fn mark_note_wikilink_stems(note: &ParsedNote, dirty_stems: &mut HashSet<String>) {
+    for link_item in &note.wikilinks {
+        dirty_stems.insert(extract_wikilink_stem(&link_item.target));
+    }
+}
+
+fn insert_note_wikilinks_no_suggest(
+    wikilinks_map: &mut HashMap<String, WikilinkData>,
+    note: &ParsedNote,
+    root: &str,
+) {
+    let slug = path_to_slug(&note.path, root);
+
+    for link_item in &note.wikilinks {
+        let stem = extract_wikilink_stem(&link_item.target);
+
+        let entry = wikilinks_map
+            .entry(stem.clone())
+            .or_insert_with(|| WikilinkData {
+                stem: stem.clone(),
+                count: 0,
+                embedded: false,
+                sources: HashMap::new(),
+                suggestions: HashMap::new(),
+                embedded_count: 0,
+            });
+
+        entry.count += 1;
+        if link_item.embedded {
+            entry.embedded_count += 1;
+            entry.embedded = true;
+        }
+
+        entry
+            .sources
+            .entry(slug.clone())
+            .or_insert_with(HashMap::new)
+            .insert(
+                link_item.line,
+                SourceOccurrence {
+                    lnum: link_item.line,
+                    line: None,
+                    col: None,
+                    end_lnum: Some(link_item.line),
+                    end_col: None,
                 },
-            )
-        })
-        .collect()
+            );
+    }
+}
+
+fn remove_note_wikilinks_no_suggest(
+    wikilinks_map: &mut HashMap<String, WikilinkData>,
+    note: &ParsedNote,
+    root: &str,
+) {
+    let slug = path_to_slug(&note.path, root);
+
+    for link_item in &note.wikilinks {
+        let stem = extract_wikilink_stem(&link_item.target);
+        let mut remove_entry = false;
+
+        if let Some(entry) = wikilinks_map.get_mut(&stem) {
+            entry.count = entry.count.saturating_sub(1);
+            if link_item.embedded {
+                entry.embedded_count = entry.embedded_count.saturating_sub(1);
+            }
+
+            if let Some(source_occurrences) = entry.sources.get_mut(&slug) {
+                source_occurrences.remove(&link_item.line);
+                if source_occurrences.is_empty() {
+                    entry.sources.remove(&slug);
+                }
+            }
+
+            entry.embedded = entry.embedded_count > 0;
+            remove_entry = entry.count == 0 || entry.sources.is_empty();
+        }
+
+        if remove_entry {
+            wikilinks_map.remove(&stem);
+        }
+    }
 }
 
 fn build_tags_map(notes: &[ParsedNote], root: &str) -> HashMap<String, TagData> {
@@ -1056,41 +1300,7 @@ fn build_wikilinks_map_no_suggest(
     let mut wikilinks_map: HashMap<String, WikilinkData> = HashMap::new();
 
     for note in notes {
-        let slug = path_to_slug(&note.path, root);
-
-        for link_item in &note.wikilinks {
-            let stem = extract_wikilink_stem(&link_item.target);
-
-            let entry = wikilinks_map
-                .entry(stem.clone())
-                .or_insert_with(|| WikilinkData {
-                    stem: stem.clone(),
-                    count: 0,
-                    embedded: false,
-                    sources: HashMap::new(),
-                    suggestions: HashMap::new(),
-                });
-
-            entry.count += 1;
-            if link_item.embedded {
-                entry.embedded = true;
-            }
-
-            entry
-                .sources
-                .entry(slug.clone())
-                .or_insert_with(HashMap::new)
-                .insert(
-                    link_item.line,
-                    SourceOccurrence {
-                        lnum: link_item.line,
-                        line: None,
-                        col: None,
-                        end_lnum: Some(link_item.line),
-                        end_col: None,
-                    },
-                );
-        }
+        insert_note_wikilinks_no_suggest(&mut wikilinks_map, note, root);
     }
 
     wikilinks_map
@@ -1128,11 +1338,13 @@ fn build_wikilinks_map(notes: &[ParsedNote], root: &str) -> HashMap<String, Wiki
                     embedded: false,
                     sources: HashMap::new(),
                     suggestions: HashMap::new(),
+                    embedded_count: 0,
                 });
 
             entry.count += 1;
             if link_item.embedded {
                 entry.embedded = true;
+                entry.embedded_count += 1;
             }
 
             entry
@@ -1674,7 +1886,7 @@ where
     T: Serialize,
     F: FnOnce(&[ParsedNote], &str) -> T,
 {
-    let notes = scan_all_notes_cached(&root, ignores);
+    let notes = scan_all_notes_cached(&root, ignores, true).unwrap_or_default();
     let data = builder(&notes, &root);
     lua.to_value(&data)
 }
@@ -1733,7 +1945,7 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
     exports.set(
         "lines",
         lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
-            run_scanner(lua, (root, ignores), build_lines_map)
+            run_scanner_cached(lua, (root, ignores), build_lines_map)
         })?,
     )?;
     exports.set(
@@ -1765,7 +1977,7 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
     exports.set(
         "wikilinks_no_suggest",
         lua.create_function(|lua, (root, ignores): (String, Vec<String>)| {
-            run_scanner(lua, (root, ignores), build_wikilinks_map_no_suggest)
+            run_scanner_cached(lua, (root, ignores), build_wikilinks_map_no_suggest)
         })?,
     )?;
 
@@ -1793,15 +2005,89 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
     exports.set(
         "paths_and_wikilinks_cached",
         lua.create_function(
-            |lua, (root, ignores): (String, Vec<String>)| -> LuaResult<LuaValue> {
-                let notes = scan_all_notes_cached(&root, ignores);
-                let paths = build_paths_map(&notes, &root);
-                let wikilinks = build_wikilinks_map_no_suggest(&notes, &root);
+            |lua,
+             (root, ignores, known_generation): (String, Vec<String>, Option<u64>)|
+             -> LuaResult<LuaValue> {
+                let ignores_hash = hash_ignores(&ignores);
+                scan_all_notes_cached(&root, ignores, false);
 
-                let table = lua.create_table()?;
-                table.set("paths", lua.to_value(&paths)?)?;
-                table.set("wikilinks", lua.to_value(&wikilinks)?)?;
-                Ok(LuaValue::Table(table))
+                let cache = SCAN_CACHE.lock().unwrap();
+                let Some(sc) = cache.as_ref() else {
+                    let empty_paths: HashMap<String, PathInfo> = HashMap::new();
+                    let empty_wikilinks: HashMap<String, WikilinkData> = HashMap::new();
+                    return cached_paths_and_wikilinks_response(
+                        lua,
+                        0,
+                        true,
+                        true,
+                        Some(&empty_paths),
+                        Some(&empty_wikilinks),
+                        None,
+                        None,
+                        None,
+                        None,
+                    );
+                };
+
+                if sc.root != root || sc.ignores_hash != ignores_hash {
+                    let empty_paths: HashMap<String, PathInfo> = HashMap::new();
+                    let empty_wikilinks: HashMap<String, WikilinkData> = HashMap::new();
+                    return cached_paths_and_wikilinks_response(
+                        lua,
+                        0,
+                        true,
+                        true,
+                        Some(&empty_paths),
+                        Some(&empty_wikilinks),
+                        None,
+                        None,
+                        None,
+                        None,
+                    );
+                }
+
+                if known_generation == Some(sc.generation) {
+                    return cached_paths_and_wikilinks_response(
+                        lua,
+                        sc.generation,
+                        false,
+                        false,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                    );
+                }
+
+                if known_generation == Some(sc.last_diff_from_generation) {
+                    return cached_paths_and_wikilinks_response(
+                        lua,
+                        sc.generation,
+                        true,
+                        false,
+                        None,
+                        None,
+                        Some(&sc.last_paths_updated),
+                        Some(&sc.last_paths_removed),
+                        Some(&sc.last_wikilinks_updated),
+                        Some(&sc.last_wikilinks_removed),
+                    );
+                }
+
+                cached_paths_and_wikilinks_response(
+                    lua,
+                    sc.generation,
+                    true,
+                    true,
+                    Some(&sc.paths_map),
+                    Some(&sc.wikilinks_map_no_suggest),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
             },
         )?,
     )?;

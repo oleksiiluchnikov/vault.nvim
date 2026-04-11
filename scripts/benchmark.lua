@@ -241,6 +241,10 @@ local function clear_picker_caches()
     Scanner.clear_rust_cache()
 end
 
+local function prewarm_picker_state()
+    require("vault.prewarm").prewarm_notes()
+end
+
 --- @param ge any
 --- @param path string
 --- @param slug string
@@ -380,6 +384,12 @@ local METRIC_NAMES = {
     "picker notes() open [cold]",
     "picker notes() open [warm]",
     "picker notes() open [preloaded]",
+    "picker linked() open [cold]",
+    "picker linked() open [prewarmed]",
+    "picker orphans() open [cold]",
+    "picker orphans() open [prewarmed]",
+    "picker inbox() open [cold]",
+    "picker inbox() open [prewarmed]",
     "picker tags() open [cold]",
     "picker tags() open [warm]",
     "picker properties() open [cold]",
@@ -447,6 +457,12 @@ local PICKER_METRICS = {
     "picker notes() open [cold]",
     "picker notes() open [warm]",
     "picker notes() open [preloaded]",
+    "picker linked() open [cold]",
+    "picker linked() open [prewarmed]",
+    "picker orphans() open [cold]",
+    "picker orphans() open [prewarmed]",
+    "picker inbox() open [cold]",
+    "picker inbox() open [prewarmed]",
     "picker tags() open [cold]",
     "picker tags() open [warm]",
     "picker properties() open [cold]",
@@ -779,6 +795,7 @@ local function main()
         local Scanner = require("vault.scanner")
         local Notes = require("vault.notes")
         local notes_picker = require("telescope._extensions.vault.pickers.notes")
+        local inbox_picker = require("telescope._extensions.vault.pickers.inbox")
         local tags_picker = require("telescope._extensions.vault.pickers.tags")
         local properties_picker = require("telescope._extensions.vault.pickers.properties")
         local dirs_picker = require("telescope._extensions.vault.pickers.dirs")
@@ -821,6 +838,129 @@ local function main()
                     sort_by = "mtime",
                 }))
             end, 10, 1)
+        end
+
+        if wants_metric(args, { "picker linked() open [cold]" }) then
+            add_metric(
+                "picker linked() open [cold]",
+                results,
+                bench,
+                function()
+                    open_picker_and_close(notes_picker({
+                        notes = Notes():linked(),
+                        sort_by = "mtime",
+                    }))
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker linked() open [prewarmed]" }) then
+            add_metric(
+                "picker linked() open [prewarmed]",
+                results,
+                bench,
+                function()
+                    open_picker_and_close(notes_picker({
+                        notes = Notes():linked(),
+                        sort_by = "mtime",
+                    }))
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                        prewarm_picker_state()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker orphans() open [cold]" }) then
+            add_metric(
+                "picker orphans() open [cold]",
+                results,
+                bench,
+                function()
+                    open_picker_and_close(notes_picker({
+                        notes = Notes():orphans(),
+                        sort_by = "mtime",
+                    }))
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker orphans() open [prewarmed]" }) then
+            add_metric(
+                "picker orphans() open [prewarmed]",
+                results,
+                bench,
+                function()
+                    open_picker_and_close(notes_picker({
+                        notes = Notes():orphans(),
+                        sort_by = "mtime",
+                    }))
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                        prewarm_picker_state()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker inbox() open [cold]" }) then
+            add_metric(
+                "picker inbox() open [cold]",
+                results,
+                bench,
+                function()
+                    open_picker_and_close(inbox_picker())
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker inbox() open [prewarmed]" }) then
+            add_metric(
+                "picker inbox() open [prewarmed]",
+                results,
+                bench,
+                function()
+                    open_picker_and_close(inbox_picker())
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                        prewarm_picker_state()
+                    end,
+                }
+            )
         end
 
         if wants_metric(args, { "picker tags() open [warm]" }) then
