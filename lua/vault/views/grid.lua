@@ -36,6 +36,41 @@ local unpack_values = table.unpack or unpack
 local get_empty_cell = shared.get_empty_cell
 local get_mtime = shared.get_mtime
 local build_records
+local build_structural_rename_specs
+local fmt_value
+local parse_value
+
+---@type table<string, { format: fun(value: any): string, parse: fun(text: string): any }>
+local GRID_COLUMN_ADAPTER_CACHE = {}
+
+---@param col string
+---@return string
+local function grid_column_adapter_key(col)
+    -- Formatter/parser behavior currently depends only on column semantics.
+    -- Keep cache key as structured payload so adapter-relevant config can widen later.
+    return vim.inspect({ col = col })
+end
+
+---@param col string
+---@return { format: fun(value: any): string, parse: fun(text: string): any }
+local function get_grid_column_adapters(col)
+    local key = grid_column_adapter_key(col)
+    local cached = GRID_COLUMN_ADAPTER_CACHE[key]
+    if cached then
+        return cached
+    end
+
+    local adapters = {
+        format = function(value)
+            return fmt_value(value, col)
+        end,
+        parse = function(text)
+            return parse_value(text, col)
+        end,
+    }
+    GRID_COLUMN_ADAPTER_CACHE[key] = adapters
+    return adapters
+end
 
 ---@class vault.ProcessStructuralOp
 ---@field old_slug vault.slug
@@ -50,13 +85,20 @@ local build_records
 ---@field new_path? vault.path
 
 ---@class vault.ProcessUndoSnapshot
----@field files table<string, string[]>
+---@field files table<string, string|string[]>
 ---@field created_paths vault.path[]
 ---@field deleted_paths table<vault.slug, vault.path>
 ---@field renames { old_path: vault.path, new_path: vault.path }[]
 ---@field timestamp integer
 ---@field description string
 ---@field mutation_details? vault.ProcessMutationDetail[]
+
+---@class vault.ProcessStructuralContext
+---@field watcher_paths table<vault.slug, { path: vault.path }>
+---@field watcher_wikilinks table<string, vault.Wikilink>
+---@field rename_specs vault.Watcher.RenameSpec[]
+---@field candidate_source_paths table<vault.path, true>
+---@field source_originals table<vault.path, string>
 
 local SAVE_DEPTH_KEY = "vault.process_save_depth"
 
@@ -370,6 +412,8 @@ local function invalidate_note_cache()
         state.set_global_key("cache.notes.paths", nil)
         state.set_global_key("cache.notes.slugs", nil)
         state.set_global_key("cache.notes.basename_index", nil)
+        state.set_global_key("cache.notes.paths_and_wikilinks_cached", nil)
+        state.set_global_key("cache.telescope._extensions.vault.pickers", nil)
     end)
 end
 
@@ -469,12 +513,16 @@ local function strip_structural_fields(diff)
     diff.updates = filtered
 end
 
----@param files table<string, string[]>
+---@param files table<string, string|string[]>
 ---@param old_path vault.path
 ---@param old_slug vault.slug
 local function snapshot_structural_side_effects(files, old_path, old_slug)
     if old_path and vim.fn.filereadable(old_path) == 1 then
-        files[old_path] = vim.fn.readfile(old_path)
+        local f = io.open(old_path, "r")
+        if f then
+            files[old_path] = f:read("*all")
+            f:close()
+        end
     end
 
     local scanner = require("vault.scanner")
@@ -494,10 +542,130 @@ local function snapshot_structural_side_effects(files, old_path, old_slug)
                     has_link = content:match("%[%[" .. esc_stem)
                 end
                 if has_link then
-                    files[path] = vim.split(content, "\n", { plain = true })
+                    files[path] = content
                 end
             end
         end
+    end
+end
+
+---@param path vault.path|nil
+---@return string|nil
+local function read_file_blob(path)
+    if not path or vim.fn.filereadable(path) ~= 1 then
+        return nil
+    end
+
+    local f = io.open(path, "r")
+    if not f then
+        return nil
+    end
+
+    local content = f:read("*all")
+    f:close()
+    return content
+end
+
+---@param st vault.GridEditorState
+---@param structural_ops vault.ProcessStructuralOp[]
+---@return vault.ProcessStructuralContext|nil
+local function build_structural_context(st, structural_ops)
+    if #structural_ops == 0 then
+        return nil
+    end
+
+    ---@type table<vault.slug, { path: vault.path }>
+    local watcher_paths = {}
+    for slug, path in pairs(st.note_paths or {}) do
+        watcher_paths[slug] = { path = path }
+    end
+
+    local watcher_wikilinks = require("vault.scanner").wikilinks_no_suggest()
+    local Watcher = require("vault.watcher")
+    local rename_specs = build_structural_rename_specs(st, structural_ops)
+    local candidate_source_paths = Watcher.collect_candidate_paths(
+        watcher_paths,
+        rename_specs,
+        watcher_wikilinks,
+        false
+    ) or {}
+
+    return {
+        watcher_paths = watcher_paths,
+        watcher_wikilinks = watcher_wikilinks,
+        rename_specs = rename_specs,
+        candidate_source_paths = candidate_source_paths,
+        source_originals = {},
+    }
+end
+
+---@param files table<string, string|string[]>
+---@param path vault.path|nil
+---@return nil
+local function snapshot_file_blob(files, path)
+    if path and not files[path] then
+        local content = read_file_blob(path)
+        if content then
+            files[path] = content
+        end
+    end
+end
+
+---@param st vault.GridEditorState
+---@param structural_ops vault.ProcessStructuralOp[]
+---@return vault.Watcher.RenameSpec[]
+build_structural_rename_specs = function(st, structural_ops)
+    ---@type vault.Watcher.RenameSpec[]
+    local renames = {}
+    for _, op in ipairs(structural_ops or {}) do
+        local old_path = st.note_paths[op.old_slug]
+        if old_path then
+            renames[#renames + 1] = {
+                old_path = old_path,
+                new_path = build_target_path_for_slug(old_path, op.new_slug),
+                old_slug = op.old_slug,
+                new_slug = op.new_slug,
+            }
+        end
+    end
+
+    return renames
+end
+
+---@param files table<string, string|string[]>
+---@param st vault.GridEditorState
+---@param structural_ops vault.ProcessStructuralOp[]
+---@param structural_ctx vault.ProcessStructuralContext|nil
+---@return nil
+local function snapshot_structural_candidates(files, st, structural_ops, structural_ctx)
+    if #structural_ops == 0 then
+        return
+    end
+
+    local renames = structural_ctx and structural_ctx.rename_specs
+        or build_structural_rename_specs(st, structural_ops)
+    if #renames == 0 then
+        return
+    end
+
+    if structural_ctx and structural_ctx.candidate_source_paths then
+        for path, _ in pairs(structural_ctx.candidate_source_paths) do
+            if not files[path] then
+                local content = read_file_blob(path)
+                if content then
+                    files[path] = content
+                    structural_ctx.source_originals[path] = content
+                end
+            end
+        end
+        for _, rename in ipairs(renames) do
+            snapshot_file_blob(files, rename.old_path)
+        end
+        return
+    end
+
+    for _, op in ipairs(structural_ops) do
+        snapshot_structural_side_effects(files, st.note_paths[op.old_slug], op.old_slug)
     end
 end
 
@@ -753,8 +921,8 @@ local set_frontmatter_fields = shared.set_frontmatter_fields
 
 -- ─── Value formatting (delegated to shared.lua) ──────────────────────────────
 
-local fmt_value = shared.fmt_value
-local parse_value = shared.parse_value
+fmt_value = shared.fmt_value
+parse_value = shared.parse_value
 
 -- ─── Record building ──────────────────────────────────────────────────────────
 
@@ -918,19 +1086,15 @@ local function build_grid_columns(visible_columns, display_names, formula_cols, 
             or READONLY_FILE_COLS[col]
             or extra_readonly[col]
             or false
+        local adapters = get_grid_column_adapters(col)
         --- @type vault.GridColumn
         local gc = {
             name = col,
             header = display_names[col] or col,
             readonly = is_readonly,
+            format = adapters.format,
+            parse = adapters.parse,
         }
-        -- Vault-specific formatter/parser
-        gc.format = function(value)
-            return fmt_value(value, col)
-        end
-        gc.parse = function(text)
-            return parse_value(text, col)
-        end
         table.insert(grid_cols, gc)
     end
     return grid_cols
@@ -976,27 +1140,28 @@ end
 ---@param st vault.GridEditorState
 ---@param bufnr integer
 ---@param structural_ops? vault.ProcessStructuralOp[]
-local function snapshot_for_undo(diff, st, bufnr, structural_ops)
-    ---@type table<string, string[]>
+---@param structural_ctx? vault.ProcessStructuralContext
+local function snapshot_for_undo(diff, st, bufnr, structural_ops, structural_ctx)
+    ---@type table<string, string|string[]>
     local files = {}
     for _, upd in ipairs(diff.updates) do
-        local path = st.note_paths[upd.id]
-        if path and vim.fn.filereadable(path) == 1 then
-            files[path] = vim.fn.readfile(path)
-        end
+        snapshot_file_blob(files, st.note_paths[upd.id])
     end
     --- @type table<string, string>  slug → path
     local deleted_paths = {}
     for _, slug in ipairs(diff.deletes) do
         local path = st.note_paths[slug]
-        if path and vim.fn.filereadable(path) == 1 then
-            files[path] = vim.fn.readfile(path)
+        if path and not files[path] then
+            local content = read_file_blob(path)
+            if content then
+                files[path] = content
+            end
+        end
+        if path and files[path] then
             deleted_paths[slug] = path
         end
     end
-    for _, op in ipairs(structural_ops or {}) do
-        snapshot_structural_side_effects(files, st.note_paths[op.old_slug], op.old_slug)
-    end
+    snapshot_structural_candidates(files, st, structural_ops or {}, structural_ctx)
     ---@type vault.ProcessUndoSnapshot
     local payload = {
         files = files,
@@ -1227,8 +1392,16 @@ end
 ---@param st vault.GridEditorState
 ---@param undo_payload? vault.ProcessUndoSnapshot
 ---@param mutation_details? vault.ProcessMutationDetail[]
+---@param structural_ctx? vault.ProcessStructuralContext
 ---@return integer, integer
-local function apply_structural_ops(structural_ops, diff, st, undo_payload, mutation_details)
+local function apply_structural_ops(
+    structural_ops,
+    diff,
+    st,
+    undo_payload,
+    mutation_details,
+    structural_ctx
+)
     local n_renamed = 0
     local n_patched = 0
     if #structural_ops == 0 then
@@ -1236,15 +1409,24 @@ local function apply_structural_ops(structural_ops, diff, st, undo_payload, muta
     end
 
     local Note = require("vault.notes.note")
-    local watcher_paths = nil
-    local watcher_wikilinks = nil
-    if #structural_ops > 1 then
+    local Watcher = require("vault.watcher")
+    local watcher_paths = structural_ctx and structural_ctx.watcher_paths or nil
+    local watcher_wikilinks = structural_ctx and structural_ctx.watcher_wikilinks or nil
+    local source_originals = structural_ctx and structural_ctx.source_originals or nil
+    if not watcher_paths then
         watcher_paths = {}
         for slug, path in pairs(st.note_paths or {}) do
             watcher_paths[slug] = { path = path }
         end
-        watcher_wikilinks = require("vault.scanner").wikilinks()
     end
+    if not watcher_wikilinks then
+        watcher_wikilinks = require("vault.scanner").wikilinks_no_suggest()
+    end
+
+    ---@type { old_path: vault.path, new_path: vault.path }[]
+    local batch_renames = {}
+    ---@type vault.Watcher.RenameSpec[]
+    local batch_rename_specs = {}
 
     for _, ren in ipairs(structural_ops) do
         local old_path = st.note_paths[ren.old_slug]
@@ -1273,14 +1455,26 @@ local function apply_structural_ops(structural_ops, diff, st, undo_payload, muta
                     end
                     local ok, note = pcall(Note, old_path)
                     if ok and note then
-                        local move_ok, result = pcall(note.move, note, new_path, false, false, {
+                        local move_ok, move_err = pcall(note.move, note, new_path, false, false, {
                             silent = true,
-                            paths = watcher_paths,
-                            wikilinks_map = watcher_wikilinks,
+                            update_links = false,
                         })
                         if move_ok then
-                            n_patched = n_patched + (result or 0)
-                            if watcher_paths and watcher_paths[ren.old_slug] then
+                            batch_renames[#batch_renames + 1] = {
+                                old_path = old_path,
+                                new_path = new_path,
+                            }
+                            batch_rename_specs[#batch_rename_specs + 1] = {
+                                old_path = old_path,
+                                new_path = new_path,
+                                old_slug = ren.old_slug,
+                                new_slug = ren.new_slug,
+                            }
+                            if
+                                watcher_paths
+                                and watcher_paths[ren.old_slug]
+                                and not source_originals
+                            then
                                 watcher_paths[ren.old_slug].path = new_path
                             end
                             if undo_payload then
@@ -1311,13 +1505,37 @@ local function apply_structural_ops(structural_ops, diff, st, undo_payload, muta
                             end
                             n_renamed = n_renamed + 1
                         else
-                            log.error("Rename '%s' failed: %s", ren.old_slug, tostring(result))
+                            log.error("Rename '%s' failed: %s", ren.old_slug, tostring(move_err))
                         end
                     end
                 end
             end
         end
         ::continue::
+    end
+
+    if #batch_renames > 0 then
+        local watcher = Watcher()
+        watcher:disable_oil_guard()
+        local pending_updates = nil
+        if source_originals then
+            pending_updates = Watcher.prepare_rename_updates(
+                watcher_paths,
+                batch_rename_specs,
+                watcher_wikilinks,
+                {
+                    use_new_paths = true,
+                    original_contents = source_originals,
+                }
+            ).pending
+        end
+        n_patched = watcher:handle_renames(
+            batch_renames,
+            true,
+            watcher_paths,
+            watcher_wikilinks,
+            pending_updates
+        ) or 0
     end
 
     return n_renamed, n_patched
@@ -1397,10 +1615,12 @@ local function make_on_save(st)
         enter_process_save()
         local save_profile = new_save_profile()
         activate_save_profile(st, save_profile)
+        local structural_ctx = nil
 
         -- ── Snapshot for undo ──
         local undo_payload = measure_save_phase(save_profile, "snapshot_for_undo", function()
-            return snapshot_for_undo(diff, st, bufnr, structural_ops)
+            structural_ctx = build_structural_context(st, structural_ops)
+            return snapshot_for_undo(diff, st, bufnr, structural_ops, structural_ctx)
         end)
 
         -- ── Hard cap on creates ──
@@ -1438,7 +1658,8 @@ local function make_on_save(st)
                     diff,
                     st,
                     undo_payload,
-                    mutation_details
+                    mutation_details,
+                    structural_ctx
                 )
             end
         )
@@ -1633,8 +1854,13 @@ function M._apply_undo(bufnr, snap)
             end
         end
     end
-    for path, original_lines in pairs(snap.files) do
-        local ok = atomic_writefile(path, original_lines)
+    for path, original_content in pairs(snap.files) do
+        local ok = false
+        if type(original_content) == "string" then
+            ok = pcall(utils.safe_write, path, original_content)
+        elseif type(original_content) == "table" then
+            ok = atomic_writefile(path, original_content)
+        end
         if ok then
             restored = restored + 1
             detail_parts[#detail_parts + 1] =
@@ -1759,9 +1985,10 @@ function M.save_range(bufnr, start_row, end_row)
     end
     strip_structural_fields(partial)
     enter_process_save()
-    local undo_payload = snapshot_for_undo(partial, st, bufnr, structural_ops)
+    local structural_ctx = build_structural_context(st, structural_ops)
+    local undo_payload = snapshot_for_undo(partial, st, bufnr, structural_ops, structural_ctx)
     local ok_ren, n_r, n_patched =
-        pcall(apply_structural_ops, structural_ops, partial, st, undo_payload)
+        pcall(apply_structural_ops, structural_ops, partial, st, undo_payload, nil, structural_ctx)
     if not ok_ren then
         leave_process_save()
         st.saving = false

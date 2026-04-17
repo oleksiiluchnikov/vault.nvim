@@ -79,21 +79,41 @@ test-dir dir:
     nvim --headless -u {{ minimal_init }} \
         -c 'PlenaryBustedDirectory {{ dir }} {minimal_init = "{{ minimal_init }}"}'
 
-# Run performance benchmarks (default: 500 notes)
-bench vault_size="500":
+# Run performance benchmarks (default: 15000 notes)
+bench vault_size="15000": build
     NVIM_LISTEN_ADDRESS= nvim --headless -u {{ minimal_init }} -l scripts/benchmark.lua -- --vault-size {{ vault_size }}
 
+# List available benchmark metric names for targeted runs
+bench-list:
+    NVIM_LISTEN_ADDRESS= nvim --headless -u {{ minimal_init }} -l scripts/benchmark.lua -- --list-metrics
+
+# Run a targeted benchmark subset by metric substring
+bench-metric vault_size metric: build
+    NVIM_LISTEN_ADDRESS= nvim --headless -u {{ minimal_init }} -l scripts/benchmark.lua -- --vault-size {{ vault_size }} --filter "{{ metric }}"
+
+# Run the full benchmark suite and save to a named report path
+bench-save vault_size out: build
+    NVIM_LISTEN_ADDRESS= nvim --headless -u {{ minimal_init }} -l scripts/benchmark.lua -- --vault-size {{ vault_size }} --out "{{ out }}"
+
+# Run a targeted benchmark subset and save to a named report path
+bench-metric-save vault_size metric out: build
+    NVIM_LISTEN_ADDRESS= nvim --headless -u {{ minimal_init }} -l scripts/benchmark.lua -- --vault-size {{ vault_size }} --filter "{{ metric }}" --out "{{ out }}"
+
 # Compare latest benchmark against the stored baseline for this size
-bench-check vault_size="500" threshold="20":
+bench-check vault_size="15000" threshold="20":
     NVIM_LISTEN_ADDRESS= nvim --headless -u {{ minimal_init }} -l scripts/check_bench.lua -- --baseline benchmarks/baseline-{{ vault_size }}.json --latest benchmarks/latest.json --threshold {{ threshold }}
 
+# Compare any two benchmark reports without failing the shell
+bench-diff baseline latest:
+    NVIM_LISTEN_ADDRESS= nvim --headless -u {{ minimal_init }} -l scripts/check_bench.lua -- --baseline "{{ baseline }}" --latest "{{ latest }}" --fail-on-regression false
+
 # Refresh the stored baseline for this size from a fresh run
-bench-baseline vault_size="500":
+bench-baseline vault_size="15000":
     just bench {{ vault_size }}
     cp benchmarks/latest.json benchmarks/baseline-{{ vault_size }}.json
 
 # Trace :Vault notes performance step-by-step (default: real knowledge vault)
-trace-notes vault_root="":
+trace-notes vault_root="": build
     NVIM_LISTEN_ADDRESS= nvim --headless -u {{ minimal_init }} -l scripts/trace_vault_notes.lua {{ if vault_root != "" { "-- --vault-root " + vault_root } else { "" } }}
 
 # Run benchmarks for all sizes (100, 500, 1000)

@@ -383,6 +383,19 @@ describe("grid (unit)", function()
       assert.are.equal("#foo #bar", cols[1].format({ "foo", "bar" }))
       assert.are.same({ "foo", "bar" }, cols[1].parse("#foo #bar"))
     end)
+
+    it("reuses formatter and parser closures across reloads for same column", function()
+      local cols1 = ge._build_grid_columns({ "tags" }, {}, {})
+      local cols2 = ge._build_grid_columns({ "tags" }, {}, {})
+      assert.is_true(cols1[1].format == cols2[1].format)
+      assert.is_true(cols1[1].parse == cols2[1].parse)
+    end)
+
+    it("creates distinct formatter and parser closures for different columns", function()
+      local cols = ge._build_grid_columns({ "tags", "status" }, {}, {})
+      assert.is_true(cols[1].format ~= cols[2].format)
+      assert.is_true(cols[1].parse ~= cols[2].parse)
+    end)
   end)
 
   -- ── frontmatter I/O ─────────────────────────────────────────────────────
@@ -838,6 +851,80 @@ describe("grid (integration)", function()
 
       config.options.root = fixture_root
       config.options.ext = old_ext
+      vim.fn.delete(tmp_root, "rf")
+    end)
+
+    it("applies batched structural renames without dropping earlier link updates", function()
+      if not check_config() then return pending("needs vault config") end
+      local config = require("vault.config")
+      local old_root = config.options.root
+      local old_ext = config.options.ext
+      local old_prompt = config.options.watcher.prompt_on_rename
+      local old_notify = config.options.watcher.notify_on_rename
+      local tmp_root = vim.fn.tempname()
+      vim.fn.mkdir(tmp_root, "p")
+      config.options.root = tmp_root
+      config.options.ext = ".md"
+      config.options.watcher.prompt_on_rename = false
+      config.options.watcher.notify_on_rename = false
+
+      local alpha = tmp_root .. "/alpha.md"
+      local beta = tmp_root .. "/beta.md"
+      local links = tmp_root .. "/links.md"
+      vim.fn.writefile({ "# Alpha" }, alpha)
+      vim.fn.writefile({ "# Beta" }, beta)
+      vim.fn.writefile({ "[[alpha]] and [[beta]]" }, links)
+
+      local bufnr = vim.api.nvim_create_buf(false, true)
+      local st = {
+        grid = {
+          bufnr = function() return bufnr end,
+          reload = function() end,
+        },
+        note_paths = {
+          alpha = alpha,
+          beta = beta,
+          links = links,
+        },
+        note_mtimes = {
+          alpha = ge._get_mtime(alpha),
+          beta = ge._get_mtime(beta),
+          links = ge._get_mtime(links),
+        },
+        columns = { "slug", "title" },
+        save_mode = nil,
+        saving = false,
+      }
+      ge._buf_states[bufnr] = st
+
+      local done_err = "PENDING"
+      local on_save = ge._make_on_save(st)
+      on_save({
+        updates = {},
+        deletes = {},
+        creates = {},
+        custom = {
+          { type = "rename", extra = { old_slug = "alpha", new_slug = "alpha-new", source_field = "slug" } },
+          { type = "rename", extra = { old_slug = "beta", new_slug = "beta-new", source_field = "slug" } },
+        },
+        errors = {},
+      }, function(err)
+        done_err = err or false
+      end)
+
+      assert.is_false(done_err)
+      assert.are.equal(1, vim.fn.filereadable(tmp_root .. "/alpha-new.md"))
+      assert.are.equal(1, vim.fn.filereadable(tmp_root .. "/beta-new.md"))
+
+      local link_lines = vim.fn.readfile(links)
+      assert.are.same({ "[[alpha-new]] and [[beta-new]]" }, link_lines)
+
+      ge._buf_states[bufnr] = nil
+      pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+      config.options.root = old_root
+      config.options.ext = old_ext
+      config.options.watcher.prompt_on_rename = old_prompt
+      config.options.watcher.notify_on_rename = old_notify
       vim.fn.delete(tmp_root, "rf")
     end)
 

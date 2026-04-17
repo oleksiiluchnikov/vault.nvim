@@ -156,7 +156,12 @@ This shows time spent loading each script/module during startup. Look for:
 
 ```bash
 # vault.nvim
+just bench-list         # Discover metric names for targeted reruns
 just bench 500          # Run with 500-note fixture
+just bench-metric 500 "grid on_save rename"
+just bench-save 500 benchmarks/rename-before.json
+just bench-metric-save 500 "grid on_save rename" benchmarks/rename-after.json
+just bench-diff benchmarks/rename-before.json benchmarks/rename-after.json
 just bench-check 500    # Compare latest run against baseline-500.json
 just bench-all          # Run 100, 500, 1000
 
@@ -176,3 +181,43 @@ just bench-check 500
 ### CI Integration
 
 CI uploads a fresh `benchmarks/latest.json` artifact for the 500-note fixture on pull requests. Local `just bench-check` remains the authoritative regression gate because absolute timings are machine-sensitive.
+
+## Live Benchmark-Driven Development Loop
+
+Use the benchmark harness as the default optimization loop instead of changing code first and measuring later.
+
+1. Capture a before snapshot for the fixture size you care about.
+
+```bash
+just bench-save 500 benchmarks/before.json
+```
+
+2. Discover the exact metric name and rerun only that hot path while iterating.
+
+```bash
+just bench-list
+just bench-metric 500 "grid on_save rename"
+```
+
+3. If the benchmark is still too broad, switch to the step-by-step tracer for deeper attribution.
+
+```bash
+just trace-notes
+just trace-notes ~/knowledge
+```
+
+4. Save an after snapshot and diff it against the before run.
+
+```bash
+just bench-metric-save 500 "grid on_save rename" benchmarks/after.json
+just bench-diff benchmarks/before.json benchmarks/after.json
+```
+
+5. Before finishing, rerun the broader suite and gate it against the stored baseline.
+
+```bash
+just bench 500
+just bench-check 500
+```
+
+`just bench` and `just bench-metric` now print the hottest measured metrics first, so the slowest targets are visible immediately. Use the targeted loop for fast local iteration, then rerun the full suite before merging.

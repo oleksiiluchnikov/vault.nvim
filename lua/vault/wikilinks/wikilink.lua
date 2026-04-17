@@ -99,9 +99,9 @@ local function strip_brackets(input)
 end
 
 --- Check whether a wikilink slug looks like a plausible Obsidian note name.
---- Real note names are alphanumeric with spaces, hyphens, underscores, dots,
---- slashes (for paths), and unicode. Code artifacts contain characters like
---- $, %, (, ), ", ', +, *, {, }, =, ;, >, <, .., etc.
+--- Be permissive about human title punctuation: real note names often contain
+--- apostrophes, parentheses, plus signs, commas, ampersands, unicode, etc.
+--- Only reject obvious shell/code artifacts and degenerate non-title strings.
 --- @private
 --- @param slug string The candidate slug to validate.
 --- @return boolean valid `true` when slug is a plausible Obsidian note name.
@@ -109,28 +109,39 @@ local function is_valid_slug(slug)
     if not slug or slug == "" then
         return false
     end
-    -- Reject strings with code/shell/regex artifacts
-    -- These characters never appear in real Obsidian note filenames
-    if slug:find("[%$%%%(%)%{%}%+%*=;<>\"'`\\]") then
+
+    -- Reject shell/code artifacts that should never be treated as note titles.
+    if slug:find("[%$`\\%{%}%[%]]") then
         return false
     end
+    if slug:find("&&", 1, true) or slug:find("||", 1, true) then
+        return false
+    end
+    if slug:find("=~", 1, true) or slug:find("==", 1, true) or slug:find("!=", 1, true) then
+        return false
+    end
+
     -- Reject Lua string concatenation patterns: " .. " (space-dot-dot-space)
-    -- But allow relative paths like "../foo" (dot-dot-slash)
+    -- But allow relative paths like "../foo" (dot-dot-slash).
     if slug:find(" %.%. ") or slug:find('" %.%. ') then
         return false
     end
-    -- Reject strings that are only punctuation/digits/commas (e.g. "0, 0", "...", "%s")
+
+    -- Reject strings that are only punctuation/digits/whitespace.
     if slug:match("^[%d%p%s]+$") then
         return false
     end
-    -- Reject pipe-only or hash-only (degenerate)
+
+    -- Reject pipe-only or hash-only (degenerate).
     if slug:match("^[#|]+$") then
         return false
     end
-    -- Must have at least one letter (unicode or ASCII) — real note names always do
+
+    -- Must have at least one letter (unicode or ASCII).
     if not slug:find("%a") and not slug:find("[\128-\255]") then
         return false
     end
+
     return true
 end
 

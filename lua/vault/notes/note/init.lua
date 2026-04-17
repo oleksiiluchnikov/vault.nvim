@@ -757,7 +757,7 @@ end
 --- @param new_path string Absolute path for the new location.
 --- @param force? boolean Overwrite target if it exists (default false).
 --- @param verbose? boolean Show notification (default true).
---- @param opts? { update_links?: boolean, silent?: boolean, paths?: table<string, table>, wikilinks_map?: table<string, vault.Wikilink> } Extra options.
+--- @param opts? { update_links?: boolean, silent?: boolean, paths?: table<string, table>, wikilinks_map?: table<string, vault.Wikilink>, pending_updates?: table<string, vault.Watcher.PendingUpdate> } Extra options.
 ---   update_links: whether to patch wikilinks across the vault.
 ---     Defaults to `config.options.watcher.auto_update_links` (true).
 ---   silent: suppress watcher notifications (default false).
@@ -831,7 +831,8 @@ function Note:move(new_path, force, verbose, opts)
             new_path,
             opts.silent,
             opts.paths,
-            opts.wikilinks_map
+            opts.wikilinks_map,
+            opts.pending_updates
         ) or 0
     end
 

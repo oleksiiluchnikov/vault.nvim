@@ -19,6 +19,9 @@ local BASENAME_INDEX_CACHE_KEY = "cache.notes.basename_index"
 local PATHS_AND_WIKILINKS_CACHE_KEY = "cache.notes.paths_and_wikilinks_cached"
 local PICKER_CACHE_KEY = "cache.telescope._extensions.vault.pickers"
 local NOTES_LINK_INDEX_CACHE_KEY = "notes.link_index"
+local BACKGROUND_REVALIDATE_SCHEDULED_KEY = "vault.scanner.background_revalidate_scheduled"
+local SCAN_SNAPSHOT_DIR = "vault.nvim/scan-cache"
+local MALFORMED_WIKILINK_SAMPLE_LIMIT = 8
 
 ---@class vault.Scanner
 ---@field paths fun(opts?: { ignore: boolean|string[] }): table<string, table>
@@ -37,14 +40,14 @@ local Scanner = {}
 
 ---@class vault.ScannerCachedPathsAndWikilinks
 ---@field generation integer
+---@field needs_revalidate? boolean
 ---@field paths table<string, table>
 ---@field wikilinks table<string, vault.Wikilink>
 
-function Scanner.invalidate_notes_cache()
+local function clear_derived_note_caches()
     state.set_global_key(PATHS_CACHE_KEY, nil)
     state.set_global_key(SLUGS_CACHE_KEY, nil)
     state.set_global_key(BASENAME_INDEX_CACHE_KEY, nil)
-    state.set_global_key(PATHS_AND_WIKILINKS_CACHE_KEY, nil)
     state.set_global_key(PICKER_CACHE_KEY, nil)
     state.set_global_key(NOTES_LINK_INDEX_CACHE_KEY, nil)
     state.set_global_key("notes", nil)
@@ -56,6 +59,91 @@ function Scanner.invalidate_notes_cache()
     state.set_global_key("properties", nil)
     state.set_global_key("dirs", nil)
     state.set_global_key("wikilinks", nil)
+end
+
+function Scanner.invalidate_notes_cache()
+    clear_derived_note_caches()
+    state.set_global_key(PATHS_AND_WIKILINKS_CACHE_KEY, nil)
+end
+
+local function rerun_enabled_prewarms()
+    local ok, prewarm = pcall(require, "vault.prewarm")
+    if not ok then
+        return false
+    end
+
+    if type(prewarm.run_enabled_now) == "function" then
+        return prewarm.run_enabled_now()
+    end
+
+    return false
+end
+
+local function report_malformed_wikilinks(context, malformed)
+    if not malformed or malformed.count == 0 then
+        return
+    end
+
+    for _, sample in ipairs(malformed.samples or {}) do
+        log.debug(
+            "%s: skipped malformed wikilink: [[%s]] — %s",
+            context,
+            sample.stem,
+            sample.err
+        )
+    end
+
+    if malformed.count > #(malformed.samples or {}) then
+        log.debug(
+            "%s: skipped %d additional malformed wikilinks",
+            context,
+            malformed.count - #(malformed.samples or {})
+        )
+    end
+end
+
+local function track_malformed_wikilink(malformed, stem, err)
+    malformed.count = (malformed.count or 0) + 1
+    malformed.samples = malformed.samples or {}
+    if #malformed.samples < MALFORMED_WIKILINK_SAMPLE_LIMIT then
+        malformed.samples[#malformed.samples + 1] = {
+            stem = stem,
+            err = tostring(err),
+        }
+    end
+end
+
+local function schedule_background_revalidate()
+    if state.get_global_key(BACKGROUND_REVALIDATE_SCHEDULED_KEY) then
+        return false
+    end
+
+    state.set_global_key(BACKGROUND_REVALIDATE_SCHEDULED_KEY, true)
+    vim.schedule(function()
+        local previous = state.get_global_key(PATHS_AND_WIKILINKS_CACHE_KEY)
+        local previous_generation = type(previous) == "table" and previous.generation or nil
+
+        local ok, err = pcall(Scanner.paths_and_wikilinks_cached)
+        state.set_global_key(BACKGROUND_REVALIDATE_SCHEDULED_KEY, nil)
+
+        if not ok then
+            log.debug("Background scan revalidate failed: %s", tostring(err))
+            return
+        end
+
+        local current = state.get_global_key(PATHS_AND_WIKILINKS_CACHE_KEY)
+        local current_generation = type(current) == "table" and current.generation or nil
+        if
+            previous_generation ~= nil
+            and current_generation ~= nil
+            and current_generation ~= previous_generation
+        then
+            clear_derived_note_caches()
+            rerun_enabled_prewarms()
+        end
+    end)
+
+    return true
 end
 
 --- Helper to determine root and ignore patterns based on options
@@ -78,6 +166,19 @@ local function get_scan_args(opts)
     end
 
     return root, ignores
+end
+
+---@param root string
+---@param ignores string[]
+---@return string
+local function persisted_snapshot_path(root, ignores)
+    local parts = { root }
+    for _, ignore in ipairs(ignores or {}) do
+        parts[#parts + 1] = ignore
+    end
+
+    local digest = vim.fn.sha256(table.concat(parts, "\0"))
+    return vim.fs.joinpath(vim.fn.stdpath("cache"), SCAN_SNAPSHOT_DIR, digest .. ".bin")
 end
 
 ---@param cached_wikilinks? table<string, vault.Wikilink>
@@ -117,8 +218,7 @@ local function upsert_cached_wikilink(wikilinks_map, cached_by_stem, stem, wikil
     })
 
     if not ok then
-        log.debug("Skipped malformed wikilink: [[%s]] — %s", stem, tostring(new_wl))
-        return false
+        return false, tostring(new_wl)
     end
 
     new_wl.data.stem = wikilink_data.stem
@@ -132,14 +232,18 @@ end
 
 ---@param raw_wikilinks table<string, table>
 ---@param cached_wikilinks? table<string, vault.Wikilink>
+---@param malformed? { count: integer, samples: table[] }
 ---@return table<string, vault.Wikilink>
-local function wrap_cached_wikilinks(raw_wikilinks, cached_wikilinks)
+local function wrap_cached_wikilinks(raw_wikilinks, cached_wikilinks, malformed)
     ---@type table<string, vault.Wikilink>
     local wikilinks_map = {}
     local cached_by_stem = index_cached_wikilinks_by_stem(cached_wikilinks)
 
     for stem, wikilink_data in pairs(raw_wikilinks) do
-        upsert_cached_wikilink(wikilinks_map, cached_by_stem, stem, wikilink_data)
+        local ok, err = upsert_cached_wikilink(wikilinks_map, cached_by_stem, stem, wikilink_data)
+        if not ok and malformed then
+            track_malformed_wikilink(malformed, stem, err or "Invalid wikilink content")
+        end
     end
 
     return wikilinks_map
@@ -168,9 +272,15 @@ local function apply_paths_and_wikilinks_delta(cached, result)
         end
         cached_by_stem[stem] = nil
     end
+    local malformed = { count = 0, samples = {} }
     for stem, wikilink_data in pairs(result.wikilinks_updated or {}) do
-        upsert_cached_wikilink(wikilinks, cached_by_stem, stem, wikilink_data)
+        local ok, err = upsert_cached_wikilink(wikilinks, cached_by_stem, stem, wikilink_data)
+        if not ok then
+            track_malformed_wikilink(malformed, stem, err or "Invalid wikilink content")
+        end
     end
+
+    report_malformed_wikilinks("Scanner.paths_and_wikilinks_cached.delta", malformed)
 
     cached.generation = tonumber(result.generation) or cached.generation
     cached.paths = paths
@@ -265,6 +375,7 @@ function Scanner.wikilinks(opts)
 
     local handle = progress.start("Scanning wikilinks")
     local raw_wikilinks = core.wikilinks(root, ignores)
+    local malformed = { count = 0, samples = {} }
 
     -- Convert raw wikilink data to Wikilink objects
     local wikilinks_map = {}
@@ -276,8 +387,8 @@ function Scanner.wikilinks(opts)
         })
 
         if not ok then
-            -- Skip malformed wikilinks returned by the Rust scanner
-            log.debug("Skipped malformed wikilink: [[%s]] — %s", stem, tostring(wl))
+            -- Skip malformed wikilinks returned by the Rust scanner.
+            track_malformed_wikilink(malformed, stem, wl)
             goto continue
         end
 
@@ -296,6 +407,7 @@ function Scanner.wikilinks(opts)
         wl_count = wl_count + 1
     end
     handle:finish(("%d wikilinks"):format(wl_count))
+    report_malformed_wikilinks("Scanner.wikilinks", malformed)
 
     return wikilinks_map
 end
@@ -494,14 +606,16 @@ function Scanner.wikilinks_no_suggest(opts)
 
     local handle = progress.start("Scanning wikilinks (no suggest)")
     local raw_wikilinks = core.wikilinks_no_suggest(root, ignores)
+    local malformed = { count = 0, samples = {} }
 
-    local wikilinks_map = wrap_cached_wikilinks(raw_wikilinks, cached and cached.wikilinks or nil)
+    local wikilinks_map = wrap_cached_wikilinks(raw_wikilinks, cached and cached.wikilinks or nil, malformed)
 
     local wl_count = 0
     for _ in pairs(wikilinks_map) do
         wl_count = wl_count + 1
     end
     handle:finish(("%d wikilinks"):format(wl_count))
+    report_malformed_wikilinks("Scanner.wikilinks_no_suggest", malformed)
 
     return wikilinks_map
 end
@@ -528,6 +642,7 @@ function Scanner.paths_and_wikilinks(opts)
     end
 
     -- Wrap wikilinks in Wikilink objects
+    local malformed = { count = 0, samples = {} }
     local wikilinks_map = {}
     for stem, wikilink_data in pairs(raw_wikilinks) do
         local ok, wl = pcall(Wikilink, {
@@ -536,7 +651,7 @@ function Scanner.paths_and_wikilinks(opts)
         })
 
         if not ok then
-            log.debug("Skipped malformed wikilink: [[%s]] — %s", stem, tostring(wl))
+            track_malformed_wikilink(malformed, stem, wl)
             goto continue
         end
 
@@ -554,6 +669,7 @@ function Scanner.paths_and_wikilinks(opts)
         wl_count = wl_count + 1
     end
     handle:finish(("%d notes, %d wikilinks"):format(path_count, wl_count))
+    report_malformed_wikilinks("Scanner.paths_and_wikilinks", malformed)
 
     return raw_paths, wikilinks_map
 end
@@ -568,9 +684,10 @@ function Scanner.paths_and_wikilinks_cached(opts)
     local root, ignores = get_scan_args(opts)
     local cached = not opts and state.get_global_key(PATHS_AND_WIKILINKS_CACHE_KEY) or nil
     local known_generation = type(cached) == "table" and cached.generation or nil
+    local snapshot_path = not opts and persisted_snapshot_path(root, ignores) or nil
 
     local handle = progress.start("Scanning paths + wikilinks (cached)")
-    local result = core.paths_and_wikilinks_cached(root, ignores, known_generation)
+    local result = core.paths_and_wikilinks_cached(root, ignores, known_generation, snapshot_path)
 
     if type(result) == "table" and result.changed == false then
         if type(cached) == "table" and cached.paths and cached.wikilinks then
@@ -585,6 +702,11 @@ function Scanner.paths_and_wikilinks_cached(opts)
             handle:finish(
                 ("%d notes, %d wikilinks (cached Lua result)"):format(path_count, wl_count)
             )
+
+            if not opts and result.needs_revalidate == true then
+                schedule_background_revalidate()
+            end
+
             return cached.paths, cached.wikilinks
         end
 
@@ -611,6 +733,10 @@ function Scanner.paths_and_wikilinks_cached(opts)
             state.set_global_key(PATHS_AND_WIKILINKS_CACHE_KEY, cached)
         end
 
+        if not opts and result.needs_revalidate == true then
+            schedule_background_revalidate()
+        end
+
         return paths, wikilinks
     end
 
@@ -622,20 +748,27 @@ function Scanner.paths_and_wikilinks_cached(opts)
         path_count = path_count + 1
     end
 
-    local wikilinks_map = wrap_cached_wikilinks(raw_wikilinks, cached and cached.wikilinks or nil)
+    local malformed = { count = 0, samples = {} }
+    local wikilinks_map = wrap_cached_wikilinks(raw_wikilinks, cached and cached.wikilinks or nil, malformed)
 
     local wl_count = 0
     for _ in pairs(wikilinks_map) do
         wl_count = wl_count + 1
     end
     handle:finish(("%d notes, %d wikilinks"):format(path_count, wl_count))
+    report_malformed_wikilinks("Scanner.paths_and_wikilinks_cached", malformed)
 
     if not opts then
         state.set_global_key(PATHS_AND_WIKILINKS_CACHE_KEY, {
             generation = tonumber(result.generation) or 0,
+            needs_revalidate = result.needs_revalidate == true,
             paths = raw_paths,
             wikilinks = wikilinks_map,
         })
+
+        if result.needs_revalidate == true then
+            schedule_background_revalidate()
+        end
     end
 
     return raw_paths, wikilinks_map
@@ -647,10 +780,13 @@ end
 --- @return nil
 function Scanner.clear_rust_cache()
     local ok, core = pcall(require, "vault_core")
+    local root, ignores = get_scan_args()
+    local snapshot_path = persisted_snapshot_path(root, ignores)
+    state.set_global_key(BACKGROUND_REVALIDATE_SCHEDULED_KEY, nil)
     state.set_global_key(PATHS_AND_WIKILINKS_CACHE_KEY, nil)
     state.set_global_key(NOTES_LINK_INDEX_CACHE_KEY, nil)
     if ok and core.clear_cache then
-        core.clear_cache()
+        core.clear_cache(snapshot_path)
     end
 end
 

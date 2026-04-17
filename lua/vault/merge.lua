@@ -893,9 +893,15 @@ function M.absorb(path_a, path_b, resolved, opts)
     snapshot_files[path_b] = plan.raw_b
 
     local paths = opts.paths
-    if opts.bufnr or not paths then
+    local wikilinks_map = opts.wikilinks_map
+    if opts.bufnr or not paths or not wikilinks_map then
         local scanner = require("vault.scanner")
-        paths = paths or scanner.paths()
+        if not paths and not wikilinks_map then
+            paths, wikilinks_map = scanner.paths_and_wikilinks_cached()
+        else
+            paths = paths or scanner.paths()
+            wikilinks_map = wikilinks_map or scanner.wikilinks_no_suggest()
+        end
     end
 
     if opts.bufnr then
@@ -949,7 +955,7 @@ function M.absorb(path_a, path_b, resolved, opts)
     local Watcher = require("vault.watcher")
     local watcher = Watcher()
     watcher:disable_oil_guard()
-    local patched = watcher:handle_rename(path_b, path_a, nil, paths) or 0
+    local patched = watcher:handle_rename(path_b, path_a, nil, paths, wikilinks_map) or 0
 
     -- Trash B
     local Note = require("vault.notes.note")

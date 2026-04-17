@@ -65,9 +65,13 @@ end
 
 function M.promote(tag_name, note_slug, opts)
     local canonical = canonical_tag(tag_name)
-    if canonical == "" then error("No tag name provided") end
+    if canonical == "" then
+        error("No tag name provided")
+    end
     note_slug = canonical_target_slug(note_slug or canonical)
-    if note_slug == "" then error("No note slug provided") end
+    if note_slug == "" then
+        error("No note slug provided")
+    end
     opts = opts or {}
     local keep_frontmatter_tags = opts.keep_frontmatter_tags ~= false
     local note_path, created = ensure_note_for_slug(note_slug)
@@ -94,23 +98,46 @@ function M.promote(tag_name, note_slug, opts)
             updated_occurrences = updated_occurrences + #filtered
         end
     end
-    clear_state_keys({ "cache.notes.paths", "cache.notes.slugs", "cache.notes.basename_index", "notes", "tags", "wikilinks" })
+    clear_state_keys({
+        "cache.notes.paths",
+        "cache.notes.slugs",
+        "cache.notes.basename_index",
+        "cache.notes.paths_and_wikilinks_cached",
+        "notes",
+        "tags",
+        "wikilinks",
+    })
     if updated_notes == 0 then
-        log.info("Prepared %s for #%s (kept frontmatter tags unchanged; no inline occurrences rewritten)", note_slug, canonical)
+        log.info(
+            "Prepared %s for #%s (kept frontmatter tags unchanged; no inline occurrences rewritten)",
+            note_slug,
+            canonical
+        )
     else
-        log.info("Promoted #%s -> %s across %d notes (%d occurrences)%s", canonical, new_link, updated_notes, updated_occurrences, created and "; created canonical note" or "")
+        log.info(
+            "Promoted #%s -> %s across %d notes (%d occurrences)%s",
+            canonical,
+            new_link,
+            updated_notes,
+            updated_occurrences,
+            created and "; created canonical note" or ""
+        )
     end
     return note_path
 end
 
 function M.open_promote_picker(tag_name, opts)
     local canonical = canonical_tag(tag_name)
-    if canonical == "" then error("No tag name provided") end
+    if canonical == "" then
+        error("No tag name provided")
+    end
     require("vault.ui.resolve_picker").open({
         wikilink = { data = { slug = canonical, suggestions = {} } },
         wikilinks = require("vault.wikilinks")().map,
         on_resolve = function(result)
-            if not result or result.action == "skip" then return end
+            if not result or result.action == "skip" then
+                return
+            end
             local note_slug = result.slug or canonical
             if not note_slug or note_slug == "" then
                 log.warn("Selected target has no usable slug")

@@ -40,8 +40,8 @@ All times in milliseconds (median of N runs).
 
 ### Observations
 
-- `Scanner.lines()` remains the slowest pure-scan path because it is still pure Lua file I/O.
-- `Scanner.paths_and_wikilinks_cached()` now has explicit cold, warm, and 1-file-changed measurements. Warm and single-file-changed runs are much cheaper than a cold scan, but they still scale with vault size because every file's metadata must be checked.
+- `Scanner.lines()` is still one of the slowest scan paths, but the benchmark label is legacy: the implementation is Rust-backed and now reuses the parsed-note cache. Most remaining cost is rebuilding the aggregated line map.
+- `Scanner.paths_and_wikilinks_cached()` now has explicit cold, warm, and 1-file-changed measurements. Warm runs should stay much cheaper because the Lua side can now reuse previously wrapped results when the Rust cache generation is unchanged.
 - `grid build_records()` and `grid open()` scale roughly linearly with note count and now replace the old synthetic `grid data prep` placeholder.
 - `grid on_save update` stays nearly flat across fixture sizes because it mutates one note.
 - `grid on_save rename` and `Watcher.handle_rename()` scale with vault size because they scan the vault and patch inbound links.

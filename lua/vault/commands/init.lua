@@ -411,36 +411,23 @@ local function build_subcommands()
             },
             leaves = {
                 run = function()
-                    safe_find(
-                        get_pickers().notes({ notes = require("vault.notes")():leaves() }),
-                        "No leaf notes found"
-                    )
+                    safe_find(get_pickers().leaves(), "No leaf notes found")
                 end,
             },
             internals = {
                 run = function()
-                    safe_find(
-                        get_pickers().notes({ notes = require("vault.notes")():internals() }),
-                        "No internal notes found"
-                    )
+                    safe_find(get_pickers().internals(), "No internal notes found")
                 end,
             },
             dangling = {
                 run = function()
-                    safe_find(
-                        get_pickers().notes({
-                            notes = require("vault.notes")():with_outlinks_unresolved(),
-                        }),
-                        "No dangling links found"
-                    )
+                    safe_find(get_pickers().with_outlinks_unresolved(), "No dangling links found")
                 end,
             },
             resolved = {
                 run = function()
                     safe_find(
-                        get_pickers().notes({
-                            notes = require("vault.notes")():with_outlinks_resolved_only(),
-                        }),
+                        get_pickers().with_outlinks_resolved_only(),
                         "No notes with all outlinks resolved"
                     )
                 end,
@@ -1523,17 +1510,7 @@ local function build_subcommands()
                     log.warn("Inbox directory not configured or does not exist (dirs.inbox)")
                     return
                 end
-                safe_find(
-                    get_pickers().notes({
-                        notes = require("vault.notes")():filter(
-                            "relpath",
-                            vim.fn.fnamemodify(inbox_dir, ":t"),
-                            "startswith",
-                            false
-                        ),
-                    }),
-                    "No notes in inbox"
-                )
+                safe_find(get_pickers().inbox(), "No notes in inbox")
             end,
         },
 
@@ -1897,20 +1874,14 @@ end
 --- Opens a picker with orphans
 --- @return nil
 function callbacks.open_orphans_picker()
-    safe_find(
-        get_pickers().notes({ notes = require("vault.notes")():orphans() }),
-        "No orphan notes found"
-    )
+    safe_find(get_pickers().orphans(), "No orphan notes found")
 end
 
 --- vault.Linked
 --- Opens a picker with linked notes
 --- @return nil
 function callbacks.open_linked_picker()
-    safe_find(
-        get_pickers().notes({ notes = require("vault.notes")():linked() }),
-        "No linked notes found"
-    )
+    safe_find(get_pickers().linked(), "No linked notes found")
 end
 
 --- Opens a live grep picker with fuzzy search
@@ -2827,6 +2798,20 @@ local function construct_notes_picker_args(input)
         safe_find(get_pickers().notes(), "No notes found")
     elseif #args == 1 then
         if args[1] ~= "by" then
+            local preset_pickers = {
+                linked = "linked",
+                orphans = "orphans",
+                leaves = "leaves",
+                internals = "internals",
+                dangling = "with_outlinks_unresolved",
+                resolved = "with_outlinks_resolved_only",
+            }
+            local picker_key = preset_pickers[args[1]]
+            if picker_key then
+                safe_find(get_pickers()[picker_key](), "No notes found for preset: " .. args[1])
+                return
+            end
+
             local notes = require("vault.notes")()
             local preset = notes[args[1]]
             if type(preset) == "function" then
