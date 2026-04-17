@@ -61,6 +61,24 @@ describe("VaultWikilink", function()
                     display = "path",
                 },
             },
+            {
+                input = "[[clipping - YouTube - You're Probably Using Vim & Neovim Wrong]]",
+                expected = {
+                    raw = "clipping - YouTube - You're Probably Using Vim & Neovim Wrong",
+                    slug = "clipping - YouTube - You're Probably Using Vim & Neovim Wrong",
+                    stem = "clipping - YouTube - You're Probably Using Vim & Neovim Wrong",
+                    display = "clipping - YouTube - You're Probably Using Vim & Neovim Wrong",
+                },
+            },
+            {
+                input = "[[How To Be A Genius (1911) by Wallace D. Wattles + Notes]]",
+                expected = {
+                    raw = "How To Be A Genius (1911) by Wallace D. Wattles + Notes",
+                    slug = "How To Be A Genius (1911) by Wallace D. Wattles + Notes",
+                    stem = "How To Be A Genius (1911) by Wallace D. Wattles + Notes",
+                    display = "How To Be A Genius (1911) by Wallace D. Wattles + Notes",
+                },
+            },
         }
 
         for _, case in ipairs(test_cases) do

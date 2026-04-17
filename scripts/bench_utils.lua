@@ -30,6 +30,18 @@
 --- @field metrics bench.Result[]
 --- @field timestamp string
 
+--- @class bench.CompareRow
+--- @field name string
+--- @field unit string
+--- @field baseline_median number|nil
+--- @field latest_median number|nil
+--- @field median_change number|nil
+--- @field baseline_p95 number|nil
+--- @field latest_p95 number|nil
+--- @field p95_change number|nil
+--- @field baseline_unit string|nil
+--- @field latest_unit string|nil
+
 --- @class bench.Utils
 local M = {}
 
@@ -204,6 +216,138 @@ end
 function M.round(x, decimals)
     local mult = 10 ^ decimals
     return math.floor(x * mult + 0.5) / mult
+end
+
+--- @param name string
+--- @param filter string|nil
+--- @return boolean
+function M.matches_filter(name, filter)
+    if type(filter) ~= "string" or filter == "" then
+        return true
+    end
+
+    return string.find(string.lower(name), string.lower(filter), 1, true) ~= nil
+end
+
+--- @param path string
+--- @return table
+function M.read_report(path)
+    local lines = vim.fn.readfile(path)
+    if #lines == 0 then
+        error("empty benchmark report: " .. path)
+    end
+
+    return vim.json.decode(table.concat(lines, "\n"))
+end
+
+--- @param metrics table[]
+--- @return table<string, table>
+function M.metric_map(metrics)
+    local map = {}
+    for _, metric in ipairs(metrics or {}) do
+        if type(metric.name) == "string" then
+            map[metric.name] = metric
+        end
+    end
+    return map
+end
+
+--- @param baseline number
+--- @param latest number
+--- @return number|nil
+function M.percent_change(baseline, latest)
+    if type(baseline) ~= "number" or type(latest) ~= "number" or baseline <= 0 then
+        return nil
+    end
+
+    return ((latest - baseline) / baseline) * 100
+end
+
+--- @param baseline table
+--- @param latest table
+--- @param filter string|nil
+--- @return bench.CompareRow[], string[], string[]
+function M.compare_reports(baseline, latest, filter)
+    local baseline_metrics = M.metric_map(baseline.metrics)
+    local latest_metrics = M.metric_map(latest.metrics)
+
+    --- @type bench.CompareRow[]
+    local rows = {}
+    --- @type string[]
+    local missing = {}
+    --- @type string[]
+    local added = {}
+
+    for name, base in pairs(baseline_metrics) do
+        if M.matches_filter(name, filter) then
+            local cur = latest_metrics[name]
+            if not cur then
+                missing[#missing + 1] = name
+            else
+                rows[#rows + 1] = {
+                    name = name,
+                    unit = tostring(cur.unit or base.unit or "ms"),
+                    baseline_median = tonumber(base.median),
+                    latest_median = tonumber(cur.median),
+                    median_change = M.percent_change(tonumber(base.median), tonumber(cur.median)),
+                    baseline_p95 = tonumber(base.p95),
+                    latest_p95 = tonumber(cur.p95),
+                    p95_change = M.percent_change(tonumber(base.p95), tonumber(cur.p95)),
+                    baseline_unit = base.unit,
+                    latest_unit = cur.unit,
+                }
+            end
+        end
+    end
+
+    for name, _ in pairs(latest_metrics) do
+        if M.matches_filter(name, filter) and not baseline_metrics[name] then
+            added[#added + 1] = name
+        end
+    end
+
+    table.sort(rows, function(a, b)
+        local a_change = a.median_change or -math.huge
+        local b_change = b.median_change or -math.huge
+        if a_change == b_change then
+            return a.name < b.name
+        end
+        return a_change > b_change
+    end)
+    table.sort(missing)
+    table.sort(added)
+
+    return rows, missing, added
+end
+
+--- @param change number|nil
+--- @return string
+function M.format_percent(change)
+    if type(change) ~= "number" then
+        return "n/a"
+    end
+
+    return string.format("%+.1f%%", change)
+end
+
+--- @param report bench.Report
+--- @param path string
+--- @return string
+function M.write_report(report, path)
+    local json = M.json_encode(report)
+    local out_dir = vim.fn.fnamemodify(path, ":h")
+    if out_dir ~= "" and out_dir ~= "." then
+        vim.fn.mkdir(out_dir, "p")
+    end
+
+    local f, err = io.open(path, "w")
+    if not f then
+        error(string.format("failed to open benchmark report %s: %s", path, tostring(err)))
+    end
+
+    f:write(json .. "\n")
+    f:close()
+    return json
 end
 
 -------------------------------------------------------------------------------
@@ -451,6 +595,96 @@ function M.print_table(results)
             )
         )
     end
+    io.stderr:write("\n")
+end
+
+--- @param results bench.Result[]
+--- @param limit integer|nil
+--- @return nil
+function M.print_hotspots(results, limit)
+    if #results == 0 then
+        return
+    end
+
+    limit = math.max(1, math.min(limit or 10, #results))
+
+    local sorted = {}
+    for i, result in ipairs(results) do
+        sorted[i] = result
+    end
+
+    table.sort(sorted, function(a, b)
+        if a.median == b.median then
+            return a.name < b.name
+        end
+        return a.median > b.median
+    end)
+
+    io.stderr:write(string.format("Top %d hottest metrics (median):\n", limit))
+    io.stderr:write(
+        string.format("%-4s %-44s %10s %10s %10s\n", "#", "Metric", "Median", "P95", "P99")
+    )
+    io.stderr:write(string.rep("-", 84) .. "\n")
+    for i = 1, limit do
+        local r = sorted[i]
+        io.stderr:write(
+            string.format(
+                "%-4d %-44s %9.3f%s %9.3f%s %9.3f%s\n",
+                i,
+                r.name,
+                r.median,
+                r.unit,
+                r.p95,
+                r.unit,
+                r.p99,
+                r.unit
+            )
+        )
+    end
+    io.stderr:write("\n")
+end
+
+--- @param rows bench.CompareRow[]
+--- @return nil
+function M.print_compare_table(rows)
+    if #rows == 0 then
+        return
+    end
+
+    io.stderr:write(
+        string.format(
+            "%-40s %12s %12s %10s %12s %12s %10s\n",
+            "Metric",
+            "Base Med",
+            "Latest Med",
+            "Delta",
+            "Base P95",
+            "Latest P95",
+            "P95 Delta"
+        )
+    )
+    io.stderr:write(string.rep("-", 114) .. "\n")
+
+    for _, row in ipairs(rows) do
+        local unit = row.unit or "ms"
+        io.stderr:write(
+            string.format(
+                "%-40s %9.3f%s %9.3f%s %10s %9.3f%s %9.3f%s %10s\n",
+                row.name,
+                row.baseline_median or 0,
+                unit,
+                row.latest_median or 0,
+                unit,
+                M.format_percent(row.median_change),
+                row.baseline_p95 or 0,
+                unit,
+                row.latest_p95 or 0,
+                unit,
+                M.format_percent(row.p95_change)
+            )
+        )
+    end
+
     io.stderr:write("\n")
 end
 

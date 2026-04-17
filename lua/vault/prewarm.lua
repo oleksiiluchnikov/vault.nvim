@@ -139,6 +139,15 @@ local function run_enabled_prewarms(prewarm)
     return ran and ok
 end
 
+function M.run_enabled_now()
+    local prewarm = select(1, prewarm_config())
+    if not prewarm or not has_enabled_prewarm(prewarm) then
+        return false
+    end
+
+    return run_enabled_prewarms(prewarm)
+end
+
 function M.schedule()
     local prewarm, delay_ms = prewarm_config()
     if not prewarm or not has_enabled_prewarm(prewarm) then

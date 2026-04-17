@@ -235,6 +235,12 @@ local function open_picker_and_close(picker)
     ensure_scratch_buffer()
 end
 
+--- @param picker_factory fun(): any
+--- @return nil
+local function measure_progressive_picker_ready(picker_factory)
+    picker_factory()
+end
+
 local function clear_picker_caches()
     local Scanner = require("vault.scanner")
     Scanner.invalidate_notes_cache()
@@ -384,12 +390,20 @@ local METRIC_NAMES = {
     "picker notes() open [cold]",
     "picker notes() open [warm]",
     "picker notes() open [preloaded]",
+    "picker notes() ready [cold]",
+    "picker notes() ready [prewarmed]",
     "picker linked() open [cold]",
     "picker linked() open [prewarmed]",
+    "picker linked() ready [cold]",
+    "picker linked() ready [prewarmed]",
     "picker orphans() open [cold]",
     "picker orphans() open [prewarmed]",
+    "picker orphans() ready [cold]",
+    "picker orphans() ready [prewarmed]",
     "picker inbox() open [cold]",
     "picker inbox() open [prewarmed]",
+    "picker inbox() ready [cold]",
+    "picker inbox() ready [prewarmed]",
     "picker tags() open [cold]",
     "picker tags() open [warm]",
     "picker properties() open [cold]",
@@ -457,12 +471,20 @@ local PICKER_METRICS = {
     "picker notes() open [cold]",
     "picker notes() open [warm]",
     "picker notes() open [preloaded]",
+    "picker notes() ready [cold]",
+    "picker notes() ready [prewarmed]",
     "picker linked() open [cold]",
     "picker linked() open [prewarmed]",
+    "picker linked() ready [cold]",
+    "picker linked() ready [prewarmed]",
     "picker orphans() open [cold]",
     "picker orphans() open [prewarmed]",
+    "picker orphans() ready [cold]",
+    "picker orphans() ready [prewarmed]",
     "picker inbox() open [cold]",
     "picker inbox() open [prewarmed]",
+    "picker inbox() ready [cold]",
+    "picker inbox() ready [prewarmed]",
     "picker tags() open [cold]",
     "picker tags() open [warm]",
     "picker properties() open [cold]",
@@ -795,6 +817,8 @@ local function main()
         local Scanner = require("vault.scanner")
         local Notes = require("vault.notes")
         local notes_picker = require("telescope._extensions.vault.pickers.notes")
+        local linked_picker = require("telescope._extensions.vault.pickers.linked")
+        local orphans_picker = require("telescope._extensions.vault.pickers.orphans")
         local inbox_picker = require("telescope._extensions.vault.pickers.inbox")
         local tags_picker = require("telescope._extensions.vault.pickers.tags")
         local properties_picker = require("telescope._extensions.vault.pickers.properties")
@@ -840,16 +864,54 @@ local function main()
             end, 10, 1)
         end
 
+        if wants_metric(args, { "picker notes() ready [cold]" }) then
+            add_metric(
+                "picker notes() ready [cold]",
+                results,
+                bench,
+                function()
+                    measure_progressive_picker_ready(function()
+                        return notes_picker({ sort_by = "mtime", _measure_ready_only = true })
+                    end)
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker notes() ready [prewarmed]" }) then
+            add_metric(
+                "picker notes() ready [prewarmed]",
+                results,
+                bench,
+                function()
+                    measure_progressive_picker_ready(function()
+                        return notes_picker({ sort_by = "mtime", _measure_ready_only = true })
+                    end)
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                        prewarm_picker_state()
+                    end,
+                }
+            )
+        end
+
         if wants_metric(args, { "picker linked() open [cold]" }) then
             add_metric(
                 "picker linked() open [cold]",
                 results,
                 bench,
                 function()
-                    open_picker_and_close(notes_picker({
-                        notes = Notes():linked(),
-                        sort_by = "mtime",
-                    }))
+                    open_picker_and_close(linked_picker({ sort_by = "mtime" }))
                 end,
                 5,
                 0,
@@ -867,10 +929,48 @@ local function main()
                 results,
                 bench,
                 function()
-                    open_picker_and_close(notes_picker({
-                        notes = Notes():linked(),
-                        sort_by = "mtime",
-                    }))
+                    open_picker_and_close(linked_picker({ sort_by = "mtime" }))
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                        prewarm_picker_state()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker linked() ready [cold]" }) then
+            add_metric(
+                "picker linked() ready [cold]",
+                results,
+                bench,
+                function()
+                    measure_progressive_picker_ready(function()
+                        return linked_picker({ sort_by = "mtime", _measure_ready_only = true })
+                    end)
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker linked() ready [prewarmed]" }) then
+            add_metric(
+                "picker linked() ready [prewarmed]",
+                results,
+                bench,
+                function()
+                    measure_progressive_picker_ready(function()
+                        return linked_picker({ sort_by = "mtime", _measure_ready_only = true })
+                    end)
                 end,
                 5,
                 0,
@@ -889,10 +989,7 @@ local function main()
                 results,
                 bench,
                 function()
-                    open_picker_and_close(notes_picker({
-                        notes = Notes():orphans(),
-                        sort_by = "mtime",
-                    }))
+                    open_picker_and_close(orphans_picker({ sort_by = "mtime" }))
                 end,
                 5,
                 0,
@@ -910,10 +1007,48 @@ local function main()
                 results,
                 bench,
                 function()
-                    open_picker_and_close(notes_picker({
-                        notes = Notes():orphans(),
-                        sort_by = "mtime",
-                    }))
+                    open_picker_and_close(orphans_picker({ sort_by = "mtime" }))
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                        prewarm_picker_state()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker orphans() ready [cold]" }) then
+            add_metric(
+                "picker orphans() ready [cold]",
+                results,
+                bench,
+                function()
+                    measure_progressive_picker_ready(function()
+                        return orphans_picker({ sort_by = "mtime", _measure_ready_only = true })
+                    end)
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker orphans() ready [prewarmed]" }) then
+            add_metric(
+                "picker orphans() ready [prewarmed]",
+                results,
+                bench,
+                function()
+                    measure_progressive_picker_ready(function()
+                        return orphans_picker({ sort_by = "mtime", _measure_ready_only = true })
+                    end)
                 end,
                 5,
                 0,
@@ -951,6 +1086,47 @@ local function main()
                 bench,
                 function()
                     open_picker_and_close(inbox_picker())
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                        prewarm_picker_state()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker inbox() ready [cold]" }) then
+            add_metric(
+                "picker inbox() ready [cold]",
+                results,
+                bench,
+                function()
+                    measure_progressive_picker_ready(function()
+                        return inbox_picker({ _measure_ready_only = true })
+                    end)
+                end,
+                5,
+                0,
+                {
+                    before_each = function()
+                        clear_picker_caches()
+                    end,
+                }
+            )
+        end
+
+        if wants_metric(args, { "picker inbox() ready [prewarmed]" }) then
+            add_metric(
+                "picker inbox() ready [prewarmed]",
+                results,
+                bench,
+                function()
+                    measure_progressive_picker_ready(function()
+                        return inbox_picker({ _measure_ready_only = true })
+                    end)
                 end,
                 5,
                 0,

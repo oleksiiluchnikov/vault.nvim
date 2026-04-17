@@ -57,119 +57,145 @@ function M.open(wl, ctx, reopen_picker)
     local conf = get_config()
 
     local prompt_hint = resolved
-        and string.format("Merge [[%s]] into (target absorbs source, source trashed):", slug)
+            and string.format("Merge [[%s]] into (target absorbs source, source trashed):", slug)
         or string.format("Rewrite [[%s]] -> pick target (rewrites links across vault):", slug)
 
-    tele_pickers.new({}, {
-        prompt_title = prompt_hint,
-        finder = tele_finders.new_table({
-            results = scored,
-            --- @param e table
-            --- @return table
-            entry_maker = function(e)
-                local pct = math.floor(e.score * 100 + 0.5)
-                local display_str = pct > 0
-                    and string.format("%s (%d%%)", e.slug, pct)
-                    or e.slug
-                local path = utils.slug_to_path(e.slug)
-                return {
-                    value    = e,
-                    display  = display_str,
-                    ordinal  = e.slug,
-                    path     = path,
-                    filename = path,
-                }
-            end,
-        }),
-        sorter = tele_sorters.get_fuzzy_file(),
-        previewer = tele_conf.file_previewer({}),
-        attach_mappings = function(sub_prompt_bufnr, _)
-            tele_actions.select_default:replace(function()
-                tele_actions.close(sub_prompt_bufnr)
-                local sel = tele_action_state.get_selected_entry()
-                if not sel then
-                    reopen_picker()
-                    return
-                end
-                local target_slug = sel.value.slug
-                local target_path = utils.slug_to_path(target_slug)
-                local target_exists = vim.fn.filereadable(target_path) == 1
+    tele_pickers
+        .new({}, {
+            prompt_title = prompt_hint,
+            finder = tele_finders.new_table({
+                results = scored,
+                --- @param e table
+                --- @return table
+                entry_maker = function(e)
+                    local pct = math.floor(e.score * 100 + 0.5)
+                    local display_str = pct > 0 and string.format("%s (%d%%)", e.slug, pct)
+                        or e.slug
+                    local path = utils.slug_to_path(e.slug)
+                    return {
+                        value = e,
+                        display = display_str,
+                        ordinal = e.slug,
+                        path = path,
+                        filename = path,
+                    }
+                end,
+            }),
+            sorter = tele_sorters.get_fuzzy_file(),
+            previewer = tele_conf.file_previewer({}),
+            attach_mappings = function(sub_prompt_bufnr, _)
+                tele_actions.select_default:replace(function()
+                    tele_actions.close(sub_prompt_bufnr)
+                    local sel = tele_action_state.get_selected_entry()
+                    if not sel then
+                        reopen_picker()
+                        return
+                    end
+                    local target_slug = sel.value.slug
+                    local target_path = utils.slug_to_path(target_slug)
+                    local target_exists = vim.fn.filereadable(target_path) == 1
 
-                if resolved then
-                    local source_path = utils.slug_to_path(slug)
-                    if target_exists then
-                        confirm(conf.confirm_merge,
-                            string.format(
-                                "Merge [[%s]] into [[%s]]?\n\n"
-                                .. "This will:\n"
-                                .. "  1. Append content of [[%s]] to [[%s]]\n"
-                                .. "  2. Rewrite all links [[%s]] -> [[%s]]\n"
-                                .. "  3. Move [[%s]] to .trash/",
-                                slug, target_slug,
-                                slug, target_slug,
-                                slug, target_slug,
-                                slug
-                            ),
-                            function()
-                                require("vault.merge").merge(target_path, source_path, {
-                                    on_done = function()
-                                        actions_mod.remove_from_results(ctx.results, wl)
-                                        reopen_picker()
-                                    end,
-                                })
-                            end,
-                            reopen_picker
-                        )
+                    if resolved then
+                        local source_path = utils.slug_to_path(slug)
+                        if target_exists then
+                            confirm(
+                                conf.confirm_merge,
+                                string.format(
+                                    "Merge [[%s]] into [[%s]]?\n\n"
+                                        .. "This will:\n"
+                                        .. "  1. Append content of [[%s]] to [[%s]]\n"
+                                        .. "  2. Rewrite all links [[%s]] -> [[%s]]\n"
+                                        .. "  3. Move [[%s]] to .trash/",
+                                    slug,
+                                    target_slug,
+                                    slug,
+                                    target_slug,
+                                    slug,
+                                    target_slug,
+                                    slug
+                                ),
+                                function()
+                                    require("vault.merge").merge(target_path, source_path, {
+                                        on_done = function()
+                                            actions_mod.remove_from_results(ctx.results, wl)
+                                            reopen_picker()
+                                        end,
+                                    })
+                                end,
+                                reopen_picker
+                            )
+                        else
+                            confirm(
+                                conf.confirm_rewrite,
+                                string.format(
+                                    "Move [[%s]] -> [[%s]]?\n\n"
+                                        .. "This will rename the file and rewrite all links.",
+                                    slug,
+                                    target_slug
+                                ),
+                                function()
+                                    local Scanner = require("vault.scanner")
+                                    local paths, wikilinks_map =
+                                        Scanner.paths_and_wikilinks_cached()
+                                    local watcher = require("vault.watcher")()
+                                    watcher:disable_oil_guard()
+                                    if watcher.handle_rename then
+                                        watcher:handle_rename(
+                                            source_path,
+                                            target_path,
+                                            nil,
+                                            paths,
+                                            wikilinks_map
+                                        )
+                                    else
+                                        vim.fn.rename(source_path, target_path)
+                                    end
+                                    wl:rewrite(target_slug)
+                                    actions_mod.remove_from_results(ctx.results, wl)
+                                    log.info("Moved [[%s]] -> [[%s]]", slug, target_slug)
+                                    reopen_picker()
+                                end,
+                                reopen_picker
+                            )
+                        end
                     else
-                        confirm(conf.confirm_rewrite,
+                        local count, affected = wl:rewrite_preview(target_slug)
+                        if count == 0 then
+                            log.info("No files contain [[%s]], nothing to rewrite", slug)
+                            reopen_picker()
+                            return
+                        end
+
+                        local msg_suffix = target_exists and "" or " (both unresolved)"
+                        confirm(
+                            conf.confirm_rewrite,
                             string.format(
-                                "Move [[%s]] -> [[%s]]?\n\n"
-                                .. "This will rename the file and rewrite all links.",
-                                slug, target_slug
+                                "Rewrite [[%s]] -> [[%s]]%s in %d file(s)?\n\nAffected:\n  %s",
+                                slug,
+                                target_slug,
+                                msg_suffix,
+                                count,
+                                table.concat(affected, "\n  ")
                             ),
                             function()
-                                local watcher = require("vault.watcher")
-                                if watcher.handle_rename then
-                                    watcher.handle_rename(source_path, target_path)
-                                else
-                                    vim.fn.rename(source_path, target_path)
-                                end
-                                wl:rewrite(target_slug)
+                                local patched = wl:rewrite(target_slug)
+                                log.info(
+                                    "Rewrote [[%s]] -> [[%s]] in %d file(s)",
+                                    slug,
+                                    target_slug,
+                                    patched
+                                )
                                 actions_mod.remove_from_results(ctx.results, wl)
-                                log.info("Moved [[%s]] -> [[%s]]", slug, target_slug)
                                 reopen_picker()
                             end,
                             reopen_picker
                         )
                     end
-                else
-                    local count, affected = wl:rewrite_preview(target_slug)
-                    if count == 0 then
-                        log.info("No files contain [[%s]], nothing to rewrite", slug)
-                        reopen_picker()
-                        return
-                    end
-
-                    local msg_suffix = target_exists and "" or " (both unresolved)"
-                    confirm(conf.confirm_rewrite,
-                        string.format(
-                            "Rewrite [[%s]] -> [[%s]]%s in %d file(s)?\n\nAffected:\n  %s",
-                            slug, target_slug, msg_suffix, count,
-                            table.concat(affected, "\n  ")
-                        ),
-                        function()
-                            local patched = wl:rewrite(target_slug)
-                            log.info("Rewrote [[%s]] -> [[%s]] in %d file(s)", slug, target_slug, patched)
-                            actions_mod.remove_from_results(ctx.results, wl)
-                            reopen_picker()
-                        end,
-                        reopen_picker
-                    )
-                end
-            end)
-            return true
-        end,
-    }):find()
+                end)
+                return true
+            end,
+        })
+        :find()
 end
 
 return M

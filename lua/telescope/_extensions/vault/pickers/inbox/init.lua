@@ -14,23 +14,30 @@ return function(opts)
         error("Inbox directory does not exist")
     end
 
-    opts = opts or {}
-    if not opts.notes then
-        local Notes = require("vault.notes")
-        local link_index = require("vault.notes.link_index")
-        local raw_paths = link_index.paths()
-        local inbox_prefix = inbox_dir:gsub("/+$", "") .. "/"
-        local inbox_paths = {}
+    return require("telescope._extensions.vault.pickers.notes")(
+        vim.tbl_extend("force", opts or {}, {
+            _dynamic = true,
+            _prepare = function()
+                local Notes = require("vault.notes")
+                local link_index = require("vault.notes.link_index")
+                local raw_paths = link_index.paths()
+                local inbox_prefix = inbox_dir:gsub("/+$", "") .. "/"
+                local inbox_paths = {}
 
-        for slug, data in pairs(raw_paths) do
-            if data.path == inbox_dir or data.path:sub(1, #inbox_prefix) == inbox_prefix then
-                inbox_paths[slug] = data
-            end
-        end
+                for slug, data in pairs(raw_paths) do
+                    if
+                        data.path == inbox_dir
+                        or data.path:sub(1, #inbox_prefix) == inbox_prefix
+                    then
+                        inbox_paths[slug] = data
+                    end
+                end
 
-        opts.notes = Notes.from_paths(inbox_paths)
-        opts._wikilinks_map = opts._wikilinks_map or link_index.wikilinks()
-    end
-
-    return require("telescope._extensions.vault.pickers.notes")(opts)
+                return {
+                    notes = Notes.from_paths(inbox_paths),
+                    wikilinks_map = link_index.wikilinks(),
+                }
+            end,
+        })
+    )
 end

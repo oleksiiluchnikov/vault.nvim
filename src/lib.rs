@@ -9,7 +9,7 @@ use std::fs::{self, File};
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use strsim::{jaro_winkler, normalized_levenshtein};
 use walkdir::{DirEntry, WalkDir};
 
@@ -291,7 +291,7 @@ struct WikilinkData {
     sources: HashMap<String, HashMap<usize, SourceOccurrence>>,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     suggestions: HashMap<String, Vec<SuggestionCandidate>>,
-    #[serde(skip)]
+    #[serde(skip, default)]
     embedded_count: usize,
 }
 
@@ -524,12 +524,20 @@ struct CachedNote {
     note: ParsedNote,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedCachedNote {
+    mtime_nanos: u32,
+    mtime_secs: u64,
+    note: ParsedNote,
+}
+
 /// Global scan cache: holds the last full scan result keyed by file path.
 /// On subsequent scans, only files with changed mtime are re-parsed.
 struct ScanCache {
     root: String,
     ignores_hash: u64,
     generation: u64,
+    needs_revalidate: bool,
     entries: HashMap<PathBuf, CachedNote>,
     paths_map: HashMap<String, PathInfo>,
     wikilinks_map_no_suggest: HashMap<String, WikilinkData>,
@@ -540,13 +548,163 @@ struct ScanCache {
     last_wikilinks_removed: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedScanCache {
+    entries: HashMap<String, PersistedCachedNote>,
+    generation: u64,
+    ignores_hash: u64,
+    last_diff_from_generation: u64,
+    last_paths_removed: Vec<String>,
+    last_paths_updated: HashMap<String, PathInfo>,
+    last_wikilinks_removed: Vec<String>,
+    last_wikilinks_updated: HashMap<String, WikilinkData>,
+    paths_map: HashMap<String, PathInfo>,
+    root: String,
+    wikilinks_map_no_suggest: HashMap<String, WikilinkData>,
+}
+
 static SCAN_CACHE: Lazy<Mutex<Option<ScanCache>>> = Lazy::new(|| Mutex::new(None));
+
+fn system_time_parts(time: SystemTime) -> (u64, u32) {
+    let duration = time
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0));
+    (duration.as_secs(), duration.subsec_nanos())
+}
+
+fn system_time_from_parts(secs: u64, nanos: u32) -> SystemTime {
+    UNIX_EPOCH + Duration::new(secs, nanos)
+}
+
+fn persisted_scan_cache_from(cache: &ScanCache) -> PersistedScanCache {
+    let entries = cache
+        .entries
+        .iter()
+        .map(|(path, cached)| {
+            let (mtime_secs, mtime_nanos) = system_time_parts(cached.mtime);
+            (
+                path.to_string_lossy().to_string(),
+                PersistedCachedNote {
+                    mtime_nanos,
+                    mtime_secs,
+                    note: cached.note.clone(),
+                },
+            )
+        })
+        .collect();
+
+    PersistedScanCache {
+        entries,
+        generation: cache.generation,
+        ignores_hash: cache.ignores_hash,
+        last_diff_from_generation: cache.last_diff_from_generation,
+        last_paths_removed: cache.last_paths_removed.clone(),
+        last_paths_updated: cache.last_paths_updated.clone(),
+        last_wikilinks_removed: cache.last_wikilinks_removed.clone(),
+        last_wikilinks_updated: cache.last_wikilinks_updated.clone(),
+        paths_map: cache.paths_map.clone(),
+        root: cache.root.clone(),
+        wikilinks_map_no_suggest: cache.wikilinks_map_no_suggest.clone(),
+    }
+}
+
+fn scan_cache_from_persisted(snapshot: PersistedScanCache) -> ScanCache {
+    let entries = snapshot
+        .entries
+        .into_iter()
+        .map(|(path, cached)| {
+            (
+                PathBuf::from(path),
+                CachedNote {
+                    mtime: system_time_from_parts(cached.mtime_secs, cached.mtime_nanos),
+                    note: cached.note,
+                },
+            )
+        })
+        .collect();
+
+    ScanCache {
+        entries,
+        generation: snapshot.generation,
+        ignores_hash: snapshot.ignores_hash,
+        needs_revalidate: true,
+        last_diff_from_generation: snapshot.last_diff_from_generation,
+        last_paths_removed: snapshot.last_paths_removed,
+        last_paths_updated: snapshot.last_paths_updated,
+        last_wikilinks_removed: snapshot.last_wikilinks_removed,
+        last_wikilinks_updated: snapshot.last_wikilinks_updated,
+        paths_map: snapshot.paths_map,
+        root: snapshot.root,
+        wikilinks_map_no_suggest: snapshot.wikilinks_map_no_suggest,
+    }
+}
+
+fn load_scan_cache_snapshot(
+    snapshot_path: &str,
+    root: &str,
+    ignores_hash: u64,
+) -> Option<ScanCache> {
+    let bytes = fs::read(snapshot_path).ok()?;
+    let snapshot: PersistedScanCache = bincode::deserialize(&bytes).ok()?;
+    if snapshot.root != root || snapshot.ignores_hash != ignores_hash {
+        return None;
+    }
+
+    Some(scan_cache_from_persisted(snapshot))
+}
+
+fn save_scan_cache_snapshot(snapshot_path: &str, cache: &ScanCache) {
+    let snapshot = persisted_scan_cache_from(cache);
+    let Ok(serialized) = bincode::serialize(&snapshot) else {
+        return;
+    };
+
+    let path = Path::new(snapshot_path);
+    if let Some(parent) = path.parent() {
+        if fs::create_dir_all(parent).is_err() {
+            return;
+        }
+    }
+
+    let tmp_path = path.with_extension("tmp");
+    if fs::write(&tmp_path, serialized).is_err() {
+        return;
+    }
+
+    if fs::rename(&tmp_path, path).is_err() {
+        let _ = fs::remove_file(path);
+        let _ = fs::rename(&tmp_path, path);
+    }
+}
+
+fn remove_scan_cache_snapshot(snapshot_path: &str) {
+    let _ = fs::remove_file(snapshot_path);
+}
+
+fn maybe_load_scan_cache_snapshot(root: &str, ignores_hash: u64, snapshot_path: Option<&str>) {
+    let Some(snapshot_path) = snapshot_path else {
+        return;
+    };
+
+    let mut cache = SCAN_CACHE.lock().unwrap();
+    let cache_valid = cache
+        .as_ref()
+        .map_or(false, |c| c.root == root && c.ignores_hash == ignores_hash);
+    if cache_valid {
+        return;
+    }
+
+    if let Some(loaded) = load_scan_cache_snapshot(snapshot_path, root, ignores_hash) {
+        *cache = Some(loaded);
+    }
+}
 
 fn cached_paths_and_wikilinks_response<'lua>(
     lua: &'lua Lua,
     generation: u64,
     changed: bool,
     full: bool,
+    needs_revalidate: bool,
     paths: Option<&HashMap<String, PathInfo>>,
     wikilinks: Option<&HashMap<String, WikilinkData>>,
     paths_updated: Option<&HashMap<String, PathInfo>>,
@@ -558,6 +716,7 @@ fn cached_paths_and_wikilinks_response<'lua>(
     table.set("generation", generation)?;
     table.set("changed", changed)?;
     table.set("full", full)?;
+    table.set("needs_revalidate", needs_revalidate)?;
 
     if let Some(paths) = paths {
         table.set("paths", lua.to_value(paths)?)?;
@@ -602,6 +761,7 @@ fn scan_all_notes_cached(
     root: &str,
     ignore_patterns: Vec<String>,
     collect_notes: bool,
+    snapshot_path: Option<&str>,
 ) -> Option<Vec<ParsedNote>> {
     let root_path = Path::new(root);
     if !root_path.exists() {
@@ -614,6 +774,8 @@ fn scan_all_notes_cached(
 
     let ignores_hash = hash_ignores(&ignore_patterns);
     let glob_set = build_ignore_set(ignore_patterns);
+
+    maybe_load_scan_cache_snapshot(root, ignores_hash, snapshot_path);
 
     // Collect all current .md files with their mtimes
     let current_files: Vec<(PathBuf, SystemTime)> = WalkDir::new(root)
@@ -681,10 +843,11 @@ fn scan_all_notes_cached(
             insert_note_wikilinks_no_suggest(&mut wikilinks_map_no_suggest, &note, root);
         }
 
-        *cache = Some(ScanCache {
+        let new_cache = ScanCache {
             root: root.to_string(),
             ignores_hash: ignores_hash,
             generation: 1,
+            needs_revalidate: false,
             entries,
             paths_map,
             wikilinks_map_no_suggest,
@@ -693,7 +856,13 @@ fn scan_all_notes_cached(
             last_paths_removed: Vec::new(),
             last_wikilinks_updated: HashMap::new(),
             last_wikilinks_removed: Vec::new(),
-        });
+        };
+
+        if let Some(path) = snapshot_path {
+            save_scan_cache_snapshot(path, &new_cache);
+        }
+
+        *cache = Some(new_cache);
 
         return notes;
     }
@@ -797,7 +966,13 @@ fn scan_all_notes_cached(
         sc.last_wikilinks_updated = last_wikilinks_updated;
         sc.last_wikilinks_removed = last_wikilinks_removed;
         sc.generation = sc.generation.wrapping_add(1);
+
+        if let Some(path) = snapshot_path {
+            save_scan_cache_snapshot(path, sc);
+        }
     }
+
+    sc.needs_revalidate = false;
 
     if collect_notes {
         Some(sc.entries.values().map(|c| c.note.clone()).collect())
@@ -808,9 +983,12 @@ fn scan_all_notes_cached(
 
 /// Clear the scan cache (called from Lua when the watcher detects changes
 /// or when the user explicitly requests a refresh).
-fn clear_scan_cache() {
+fn clear_scan_cache(snapshot_path: Option<&str>) {
     let mut cache = SCAN_CACHE.lock().unwrap();
     *cache = None;
+    if let Some(path) = snapshot_path {
+        remove_scan_cache_snapshot(path);
+    }
 }
 
 fn build_paths_map(notes: &[ParsedNote], root: &str) -> HashMap<String, PathInfo> {
@@ -1886,7 +2064,7 @@ where
     T: Serialize,
     F: FnOnce(&[ParsedNote], &str) -> T,
 {
-    let notes = scan_all_notes_cached(&root, ignores, true).unwrap_or_default();
+    let notes = scan_all_notes_cached(&root, ignores, true, None).unwrap_or_default();
     let data = builder(&notes, &root);
     lua.to_value(&data)
 }
@@ -2006,10 +2184,43 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
         "paths_and_wikilinks_cached",
         lua.create_function(
             |lua,
-             (root, ignores, known_generation): (String, Vec<String>, Option<u64>)|
+             (root, ignores, known_generation, snapshot_path): (
+                String,
+                Vec<String>,
+                Option<u64>,
+                Option<String>,
+            )|
              -> LuaResult<LuaValue> {
                 let ignores_hash = hash_ignores(&ignores);
-                scan_all_notes_cached(&root, ignores, false);
+
+                maybe_load_scan_cache_snapshot(&root, ignores_hash, snapshot_path.as_deref());
+
+                {
+                    let cache = SCAN_CACHE.lock().unwrap();
+                    if let Some(sc) = cache.as_ref() {
+                        if sc.root == root
+                            && sc.ignores_hash == ignores_hash
+                            && sc.needs_revalidate
+                            && known_generation.is_none()
+                        {
+                            return cached_paths_and_wikilinks_response(
+                                lua,
+                                sc.generation,
+                                true,
+                                true,
+                                true,
+                                Some(&sc.paths_map),
+                                Some(&sc.wikilinks_map_no_suggest),
+                                None,
+                                None,
+                                None,
+                                None,
+                            );
+                        }
+                    }
+                }
+
+                scan_all_notes_cached(&root, ignores, false, snapshot_path.as_deref());
 
                 let cache = SCAN_CACHE.lock().unwrap();
                 let Some(sc) = cache.as_ref() else {
@@ -2020,6 +2231,7 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
                         0,
                         true,
                         true,
+                        false,
                         Some(&empty_paths),
                         Some(&empty_wikilinks),
                         None,
@@ -2037,6 +2249,7 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
                         0,
                         true,
                         true,
+                        false,
                         Some(&empty_paths),
                         Some(&empty_wikilinks),
                         None,
@@ -2050,6 +2263,7 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
                     return cached_paths_and_wikilinks_response(
                         lua,
                         sc.generation,
+                        false,
                         false,
                         false,
                         None,
@@ -2067,6 +2281,7 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
                         sc.generation,
                         true,
                         false,
+                        false,
                         None,
                         None,
                         Some(&sc.last_paths_updated),
@@ -2081,6 +2296,7 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
                     sc.generation,
                     true,
                     true,
+                    false,
                     Some(&sc.paths_map),
                     Some(&sc.wikilinks_map_no_suggest),
                     None,
@@ -2095,8 +2311,8 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
     // clear_cache: invalidate the incremental scan cache
     exports.set(
         "clear_cache",
-        lua.create_function(|_, ()| -> LuaResult<()> {
-            clear_scan_cache();
+        lua.create_function(|_, snapshot_path: Option<String>| -> LuaResult<()> {
+            clear_scan_cache(snapshot_path.as_deref());
             Ok(())
         })?,
     )?;
@@ -2112,4 +2328,57 @@ fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
     )?;
 
     Ok(exports)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("vault-core-{label}-{}-{stamp}", std::process::id()))
+    }
+
+    #[test]
+    fn scan_all_notes_cached_restores_snapshot_after_clearing_memory() {
+        let root_dir = unique_temp_dir("restore-root");
+        fs::create_dir_all(&root_dir).expect("create root dir");
+        let note_path = root_dir.join("alpha.md");
+        fs::write(&note_path, "# Alpha\n\n[[beta]]\n").expect("write note");
+
+        let snapshot_path = root_dir.join("snapshot.json");
+        clear_scan_cache(Some(snapshot_path.to_str().expect("snapshot utf-8")));
+
+        let _ = scan_all_notes_cached(
+            root_dir.to_str().expect("root utf-8"),
+            Vec::new(),
+            false,
+            Some(snapshot_path.to_str().expect("snapshot utf-8")),
+        );
+
+        assert!(snapshot_path.exists());
+
+        clear_scan_cache(None);
+
+        let _ = scan_all_notes_cached(
+            root_dir.to_str().expect("root utf-8"),
+            Vec::new(),
+            false,
+            Some(snapshot_path.to_str().expect("snapshot utf-8")),
+        );
+
+        let cache = SCAN_CACHE.lock().expect("scan cache lock");
+        let restored = cache.as_ref().expect("restored cache");
+        assert_eq!(restored.root, root_dir.to_string_lossy().to_string());
+        assert_eq!(restored.entries.len(), 1);
+        assert_eq!(restored.paths_map.len(), 1);
+        assert!(restored.paths_map.contains_key("alpha"));
+
+        drop(cache);
+        clear_scan_cache(Some(snapshot_path.to_str().expect("snapshot utf-8")));
+        let _ = fs::remove_dir_all(root_dir);
+    }
 }

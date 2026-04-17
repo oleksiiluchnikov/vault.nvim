@@ -84,7 +84,11 @@ describe("vault inbox picker", function()
         picker({})
 
         assert.is_not_nil(captured)
-        assert.are.same({ sentinel = true }, captured._wikilinks_map)
-        assert.are.equal(2, #captured.notes:list())
+        assert.is_function(captured._prepare)
+
+        local prepared = captured._prepare()
+
+        assert.are.same({ sentinel = true }, prepared.wikilinks_map)
+        assert.are.equal(2, #prepared.notes:list())
     end)
 end)

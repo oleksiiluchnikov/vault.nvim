@@ -11,6 +11,17 @@
 --- @return Picker?
 return function(opts)
     return require("telescope._extensions.vault.pickers.notes")(
-        vim.tbl_extend("force", opts or {}, { notes = require("vault.notes")():orphans() })
+        vim.tbl_extend("force", opts or {}, {
+            _dynamic = true,
+            _notes_provider = function()
+                local state = require("vault.core.state")
+                local cached = state.get_global_key("notes.orphans")
+                if type(cached) == "table" and type(cached.map) == "table" then
+                    return cached
+                end
+
+                return require("vault.notes")():orphans()
+            end,
+        })
     )
 end
