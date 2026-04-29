@@ -211,7 +211,7 @@ These controls only affect `:Vault tasks kanban`; other kanban boards are not ch
 | `:Vault note cluster` | Notes reachable via wikilink graph BFS from current note. |
 | `:Vault note rename [slug]` | Rename note. No arg = interactive prompt. Patches all wikilinks. |
 | `:Vault note delete [slug] [--permanent]` | Delete note (trash by default, `--permanent` for hard delete). |
-| `:Vault note preview` | Markdown preview via Glow plus a local graph sidebar. |
+| `:Vault note preview` | Markdown preview via Glow plus a local graph sidebar unless `views.local_graph.enabled = false`. |
 | `:Vault note graph` | Open local graph sidebar for current note. |
 | `:Vault note obsidian` | Open current note in Obsidian. |
 | `:Vault note random [filter]` | Open a random note. Optional arg is a fuzzy filter on slug. |
@@ -261,6 +261,14 @@ The batch rename popup for property values uses a plain text buffer, so typing `
 | `:Vault merge biases` | Open the learned merge-bias file for editing. |
 | `:Vault watcher start\|stop\|status` | Control the file watcher. |
 | `:Vault api <function> [args...]` | Raw dispatch to any `vault.api` function. |
+
+## Notes Picker Search
+
+- Single-word prompts use Telescope/fzy fuzzy matching.
+- Multi-word prompts use strict token matching: every token must appear in note search text.
+- Search text includes filename stem, slug, title, relative path, absolute path, and cached content.
+- Add a trailing `/` for regex filtering, for example `project/`.
+- Prefix regex with `-` to exclude matches, for example `-archive/`.
 
 ## Telescope Picker Keymaps
 
