@@ -4,40 +4,11 @@ return function(opts)
     local sorters = require("telescope.sorters")
     local entry_display = require("telescope.pickers.entry_display")
     local vault_state = require("vault.core.state")
-    local available_pickers = {
-        { name = "notes", description = "Browse and search through all notes" },
-        { name = "tasks", description = "Search and manage tasks across notes" },
-        { name = "properties", description = "Search for properties and values" },
-        { name = "dirs", description = "Browse notes by directory structure" },
-        { name = "orphans", description = "Find notes without internal links" },
-        { name = "tags", description = "Search and navigate through tags" },
-        { name = "links", description = "Find and navigate between linked notes" },
-        { name = "wikilinks", description = "Find notes linking to current note" },
-        { name = "bases", description = "Browse Obsidian base database views" },
-    }
-    -- extend available pickers with vault pickers
-    local vault_pickers = require("telescope._extensions.vault.pickers")
-    for name, _ in pairs(vault_pickers) do
-        table.insert(available_pickers, { name = name, description = "" })
-    end
-
-    -- -- get pickers from the plugin's data
-    -- local plugin_dir = vim.fn.stdpath("data")
-    --     .. "/lazy/vault.nvim/telescope/_extensions/vault/pickers"
-    -- if not vim.uv.fs_stat(plugin_dir) then
-    --     Log:error("vault.nvim is not installed")
-    --     return
-    -- end
-    --
-    -- for _, picker in ipairs(vim.fn.glob(plugin_dir .. "/*", false, true)) do
-    --     local name = vim.fn.fnamemodify(picker, ":t")
-    --     if name ~= "init.lua" then
-    --         table.insert(available_pickers, { name = name, description = "" })
-    --     end
-    -- end
-    --
+    local vault_registry = require("telescope._extensions.vault.pickers.registry")
     local vault_layouts = require("telescope._extensions.vault.layouts")
     opts = opts or {}
+
+    local available_pickers = vault_registry.entries()
 
     -- Calculate optimal widths based on content
     local widths = {

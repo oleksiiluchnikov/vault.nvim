@@ -14,7 +14,8 @@ return {
         local entry = selections[1]
 
         --- @type fun(): Picker
-        local picker_fn = require("telescope._extensions.vault.pickers")[entry.value.name]
+        local picker_fn =
+            require("telescope._extensions.vault.pickers.registry").resolve(entry.value.name)
         if not picker_fn then
             log.error("No picker found for '%s'", entry.value.name)
             return
