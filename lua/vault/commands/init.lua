@@ -95,6 +95,50 @@ end
 
 --- @alias vault.Subcommand { run?: fun(args: string[], cmd_args: table), complete?: fun(prefix: string): string[], [string]: vault.Subcommand }
 
+---@param args string[]
+---@return string|nil path
+local function note_path_from_optional_slug(args)
+    local first = args[1]
+    if type(first) == "string" and first ~= "" and first:sub(1, 2) ~= "--" then
+        return require("vault.utils").slug_to_path(first)
+    end
+
+    local path = vim.fn.expand("%:p")
+    if type(path) == "table" then
+        path = path[1]
+    end
+    if type(path) ~= "string" or not path:match("%.md$") then
+        log.warn("Current buffer is not a note")
+        return nil
+    end
+    return path
+end
+
+---@param args string[]
+---@return boolean|nil
+local function graph_flag(args)
+    if vim.tbl_contains(args, "--graph") then
+        return true
+    end
+    if vim.tbl_contains(args, "--no-graph") then
+        return false
+    end
+    return nil
+end
+
+---@param prefix string
+---@return string[]
+local function complete_note_slug_or_preview_flag(prefix)
+    local results = completions.note_slugs(prefix, "", 0) or {}
+    for _, flag in ipairs({ "--graph", "--no-graph" }) do
+        if flag:find(prefix or "", 1, true) == 1 then
+            results[#results + 1] = flag
+        end
+    end
+    table.sort(results)
+    return results
+end
+
 --- Build the subcommand tree lazily so pickers/callbacks resolve at call time.
 --- @return table<string, vault.Subcommand>
 local function build_subcommands()
@@ -300,33 +344,37 @@ local function build_subcommands()
                 end,
             },
             preview = {
-                run = function()
-                    local path = vim.fn.expand("%:p")
-                    if not path:match("%.md$") then
-                        log.warn("Current buffer is not a note")
+                run = function(args)
+                    local path = note_path_from_optional_slug(args)
+                    if not path then
                         return
                     end
-                    require("vault.notes.note")(path):preview()
+                    require("vault.notes.note")(path):preview({ graph = graph_flag(args) })
                 end,
+                complete = complete_note_slug_or_preview_flag,
             },
             graph = {
-                run = function()
-                    local path = vim.fn.expand("%:p")
-                    if not path:match("%.md$") then
-                        log.warn("Current buffer is not a note")
+                run = function(args)
+                    local path = note_path_from_optional_slug(args)
+                    if not path then
                         return
                     end
                     require("vault.notes.note")(path):local_graph()
                 end,
+                complete = function(prefix)
+                    return completions.note_slugs(prefix, "", 0) or {}
+                end,
             },
             obsidian = {
-                run = function()
-                    local path = vim.fn.expand("%:p")
-                    if not path:match("%.md$") then
-                        log.warn("Current buffer is not a note")
+                run = function(args)
+                    local path = note_path_from_optional_slug(args)
+                    if not path then
                         return
                     end
                     require("vault.notes.note")(path):open_in_obsidian()
+                end,
+                complete = function(prefix)
+                    return completions.note_slugs(prefix, "", 0) or {}
                 end,
             },
         },
