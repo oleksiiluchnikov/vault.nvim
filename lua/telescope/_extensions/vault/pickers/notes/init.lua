@@ -28,6 +28,7 @@ return function(opts)
     local note_stats = require("telescope._extensions.vault.pickers.notes.stats")
     local note_columns = require("telescope._extensions.vault.pickers.notes.columns")
     local vault_match = require("vault.utils").match
+    local has_fzy, fzy = pcall(require, "telescope.algos.fzy")
 
     opts = opts or {}
     opts.sort_by = opts.sort_by or "mtime"
@@ -154,6 +155,15 @@ return function(opts)
                 end
             end
             return true
+        end
+
+        if
+            #terms == 1
+            and has_fzy
+            and type(fzy) == "table"
+            and type(fzy.has_match) == "function"
+        then
+            return fzy.has_match(terms[1], searchable)
         end
 
         return false
