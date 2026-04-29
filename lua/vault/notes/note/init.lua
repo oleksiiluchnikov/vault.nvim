@@ -462,9 +462,13 @@ function Note:edit(path)
     end
 end
 
+---@class vault.NotePreviewOptions
+---@field graph? boolean Open local graph sidebar after preview. Defaults to `views.local_graph.enabled`.
+
 --- Preview with Glow.nvim and optional local graph sidebar.
----
-function Note:preview()
+--- @param opts? vault.NotePreviewOptions
+function Note:preview(opts)
+    opts = opts or {}
     local previewer = config.options.previewer or "glow"
 
     if vim.fn.executable(previewer) == 0 and package.loaded["glow"] == nil then
@@ -474,15 +478,23 @@ function Note:preview()
     vim.cmd("Glow " .. vim.fn.fnameescape(self.data.path))
 
     local local_graph = ((config.options.views or {}).local_graph or {})
-    if local_graph.enabled ~= false then
+    local should_open_graph = opts.graph
+    if should_open_graph == nil then
+        should_open_graph = local_graph.enabled ~= false
+    end
+    if should_open_graph then
         require("vault.ui.local_graph").open(self, { enter = false })
     end
 end
 
 --- Open Obsidian-like local graph sidebar for this note.
----
-function Note:local_graph()
-    require("vault.ui.local_graph").open(self, { enter = true })
+--- @param opts? vault.LocalGraphOpenOptions
+function Note:local_graph(opts)
+    opts = opts or {}
+    if opts.enter == nil then
+        opts.enter = true
+    end
+    require("vault.ui.local_graph").open(self, opts)
 end
 
 --- Check if note has values for the specified keys.

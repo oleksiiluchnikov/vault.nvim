@@ -3,7 +3,7 @@
 ---
 --- @param results table The original results list (domain objects, NOT telescope entries)
 --- @param entry_maker function The picker's entry_maker function
---- @param opts? { search_text?: fun(item: any): string }
+--- @param opts? { search_text?: fun(item: table): string }
 --- @return function on_input_filter_cb
 return function(results, entry_maker, opts)
     opts = opts or {}
@@ -41,8 +41,8 @@ return function(results, entry_maker, opts)
         local new_results = {}
         local excluded = {}
 
-        for _, entry in ipairs(picker.finder.results) do
-            local item = entry.value or entry
+        for _, item in ipairs(results) do
+            local entry = entry_maker(item)
             local searchable = type(opts.search_text) == "function" and opts.search_text(item)
                 or entry.ordinal
                 or (item.data and (item.data.slug or item.data.name or item.data.relpath or item.data.content))
@@ -68,8 +68,7 @@ return function(results, entry_maker, opts)
             return default_finder()
         elseif is_negative then
             new_results = {}
-            for _, entry in ipairs(picker.finder.results) do
-                local item = entry.value or entry
+            for _, item in ipairs(results) do
                 if not vim.tbl_contains(excluded, item) then
                     table.insert(new_results, item)
                 end

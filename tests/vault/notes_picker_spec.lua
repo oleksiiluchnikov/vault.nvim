@@ -807,6 +807,36 @@ describe("vault notes picker", function()
         assert.are.equal("keep-note", captured.finder.results[1].data.slug)
     end)
 
+    it("applies each static regex filter against the original note set", function()
+        local captured = stub_deps()
+        package.loaded["telescope._extensions.vault.on_input_filter"] = nil
+        package.loaded[MODULE] = nil
+
+        local note_a = sample_note()
+        local note_b = sample_note()
+        note_a.data.slug = "alpha"
+        note_a.data.path = "/tmp/vault/alpha.md"
+        note_a.data.relpath = "alpha.md"
+        note_b.data.slug = "beta"
+        note_b.data.path = "/tmp/vault/beta.md"
+        note_b.data.relpath = "beta.md"
+
+        require(MODULE)({
+            notes = {
+                list = function()
+                    return { note_a, note_b }
+                end,
+            },
+            _wikilinks_map = {},
+        })
+
+        captured.picker.on_input_filter_cb("alpha/")
+        captured.picker.on_input_filter_cb("beta/")
+
+        assert.are.equal(1, #captured.finder.results)
+        assert.are.equal("beta", captured.finder.results[1].data.slug)
+    end)
+
     it("uses the same searchable fields for static and dynamic regex note filtering", function()
         local captured = stub_deps({ root = "/tmp/vault" })
         package.loaded["telescope._extensions.vault.on_input_filter"] = nil

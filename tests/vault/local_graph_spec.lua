@@ -83,6 +83,28 @@ describe("vault local graph", function()
         assert.matches("missing ?", lines, nil, true)
     end)
 
+    it("opens from a typed slug reference without a full note object", function()
+        package.loaded["vault.notes.link_index"] = {
+            get = function()
+                return {
+                    paths = {
+                        current = { title = "Current Note", path = "/tmp/current.md" },
+                    },
+                    outlinks_by_source = {},
+                    inlinks_by_target = {},
+                }
+            end,
+        }
+
+        local graph = require(MODULE)
+        graph.open({ slug = "current" }, { enter = true })
+
+        local buf = vim.api.nvim_get_current_buf()
+        local lines = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+
+        assert.matches("Current Note", lines, nil, true)
+    end)
+
     it("creates unresolved link notes when opened", function()
         local created_slug
         local invalidated = false

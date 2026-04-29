@@ -38,6 +38,11 @@ local M = {}
 ---@field slug string
 ---@field label string
 
+---@class vault.LocalGraphRef
+---@field slug string
+---@field path? string
+---@field title? string
+
 ---@class vault.LocalGraphOpenOptions
 ---@field enter? boolean
 ---@field buf? integer
@@ -113,16 +118,22 @@ local function add_line(lines, line_slugs, text, slug)
     end
 end
 
----@param note vault.Note
+---@param target vault.Note|vault.LocalGraphRef
+---@return string
+local function target_slug(target)
+    return target.slug or (target.data and target.data.slug) or ""
+end
+
+---@param target vault.Note|vault.LocalGraphRef
 ---@return vault.LocalGraphIndex index
 ---@return string slug
 ---@return string[] outgoing
 ---@return string[] backlinks
 ---@return string[] unresolved
-local function collect_graph(note)
+local function collect_graph(target)
     ---@type vault.LocalGraphIndex
     local index = require("vault.notes.link_index").get()
-    local slug = note.data.slug
+    local slug = target_slug(target)
     local outlinks = index.outlinks_by_source[slug] or {}
     local inlinks = index.inlinks_by_target[slug] or {}
     local outgoing = {}
@@ -132,9 +143,9 @@ local function collect_graph(note)
     for _, link_slug in ipairs(sort_keys(outlinks)) do
         local link = outlinks[link_slug]
         local data = link.data or {}
-        local target = data.target
-        if type(target) == "string" and target ~= "" then
-            outgoing[#outgoing + 1] = target
+        local resolved_target = data.target
+        if type(resolved_target) == "string" and resolved_target ~= "" then
+            outgoing[#outgoing + 1] = resolved_target
         else
             unresolved[#unresolved + 1] = data.slug or link_slug
         end
@@ -147,12 +158,12 @@ local function collect_graph(note)
     return index, slug, outgoing, backlinks, unresolved
 end
 
----@param note vault.Note
+---@param target vault.Note|vault.LocalGraphRef
 ---@param width integer
 ---@return string[] lines
 ---@return table<string, vault.LocalGraphLineSlugs> line_slugs
-local function build_canvas(note, width)
-    local index, slug, outgoing, backlinks, unresolved = collect_graph(note)
+local function build_canvas(target, width)
+    local index, slug, outgoing, backlinks, unresolved = collect_graph(target)
     local lines = {}
     local line_slugs = {}
 
@@ -317,8 +328,8 @@ local function open_slug(buf)
 end
 
 ---@param buf integer
----@param note vault.Note
-local function set_keymaps(buf, note)
+---@param target vault.Note|vault.LocalGraphRef
+local function set_keymaps(buf, target)
     local opts = { buffer = buf, silent = true }
     vim.keymap.set("n", "q", function()
         local win = vim.fn.bufwinid(buf)
@@ -327,7 +338,7 @@ local function set_keymaps(buf, note)
         end
     end, opts)
     vim.keymap.set("n", "r", function()
-        M.open(note, { enter = true })
+        M.open(target, { enter = true })
     end, opts)
     vim.keymap.set("n", "<CR>", function()
         open_slug(buf)
@@ -338,14 +349,15 @@ local function set_keymaps(buf, note)
 end
 
 --- Open an Obsidian-like local graph sidebar for a note.
---- @param note vault.Note
+--- @param target vault.Note|vault.LocalGraphRef
 --- @param opts? vault.LocalGraphOpenOptions
-function M.open(note, opts)
+function M.open(target, opts)
     opts = opts or {}
     local cfg = graph_config()
     local width = tonumber(cfg.width) or 54
     local previous_win = vim.api.nvim_get_current_win()
-    local name = "vault://local-graph/" .. note.data.slug
+    local slug = target_slug(target)
+    local name = "vault://local-graph/" .. slug
     local win, buf
 
     if type(opts.buf) == "number" and vim.api.nvim_buf_is_valid(opts.buf) then
@@ -381,7 +393,7 @@ function M.open(note, opts)
     vim.bo[buf].readonly = false
     vim.bo[buf].modifiable = true
 
-    local lines, line_slugs = build_canvas(note, width)
+    local lines, line_slugs = build_canvas(target, width)
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
     if previous_win ~= win and vim.api.nvim_win_is_valid(previous_win) then
         vim.b[buf].vault_local_graph_source_win = previous_win
@@ -395,7 +407,7 @@ function M.open(note, opts)
     vim.wo[win].signcolumn = "no"
     vim.wo[win].foldcolumn = "0"
 
-    set_keymaps(buf, note)
+    set_keymaps(buf, target)
 
     if not opts.enter and vim.api.nvim_win_is_valid(previous_win) then
         vim.api.nvim_set_current_win(previous_win)
