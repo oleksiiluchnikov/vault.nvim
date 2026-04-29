@@ -462,7 +462,7 @@ function Note:edit(path)
     end
 end
 
---- Preview with Glow.nvim
+--- Preview with Glow.nvim and optional local graph sidebar.
 ---
 function Note:preview()
     local previewer = config.options.previewer or "glow"
@@ -471,7 +471,18 @@ function Note:preview()
         log.warn("Preview requires 'glow' — install with: brew install glow")
         return
     end
-    vim.cmd("Glow " .. self.data.path)
+    vim.cmd("Glow " .. vim.fn.fnameescape(self.data.path))
+
+    local local_graph = ((config.options.views or {}).local_graph or {})
+    if local_graph.enabled ~= false then
+        require("vault.ui.local_graph").open(self, { enter = false })
+    end
+end
+
+--- Open Obsidian-like local graph sidebar for this note.
+---
+function Note:local_graph()
+    require("vault.ui.local_graph").open(self, { enter = true })
 end
 
 --- Check if note has values for the specified keys.

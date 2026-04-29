@@ -124,6 +124,8 @@ local function build_subcommands()
                     "cluster",
                     "random",
                     "preview",
+                    "graph",
+                    "local_graph",
                     "obsidian",
                 }
                 -- Also include Note methods
@@ -306,6 +308,26 @@ local function build_subcommands()
                         return
                     end
                     require("vault.notes.note")(path):preview()
+                end,
+            },
+            graph = {
+                run = function()
+                    local path = vim.fn.expand("%:p")
+                    if not path:match("%.md$") then
+                        log.warn("Current buffer is not a note")
+                        return
+                    end
+                    require("vault.notes.note")(path):local_graph()
+                end,
+            },
+            local_graph = {
+                run = function()
+                    local path = vim.fn.expand("%:p")
+                    if not path:match("%.md$") then
+                        log.warn("Current buffer is not a note")
+                        return
+                    end
+                    require("vault.notes.note")(path):local_graph()
                 end,
             },
             obsidian = {

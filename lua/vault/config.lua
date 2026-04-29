@@ -49,7 +49,7 @@
 --- @field duplicates? { preferred_dirs?: string[], ignored_frontmatter_keys?: string[], frontmatter_normalizers?: table<string, fun(value:string, key:string): string>, stem_suffix_patterns?: string[], review_excluded_dirs?: string[], review_excluded_files?: string[], review_excluded_patterns?: string[], related_excluded_dirs?: string[], related_excluded_files?: string[], related_excluded_patterns?: string[], presets?: table<string, { description?: string, root?: string, dirs?: string[], tags?: string[], kind?: string[] }> } Duplicate review heuristics
 --- @field taxonomy? { field?: string, reference_prefix?: string, classify?: { columns?: string[], readonly_columns?: string[], dirs?: string[]|nil }, rename?: { require_preview?: boolean, update_links?: boolean, chunk_size?: integer, skip_collisions?: boolean }, mapping?: table<string, string|{ prefix?: string, dir?: string }> } Taxonomy workflow settings
 --- @field tasks? { dir?: string, fields?: { status?: string, priority?: string, blocked_by?: string }, defaults?: { status?: string, executor?: string, category?: string, priority?: string }, status_order?: string[], priority_order?: string[], completed_statuses?: string[], aliases?: table<string, string>, transitions?: table<string, table<string, true>> } Task-note policy settings
---- @field views? { grid?: { default_columns?: string[], identity_mode?: "conceal"|"extmark"|"visible", delete_hard_cap?: integer, create_hard_cap?: integer, row_hl?: vault.RowHlRule[]|fun(record: table, row_idx: integer): string|nil } } Shared view settings
+--- @field views? { grid?: { default_columns?: string[], identity_mode?: "conceal"|"extmark"|"visible", delete_hard_cap?: integer, create_hard_cap?: integer, row_hl?: vault.RowHlRule[]|fun(record: table, row_idx: integer): string|nil }, local_graph?: { enabled?: boolean, width?: integer } } Shared view settings
 ---
 --- @field telescope? { notes?: { columns?: (string|vault.TelescopeNotesColumnSpec)[] }, prewarm?: { notes?: boolean, properties?: boolean, tags?: boolean, dirs?: boolean, delay_ms?: integer }, pickers?: table } Telescope configuration. Example:
 ---   ```lua
@@ -334,6 +334,10 @@ local DEFAULT_OPTIONS = {
     },
     views = {
         grid = {},
+        local_graph = {
+            enabled = true,
+            width = 54,
+        },
     },
     previewer = "glow", -- The previewer to use. Default: "glow"
     telescope = {

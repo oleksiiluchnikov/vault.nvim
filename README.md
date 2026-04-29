@@ -211,7 +211,8 @@ These controls only affect `:Vault tasks kanban`; other kanban boards are not ch
 | `:Vault note cluster` | Notes reachable via wikilink graph BFS from current note. |
 | `:Vault note rename [slug]` | Rename note. No arg = interactive prompt. Patches all wikilinks. |
 | `:Vault note delete [slug] [--permanent]` | Delete note (trash by default, `--permanent` for hard delete). |
-| `:Vault note preview` | Markdown preview via Glow. |
+| `:Vault note preview` | Markdown preview via Glow plus a local graph sidebar. |
+| `:Vault note graph` | Open local graph sidebar for current note. |
 | `:Vault note obsidian` | Open current note in Obsidian. |
 | `:Vault note random [filter]` | Open a random note. Optional arg is a fuzzy filter on slug. |
 | `:Vault move [slug]` | Move note to a different directory via Telescope picker. |
