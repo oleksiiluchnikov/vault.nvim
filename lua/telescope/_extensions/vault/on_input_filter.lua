@@ -3,9 +3,12 @@
 ---
 --- @param results table The original results list (domain objects, NOT telescope entries)
 --- @param entry_maker function The picker's entry_maker function
+--- @param opts? { search_text?: fun(item: any): string }
 --- @return function on_input_filter_cb
-return function(results, entry_maker)
+return function(results, entry_maker, opts)
+    opts = opts or {}
     local finders = require("telescope.finders")
+    local vault_match = require("vault.utils").match
     local vault_state = require("vault.core.state")
 
     return function(prompt)
@@ -30,7 +33,7 @@ return function(results, entry_maker)
         end
 
         local is_negative = prompt:sub(1, 1) == "-"
-        local pattern = prompt:sub(1, -2):sub(2)
+        local pattern = prompt:sub(1, -2)
         if is_negative then
             pattern = pattern:sub(2)
         end
@@ -39,17 +42,20 @@ return function(results, entry_maker)
         local excluded = {}
 
         for _, entry in ipairs(picker.finder.results) do
-            local item = entry.value
-            local slug = (item.data and (item.data.slug or item.data.name or item.data.relpath or item.data.content))
+            local item = entry.value or entry
+            local searchable = type(opts.search_text) == "function" and opts.search_text(item)
+                or entry.ordinal
+                or (item.data and (item.data.slug or item.data.name or item.data.relpath or item.data.content))
                 or ""
-            if slug == "" then
+            searchable = tostring(searchable)
+            if searchable == "" then
                 goto continue
             end
-            local ok = pcall(vim.fn.match, slug, pattern)
+            local ok, matched = pcall(vault_match, searchable, pattern, "regex", false)
             if not ok then
                 goto continue
             end
-            if vim.fn.match(slug, pattern) ~= -1 then
+            if matched then
                 table.insert(new_results, item)
                 if is_negative then
                     table.insert(excluded, item)
@@ -63,8 +69,9 @@ return function(results, entry_maker)
         elseif is_negative then
             new_results = {}
             for _, entry in ipairs(picker.finder.results) do
-                if not vim.tbl_contains(excluded, entry.value) then
-                    table.insert(new_results, entry.value)
+                local item = entry.value or entry
+                if not vim.tbl_contains(excluded, item) then
+                    table.insert(new_results, item)
                 end
             end
         end

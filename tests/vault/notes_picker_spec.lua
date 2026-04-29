@@ -44,6 +44,7 @@ describe("vault notes picker", function()
             shared_progressive = package.loaded[SHARED_PROGRESSIVE_MODULE],
             notes = package.loaded["vault.notes"],
             scanner = package.loaded["vault.scanner"],
+            fzy = package.loaded["telescope.algos.fzy"],
             schedule = vim.schedule,
             uv_new_timer = vim.uv.new_timer,
         }
@@ -76,6 +77,7 @@ describe("vault notes picker", function()
         package.loaded[SHARED_PROGRESSIVE_MODULE] = originals.shared_progressive
         package.loaded["vault.notes"] = originals.notes
         package.loaded["vault.scanner"] = originals.scanner
+        package.loaded["telescope.algos.fzy"] = originals.fzy
         vim.schedule = originals.schedule
         vim.uv.new_timer = originals.uv_new_timer
     end)
@@ -111,7 +113,10 @@ describe("vault notes picker", function()
                         state = { prompt_cache = {} },
                     }
                     captured.generic_sorter_calls = captured.generic_sorter_calls + 1
-                    generic_sorter.scoring_function = function()
+                    generic_sorter.scoring_function = function(_, prompt, line, entry)
+                        if config and type(config._generic_score) == "function" then
+                            return config._generic_score(prompt, line, entry)
+                        end
                         return 1
                     end
                     generic_sorter._init = function(self)
@@ -146,10 +151,14 @@ describe("vault notes picker", function()
         package.loaded["telescope.finders"] = {
             new_table = function(opts)
                 captured.finder = {
+                    closed = false,
                     kind = "table",
                     results = vim.deepcopy(opts.results),
                     entry_maker = opts.entry_maker,
                 }
+                captured.finder.close = function(self)
+                    self.closed = true
+                end
                 return captured.finder
             end,
             new_dynamic = function(opts)
@@ -269,7 +278,7 @@ describe("vault notes picker", function()
         local entry = captured.finder.entry_maker(captured.finder.results[1])
         entry.display(entry)
 
-        assert.are.equal(24, captured.items[5].width)
+        assert.are.equal(8, captured.items[5].width)
     end)
 
     it("uses globally configured note columns", function()
@@ -325,6 +334,24 @@ describe("vault notes picker", function()
 
         assert.are.equal(1, #captured.items)
         assert.are.equal("Readable Title", cells[1][1])
+    end)
+
+    it("includes title and paths in static note search text", function()
+        local captured = stub_deps()
+        local picker = require(MODULE)
+        local notes = {
+            list = function()
+                return { sample_note() }
+            end,
+        }
+
+        picker({ notes = notes, _wikilinks_map = {} })
+        local entry = captured.finder.entry_maker(captured.finder.results[1])
+
+        assert.is_truthy(entry.ordinal:find("topic", 1, true))
+        assert.is_truthy(entry.ordinal:find("readable title", 1, true))
+        assert.is_truthy(entry.ordinal:find("topic%.md"))
+        assert.is_truthy(entry.ordinal:find("/tmp/very/deeply", 1, true))
     end)
 
     it("reuses cached default note prep between openings", function()
@@ -430,6 +457,120 @@ describe("vault notes picker", function()
         assert.are.equal(1, prepare_calls)
         assert.are.equal(1, captured.refresh_count)
         assert.are.same({ result_count = 1, state = "ready" }, ready_event)
+    end)
+
+    it("matches relpath in dynamic note search", function()
+        local captured = stub_deps({ root = "/tmp/vault" })
+        local scheduled = {}
+
+        vim.schedule = function(fn)
+            scheduled[#scheduled + 1] = fn
+        end
+
+        package.loaded[DEFAULT_PREP_MODULE] = {
+            get_or_prepare = function()
+                return {
+                    link_counts = {
+                        [sample_note().data.slug] = { outlinks = 0, inlinks = 0, dangling = 0 },
+                    },
+                    notes = {
+                        list = function()
+                            return { sample_note() }
+                        end,
+                    },
+                    results = { sample_note() },
+                }
+            end,
+        }
+
+        local picker = require(MODULE)({})
+        picker.attach_mappings(1, function() end)
+        scheduled[1]()
+
+        local filtered = captured.finder.fn("topic.md")
+        assert.are.equal(1, #filtered)
+        assert.are.equal(sample_note().data.slug, filtered[1].data.slug)
+    end)
+
+    it("keeps dynamic note matches strict for multi-word prompts", function()
+        local captured = stub_deps({
+            root = "/tmp/vault",
+            _generic_score = function()
+                return -1
+            end,
+        })
+        local scheduled = {}
+        local note_a = sample_note()
+        local note_b = sample_note()
+        local query = "bases databases views"
+
+        note_a.data.slug = "architecture-philosophy"
+        note_a.data.path = "/tmp/vault/architecture-philosophy.md"
+        note_a.data.relpath = "architecture-philosophy.md"
+        note_a.data.title = "Architecture philosophy"
+        note_a.data.content = "Bases aren't databases. Vault views."
+
+        note_b.data.slug = "false-positive"
+        note_b.data.path = "/tmp/vault/false-positive.md"
+        note_b.data.relpath = "false-positive.md"
+        note_b.data.title = "False positive"
+        note_b.data.content = "b a s e s x d a t a b a s e s x v i e w s"
+
+        package.loaded["telescope.algos.fzy"] = {
+            has_match = function(prompt, line)
+                local needle_index = 1
+                if prompt == "" then
+                    return true
+                end
+                for i = 1, #line do
+                    if line:sub(i, i) == prompt:sub(needle_index, needle_index) then
+                        needle_index = needle_index + 1
+                        if needle_index > #prompt then
+                            return true
+                        end
+                    end
+                end
+                return false
+            end,
+        }
+
+        vim.schedule = function(fn)
+            scheduled[#scheduled + 1] = fn
+        end
+
+        package.loaded[DEFAULT_PREP_MODULE] = {
+            get_or_prepare = function()
+                return {
+                    link_counts = {
+                        [note_a.data.slug] = { outlinks = 0, inlinks = 0, dangling = 0 },
+                        [note_b.data.slug] = { outlinks = 0, inlinks = 0, dangling = 0 },
+                    },
+                    notes = {
+                        list = function()
+                            return { note_a, note_b }
+                        end,
+                    },
+                    results = { note_a, note_b },
+                }
+            end,
+        }
+
+        local picker = require(MODULE)({})
+        picker.attach_mappings(1, function() end)
+        scheduled[1]()
+
+        local filtered = captured.finder.fn(query)
+        assert.are.equal(1, #filtered)
+        assert.are.equal(note_a.data.slug, filtered[1].data.slug)
+
+        local entry = captured.finder.entry_maker(filtered[1])
+        local score = captured.picker.sorter.scoring_function(
+            captured.picker.sorter,
+            query,
+            entry.ordinal,
+            entry
+        )
+        assert.is_true(score > 0)
     end)
 
     it("shows matched over total in the dynamic status text", function()
@@ -563,6 +704,157 @@ describe("vault notes picker", function()
         scheduled[2]()
 
         assert.are.equal(" 2 / 3", captured.picker.get_status_text())
+    end)
+
+    it("keeps the first regex character in static note filtering", function()
+        local captured = stub_deps()
+        package.loaded["telescope._extensions.vault.on_input_filter"] = nil
+        package.loaded[MODULE] = nil
+
+        local note_a = sample_note()
+        local note_b = sample_note()
+        note_a.data.slug = "abc-note"
+        note_a.data.path = "/tmp/vault/abc-note.md"
+        note_a.data.relpath = "abc-note.md"
+        note_b.data.slug = "bc-only"
+        note_b.data.path = "/tmp/vault/bc-only.md"
+        note_b.data.relpath = "bc-only.md"
+
+        require(MODULE)({
+            notes = {
+                list = function()
+                    return { note_a, note_b }
+                end,
+            },
+            _wikilinks_map = {},
+        })
+
+        local result = captured.picker.on_input_filter_cb("abc/")
+
+        assert.are.equal("", result.prompt)
+        assert.are.equal(1, #captured.finder.results)
+        assert.are.equal("abc-note", captured.finder.results[1].data.slug)
+    end)
+
+    it("supports negative regex in static note filtering", function()
+        local captured = stub_deps()
+        package.loaded["telescope._extensions.vault.on_input_filter"] = nil
+        package.loaded[MODULE] = nil
+
+        local note_a = sample_note()
+        local note_b = sample_note()
+        note_a.data.slug = "abc-note"
+        note_a.data.path = "/tmp/vault/abc-note.md"
+        note_a.data.relpath = "abc-note.md"
+        note_b.data.slug = "keep-note"
+        note_b.data.path = "/tmp/vault/keep-note.md"
+        note_b.data.relpath = "keep-note.md"
+
+        require(MODULE)({
+            notes = {
+                list = function()
+                    return { note_a, note_b }
+                end,
+            },
+            _wikilinks_map = {},
+        })
+
+        local result = captured.picker.on_input_filter_cb("-abc/")
+
+        assert.are.equal("", result.prompt)
+        assert.are.equal(1, #captured.finder.results)
+        assert.are.equal("keep-note", captured.finder.results[1].data.slug)
+    end)
+
+    it("uses the same searchable fields for static and dynamic regex note filtering", function()
+        local captured = stub_deps({ root = "/tmp/vault" })
+        package.loaded["telescope._extensions.vault.on_input_filter"] = nil
+        package.loaded[MODULE] = nil
+
+        local scheduled = {}
+        vim.schedule = function(fn)
+            scheduled[#scheduled + 1] = fn
+        end
+
+        local note_a = sample_note()
+        local note_b = sample_note()
+        note_a.data.slug = "title-only-slug"
+        note_a.data.title = "Needle Title"
+        note_a.data.path = "/tmp/vault/title-only-slug.md"
+        note_a.data.relpath = "title-only-slug.md"
+        note_b.data.slug = "other"
+        note_b.data.title = "Other"
+        note_b.data.path = "/tmp/vault/other.md"
+        note_b.data.relpath = "other.md"
+
+        package.loaded[DEFAULT_PREP_MODULE] = {
+            get_or_prepare = function()
+                return {
+                    link_counts = {
+                        [note_a.data.slug] = { outlinks = 0, inlinks = 0, dangling = 0 },
+                        [note_b.data.slug] = { outlinks = 0, inlinks = 0, dangling = 0 },
+                    },
+                    notes = {
+                        list = function()
+                            return { note_a, note_b }
+                        end,
+                    },
+                    results = { note_a, note_b },
+                }
+            end,
+        }
+
+        local dynamic_picker = require(MODULE)({})
+        dynamic_picker.attach_mappings(1, function() end)
+        scheduled[1]()
+        local dynamic_matches = captured.finder.fn("Needle/")
+
+        package.loaded[MODULE] = nil
+        local static_captured = stub_deps()
+        package.loaded["telescope._extensions.vault.on_input_filter"] = nil
+        require(MODULE)({
+            notes = {
+                list = function()
+                    return { note_a, note_b }
+                end,
+            },
+            _wikilinks_map = {},
+        })
+        static_captured.picker.on_input_filter_cb("Needle/")
+
+        assert.are.equal(1, #dynamic_matches)
+        assert.are.equal(1, #static_captured.finder.results)
+        assert.are.equal(dynamic_matches[1].data.slug, static_captured.finder.results[1].data.slug)
+    end)
+
+    it("orders exact filename stem matches before partial stem matches", function()
+        local captured = stub_deps()
+        local picker = require(MODULE)
+        local exact = sample_note()
+        local partial = sample_note()
+        exact.data.path = "/tmp/vault/topic.md"
+        exact.data.slug = "topic"
+        partial.data.path = "/tmp/vault/topic-extra.md"
+        partial.data.slug = "topic-extra"
+
+        picker({
+            notes = {
+                list = function()
+                    return { exact, partial }
+                end,
+            },
+            _wikilinks_map = {},
+        })
+        local exact_entry = captured.finder.entry_maker(exact)
+        local partial_entry = captured.finder.entry_maker(partial)
+        local sorter = captured.picker.sorter
+
+        local exact_score =
+            sorter.scoring_function(sorter, "topic", exact_entry.ordinal, exact_entry)
+        local partial_score =
+            sorter.scoring_function(sorter, "topic", partial_entry.ordinal, partial_entry)
+
+        assert.is_true(exact_score < partial_score)
     end)
 
     it("uses Telescope generic sorter when configured", function()

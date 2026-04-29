@@ -27,6 +27,7 @@ return function(opts)
     local link_index = require("vault.notes.link_index")
     local note_stats = require("telescope._extensions.vault.pickers.notes.stats")
     local note_columns = require("telescope._extensions.vault.pickers.notes.columns")
+    local vault_match = require("vault.utils").match
 
     opts = opts or {}
     opts.sort_by = opts.sort_by or "mtime"
@@ -92,6 +93,98 @@ return function(opts)
         end
     end
 
+    ---@param note vault.Note
+    ---@return string
+    local function searchable_text(note)
+        local data = note and note.data or {}
+        local title = data.title
+        if type(title) == "table" then
+            title = title.text
+        end
+
+        local stem = data.stem
+        if type(stem) ~= "string" or stem == "" then
+            stem = vim.fn.fnamemodify(data.path or "", ":t:r")
+        end
+
+        return table
+            .concat({
+                tostring(stem or ""),
+                tostring(data.slug or ""),
+                tostring(title or ""),
+                tostring(data.relpath or ""),
+                tostring(data.path or ""),
+                tostring(data.content or ""),
+            }, " ")
+            :lower()
+    end
+
+    ---@param prompt string
+    ---@return string[]
+    local function prompt_terms(prompt)
+        local terms = {}
+        for raw in prompt:lower():gmatch("%S+") do
+            local term = raw:gsub("^[\"'`“”‘’%(%[%{]+", "")
+                :gsub("[\"'`“”‘’%,!%?%;:%)%]%}]+$", "")
+            if #term > 1 and term ~= "-" and term ~= "—" then
+                terms[#terms + 1] = term
+            end
+        end
+        return terms
+    end
+
+    ---@param prompt string
+    ---@param searchable string
+    ---@return boolean
+    local function matches_prompt(prompt, searchable)
+        local query = (prompt or ""):lower()
+        if query == "" then
+            return true
+        end
+
+        if vault_match(searchable, query, "contains", false) then
+            return true
+        end
+
+        local terms = prompt_terms(query)
+        if #terms >= 2 then
+            for _, term in ipairs(terms) do
+                if not vault_match(searchable, term, "contains", false) then
+                    return false
+                end
+            end
+            return true
+        end
+
+        return false
+    end
+
+    ---@param prompt string
+    ---@param searchable string
+    ---@return number?
+    local function token_match_score(prompt, searchable)
+        local query = (prompt or ""):lower()
+        if query == "" then
+            return nil
+        end
+
+        if vault_match(searchable, query, "contains", false) then
+            return 0.02
+        end
+
+        local terms = prompt_terms(query)
+        if #terms >= 2 then
+            for _, term in ipairs(terms) do
+                if not vault_match(searchable, term, "contains", false) then
+                    return nil
+                end
+            end
+            return 0.05
+        end
+
+        return nil
+    end
+
     ---@param results vault.Note[]
     ---@param link_counts table<string, vault.NotePickerLinkCounts>
     ---@return fun(note: vault.Note): table
@@ -117,10 +210,9 @@ return function(opts)
         end
 
         return function(note)
-            local stem = vim.fn.fnamemodify(note.data.path, ":t:r")
             return {
                 value = note,
-                ordinal = stem .. " " .. (note.data.slug or "") .. " " .. (note.data.content or ""),
+                ordinal = searchable_text(note),
                 display = make_display,
                 filename = note.data.path,
             }
@@ -222,21 +314,39 @@ return function(opts)
                 return 0
             end
 
+            local query = prompt:lower()
+            local searchable = type(entry and entry.ordinal) == "string" and entry.ordinal
+                or tostring(line or ""):lower()
+            local token_score = token_match_score(query, searchable)
             local fuzzy_score = fuzzy.scoring_function(fuzzy, prompt, line, entry)
-            if fuzzy_score <= 0 then
-                return -1
-            end
 
             local note = entry.value
             if note and note.data then
                 local stem = vim.fn.fnamemodify(note.data.path or "", ":t:r"):lower()
-                local query = prompt:lower()
                 if stem == query then
                     return 0.001
                 end
-                if stem:find(query, 1, true) then
-                    return math.min(fuzzy_score, 0.01)
+                if vault_match(stem, query, "contains", false) then
+                    local boosted = 0.01
+                    if token_score then
+                        return math.min(boosted, token_score)
+                    end
+                    if fuzzy_score > 0 then
+                        return math.min(fuzzy_score, boosted)
+                    end
+                    return boosted
                 end
+            end
+
+            if token_score then
+                if fuzzy_score > 0 then
+                    return math.min(fuzzy_score, token_score)
+                end
+                return token_score
+            end
+
+            if fuzzy_score <= 0 then
+                return -1
             end
 
             return fuzzy_score
@@ -266,8 +376,10 @@ return function(opts)
         local session = progressive.new({
             empty_prompt_limit = opts.empty_prompt_limit,
             loading_message = opts.loading_message,
+            matches_prompt = matches_prompt,
             prepare = prepare_picker_data,
             prompt_result_limit = opts.prompt_result_limit,
+            search_text = searchable_text,
         })
 
         picker_opts.finder = session:finder()
@@ -309,7 +421,9 @@ return function(opts)
         })
         picker_opts.previewer = vault_previewers.notes or nil
         picker_opts.attach_mappings = base_attach
-        picker_opts.on_input_filter_cb = make_filter(prepared.results, prepared.entry_maker)
+        picker_opts.on_input_filter_cb = make_filter(prepared.results, prepared.entry_maker, {
+            search_text = searchable_text,
+        })
     end
 
     picker = pickers.new(layout, picker_opts)
