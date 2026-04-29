@@ -492,6 +492,47 @@ describe("vault notes picker", function()
         assert.are.equal(sample_note().data.slug, filtered[1].data.slug)
     end)
 
+    it("keeps dynamic note fuzzy matches for single-word prompts", function()
+        local captured = stub_deps({ root = "/tmp/vault" })
+        local scheduled = {}
+        local note = sample_note()
+
+        package.loaded["telescope.algos.fzy"] = {
+            has_match = function(prompt, line)
+                assert.are.equal("tpc", prompt)
+                return line:find("topic", 1, true) ~= nil
+            end,
+        }
+
+        vim.schedule = function(fn)
+            scheduled[#scheduled + 1] = fn
+        end
+
+        package.loaded[DEFAULT_PREP_MODULE] = {
+            get_or_prepare = function()
+                return {
+                    link_counts = {
+                        [note.data.slug] = { outlinks = 0, inlinks = 0, dangling = 0 },
+                    },
+                    notes = {
+                        list = function()
+                            return { note }
+                        end,
+                    },
+                    results = { note },
+                }
+            end,
+        }
+
+        local picker = require(MODULE)({})
+        picker.attach_mappings(1, function() end)
+        scheduled[1]()
+
+        local filtered = captured.finder.fn("tpc")
+        assert.are.equal(1, #filtered)
+        assert.are.equal(note.data.slug, filtered[1].data.slug)
+    end)
+
     it("keeps dynamic note matches strict for multi-word prompts", function()
         local captured = stub_deps({
             root = "/tmp/vault",

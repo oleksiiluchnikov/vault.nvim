@@ -300,6 +300,7 @@ function M.open(note, opts)
     vim.bo[buf].bufhidden = "wipe"
     vim.bo[buf].swapfile = false
     vim.bo[buf].filetype = "vault-local-graph"
+    vim.bo[buf].readonly = false
     vim.bo[buf].modifiable = true
 
     local lines, line_slugs = build_canvas(note, width)
