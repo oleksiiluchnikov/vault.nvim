@@ -31,7 +31,7 @@ local DEFAULT_COLUMNS = {
     "outlinks",
     "inlinks",
     "dangling",
-    { key = "directory", min_width = 8, max_width = 24 },
+    { key = "directory", min_width = 1, max_width = 8 },
     { key = "stem", flex = 1, min_width = 12 },
 }
 
@@ -111,21 +111,24 @@ local BUILTIN_COLUMNS = {
     outlinks = {
         width = "auto",
         text = function(note, ctx)
-            return string.format("out %d", counts_for(note, ctx).outlinks)
+            local count = counts_for(note, ctx).outlinks
+            return count > 0 and string.format("o%d", count) or ""
         end,
         hl = "TelescopeResultsComment",
     },
     inlinks = {
         width = "auto",
         text = function(note, ctx)
-            return string.format("in %d", counts_for(note, ctx).inlinks)
+            local count = counts_for(note, ctx).inlinks
+            return count > 0 and string.format("i%d", count) or ""
         end,
         hl = "TelescopeResultsComment",
     },
     dangling = {
         width = "auto",
         text = function(note, ctx)
-            return string.format("dang %d", counts_for(note, ctx).dangling)
+            local count = counts_for(note, ctx).dangling
+            return count > 0 and string.format("d%d", count) or ""
         end,
         hl = function(note, ctx)
             return counts_for(note, ctx).dangling > 0 and "DiagnosticWarn"
@@ -135,7 +138,7 @@ local BUILTIN_COLUMNS = {
     directory = {
         width = "auto",
         min_width = 8,
-        max_width = 24,
+        max_width = 8,
         text = function(note)
             return directory_text(note)
         end,

@@ -1,4 +1,5 @@
 local finders = require("telescope.finders")
+local vault_match = require("vault.utils").match
 local has_fzy, fzy = pcall(require, "telescope.algos.fzy")
 local COUNT_DEBOUNCE_MS = 120
 
@@ -10,7 +11,7 @@ local function fuzzy_has_match(prompt, line)
         return fzy.has_match(prompt, line)
     end
 
-    return line:find(prompt, 1, true) ~= nil
+    return vault_match(line, prompt, "contains", true)
 end
 
 ---@class vault.TelescopeProgressivePrepared
@@ -24,6 +25,7 @@ end
 ---@field loading_message? string
 ---@field prompt_result_limit? integer
 ---@field search_text? fun(item: any): string
+---@field matches_prompt? fun(prompt: string, searchable: string, item?: any): boolean
 
 ---@class vault.TelescopeProgressiveStatus
 ---@field kind "status"
@@ -43,6 +45,7 @@ end
 ---@field prepare fun(): vault.TelescopeProgressivePrepared
 ---@field prompt_result_limit integer
 ---@field results table[]
+---@field matches_prompt fun(prompt: string, searchable: string, item?: any): boolean
 ---@field search_text fun(item: any): string
 ---@field searchables string[]
 ---@field seed_results table[]
@@ -86,6 +89,13 @@ local function default_search_text(item)
             tostring(data.content or ""),
         }, " ")
         :lower()
+end
+
+---@param prompt string
+---@param searchable string
+---@return boolean
+local function default_matches_prompt(prompt, searchable)
+    return fuzzy_has_match(prompt:lower(), searchable)
 end
 
 ---@param prompt string
@@ -179,11 +189,10 @@ end
 ---@param prompt string
 ---@return table[]
 local function prompt_matches(self, prompt)
-    local lowered = prompt:lower()
     local filtered = {}
 
     for index, item in ipairs(self.results) do
-        if fuzzy_has_match(lowered, self.searchables[index]) then
+        if self.matches_prompt(prompt, self.searchables[index], item) then
             if #filtered < self.prompt_result_limit then
                 filtered[#filtered + 1] = item
             else
@@ -203,15 +212,12 @@ local function regex_matches(self, pattern, is_negative)
     local filtered = {}
 
     for index, item in ipairs(self.results) do
-        local ok, match_index = pcall(vim.fn.match, self.searchables[index], pattern)
-        if ok then
-            local matched = match_index ~= -1
-            if matched ~= is_negative then
-                if #filtered < self.prompt_result_limit then
-                    filtered[#filtered + 1] = item
-                else
-                    break
-                end
+        local ok, matched = pcall(vault_match, self.searchables[index], pattern, "regex", false)
+        if ok and matched ~= is_negative then
+            if #filtered < self.prompt_result_limit then
+                filtered[#filtered + 1] = item
+            else
+                break
             end
         end
     end
@@ -223,11 +229,10 @@ end
 ---@param prompt string
 ---@return integer
 local function count_prompt_matches(self, prompt)
-    local lowered = prompt:lower()
     local matched_count = 0
 
-    for index = 1, #self.results do
-        if fuzzy_has_match(lowered, self.searchables[index]) then
+    for index, item in ipairs(self.results) do
+        if self.matches_prompt(prompt, self.searchables[index], item) then
             matched_count = matched_count + 1
         end
     end
@@ -243,12 +248,9 @@ local function count_regex_matches(self, pattern, is_negative)
     local matched_count = 0
 
     for index = 1, #self.results do
-        local ok, match_index = pcall(vim.fn.match, self.searchables[index], pattern)
-        if ok then
-            local matched = match_index ~= -1
-            if matched ~= is_negative then
-                matched_count = matched_count + 1
-            end
+        local ok, matched = pcall(vault_match, self.searchables[index], pattern, "regex", false)
+        if ok and matched ~= is_negative then
+            matched_count = matched_count + 1
         end
     end
 
@@ -323,6 +325,7 @@ function Session:new(opts)
         prepare = opts.prepare,
         prompt_result_limit = math.max(1, tonumber(opts.prompt_result_limit) or 400),
         results = {},
+        matches_prompt = opts.matches_prompt or default_matches_prompt,
         search_text = opts.search_text or default_search_text,
         searchables = {},
         seed_results = {},
