@@ -1361,7 +1361,7 @@ fn suggest_all_strategies(
 fn vault_suggest(
     lua: &Lua,
     (query, slugs, limit): (String, Vec<String>, usize),
-) -> LuaResult<LuaValue> {
+) -> LuaResult<LuaValue<'_>> {
     let slug_refs: Vec<&str> = slugs.iter().map(|s| s.as_str()).collect();
     let result = suggest_all_strategies(&query, &slug_refs, limit);
     lua.to_value(&result)
@@ -1967,7 +1967,7 @@ fn scan_base_files(root: &str, ignore_patterns: Vec<String>, ext: &str) -> Vec<B
 fn vault_base_files(
     lua: &Lua,
     (root, ignores, ext): (String, Vec<String>, String),
-) -> LuaResult<LuaValue> {
+) -> LuaResult<LuaValue<'_>> {
     let bases = scan_base_files(&root, ignores, &ext);
     lua.to_value(&bases)
 }
@@ -2040,7 +2040,7 @@ fn run_scanner<T, F>(
     lua: &Lua,
     (root, ignores): (String, Vec<String>), // Standardize inputs
     builder: F,
-) -> LuaResult<LuaValue>
+) -> LuaResult<LuaValue<'_>>
 where
     T: Serialize,
     F: FnOnce(&[ParsedNote], &str) -> T,
@@ -2059,7 +2059,7 @@ fn run_scanner_cached<T, F>(
     lua: &Lua,
     (root, ignores): (String, Vec<String>),
     builder: F,
-) -> LuaResult<LuaValue>
+) -> LuaResult<LuaValue<'_>>
 where
     T: Serialize,
     F: FnOnce(&[ParsedNote], &str) -> T,
@@ -2071,13 +2071,13 @@ where
 
 // 1. Define this helper function if you haven't already,
 //    or just use a closure in the module definition.
-fn vault_scan_raw(lua: &Lua, (root, ignores): (String, Vec<String>)) -> LuaResult<LuaValue> {
+fn vault_scan_raw(lua: &Lua, (root, ignores): (String, Vec<String>)) -> LuaResult<LuaValue<'_>> {
     let notes = scan_all_notes(&root, ignores);
     lua.to_value(&notes)
 }
 
 #[mlua::lua_module]
-fn vault_core(lua: &Lua) -> LuaResult<LuaTable> {
+fn vault_core(lua: &Lua) -> LuaResult<LuaTable<'_>> {
     let exports = lua.create_table()?;
 
     // exports.set("paths", lua.create_function(vault_paths)?)?;

@@ -3,11 +3,53 @@ local log = require("vault.log").scope("local_graph")
 
 local M = {}
 
+---@class vault.LocalGraphConfig
+---@field enabled? boolean
+---@field width? integer
+
+---@class vault.LocalGraphIndexEntry
+---@field basename? string
+---@field path? string
+---@field stem? string
+---@field title? string
+
+---@class vault.LocalGraphLinkData
+---@field slug? string
+---@field target? string
+
+---@class vault.LocalGraphLink
+---@field data? vault.LocalGraphLinkData
+
+---@class vault.LocalGraphIndex
+---@field paths? table<string, vault.LocalGraphIndexEntry>
+---@field outlinks_by_source table<string, table<string, vault.LocalGraphLink>>
+---@field inlinks_by_target table<string, table<string, boolean|table>>
+
+---@class vault.LocalGraphLineSlugs
+---@field any? string
+---@field left? string
+---@field center? string
+---@field right? string
+---@field left_end? integer
+---@field center_start? integer
+---@field center_end? integer
+
+---@class vault.LocalGraphNode
+---@field slug string
+---@field label string
+
+---@class vault.LocalGraphOpenOptions
+---@field enter? boolean
+---@field buf? integer
+
+---@return vault.LocalGraphConfig
 local function graph_config()
     local views = config.options.views or {}
     return views.local_graph or {}
 end
 
+---@param t table<string, table|boolean>|nil
+---@return string[]
 local function sort_keys(t)
     local keys = {}
     for key, _ in pairs(t or {}) do
@@ -17,11 +59,17 @@ local function sort_keys(t)
     return keys
 end
 
+---@param index vault.LocalGraphIndex
+---@param slug string
+---@return string|nil
 local function path_for_slug(index, slug)
     local entry = index.paths and index.paths[slug]
     return entry and entry.path or nil
 end
 
+---@param index vault.LocalGraphIndex
+---@param slug string
+---@return string
 local function title_for_slug(index, slug)
     local entry = index.paths and index.paths[slug]
     if entry then
@@ -30,6 +78,9 @@ local function title_for_slug(index, slug)
     return slug
 end
 
+---@param text string|number|boolean|nil
+---@param max_len integer
+---@return string
 local function shorten(text, max_len)
     text = tostring(text or "")
     if #text <= max_len then
@@ -41,11 +92,20 @@ local function shorten(text, max_len)
     return text:sub(1, max_len - 1) .. "…"
 end
 
+---@param index vault.LocalGraphIndex
+---@param slug string
+---@param max_len integer
+---@param glyph string
+---@return string
 local function node_label(index, slug, max_len, glyph)
     local title = title_for_slug(index, slug)
     return glyph .. " " .. shorten(title, max_len - 2)
 end
 
+---@param lines string[]
+---@param line_slugs table<string, vault.LocalGraphLineSlugs>
+---@param text string
+---@param slug? string
 local function add_line(lines, line_slugs, text, slug)
     lines[#lines + 1] = text
     if slug then
@@ -53,7 +113,14 @@ local function add_line(lines, line_slugs, text, slug)
     end
 end
 
+---@param note vault.Note
+---@return vault.LocalGraphIndex index
+---@return string slug
+---@return string[] outgoing
+---@return string[] backlinks
+---@return string[] unresolved
 local function collect_graph(note)
+    ---@type vault.LocalGraphIndex
     local index = require("vault.notes.link_index").get()
     local slug = note.data.slug
     local outlinks = index.outlinks_by_source[slug] or {}
@@ -80,6 +147,10 @@ local function collect_graph(note)
     return index, slug, outgoing, backlinks, unresolved
 end
 
+---@param note vault.Note
+---@param width integer
+---@return string[] lines
+---@return table<string, vault.LocalGraphLineSlugs> line_slugs
 local function build_canvas(note, width)
     local index, slug, outgoing, backlinks, unresolved = collect_graph(note)
     local lines = {}
@@ -100,6 +171,7 @@ local function build_canvas(note, width)
     local center = node_label(index, slug, mid_w, "◉")
     local rows = math.max(#backlinks, #outgoing + #unresolved, 1)
     local center_row = math.ceil(rows / 2)
+    ---@type vault.LocalGraphNode[]
     local right_nodes = {}
 
     for _, target in ipairs(outgoing) do
@@ -180,6 +252,9 @@ local function build_canvas(note, width)
     return lines, line_slugs
 end
 
+---@param name string
+---@return integer? win
+---@return integer? buf
 local function find_graph_win(name)
     for _, win in ipairs(vim.api.nvim_list_wins()) do
         local buf = vim.api.nvim_win_get_buf(win)
@@ -190,10 +265,12 @@ local function find_graph_win(name)
     return nil, nil
 end
 
+---@param buf integer
 local function open_slug(buf)
     local cursor = vim.api.nvim_win_get_cursor(0)
     local line = cursor[1]
     local col = cursor[2]
+    ---@type table<string, vault.LocalGraphLineSlugs>
     local slugs = vim.b[buf].vault_local_graph_slugs or {}
     local data = slugs[tostring(line)] or slugs[line]
     local slug = nil
@@ -213,13 +290,12 @@ local function open_slug(buf)
         else
             slug = data.left or data.center or data.right
         end
-    elseif type(data) == "string" then
-        slug = data
     end
     if not slug then
         return
     end
 
+    ---@type vault.LocalGraphIndex
     local index = require("vault.notes.link_index").get()
     local path = path_for_slug(index, slug)
     if not path then
@@ -240,6 +316,8 @@ local function open_slug(buf)
     end
 end
 
+---@param buf integer
+---@param note vault.Note
 local function set_keymaps(buf, note)
     local opts = { buffer = buf, silent = true }
     vim.keymap.set("n", "q", function()
@@ -261,7 +339,7 @@ end
 
 --- Open an Obsidian-like local graph sidebar for a note.
 --- @param note vault.Note
---- @param opts? { enter?: boolean, buf?: integer }
+--- @param opts? vault.LocalGraphOpenOptions
 function M.open(note, opts)
     opts = opts or {}
     local cfg = graph_config()
