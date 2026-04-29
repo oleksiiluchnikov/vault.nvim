@@ -691,6 +691,74 @@ describe("Vault note-context commands", function()
             assert.is_true(vim.tbl_count(tags) > 0, "test_note.md should have tags")
         end)
     end)
+
+    describe(":Vault note preview", function()
+        it("accepts an optional slug and graph flags", function()
+            local original_note = package.loaded["vault.notes.note"]
+            local seen = {}
+            package.loaded["vault.notes.note"] = function(path)
+                seen.path = path
+                return {
+                    preview = function(_, opts)
+                        seen.opts = opts
+                    end,
+                }
+            end
+
+            require("vault.commands")
+                ._get_subcommands().note.preview
+                .run({ "test_note", "--no-graph" })
+
+            assert.are.equal(test_note_path, seen.path)
+            assert.are.same({ graph = false }, seen.opts)
+            package.loaded["vault.notes.note"] = original_note
+        end)
+
+        it("completes note slugs and graph flags", function()
+            local result = require("vault.commands")._get_subcommands().note.preview.complete("--n")
+            assert.is_true(vim.tbl_contains(result, "--no-graph"))
+        end)
+    end)
+
+    describe(":Vault note graph", function()
+        it("accepts an optional slug", function()
+            local original_note = package.loaded["vault.notes.note"]
+            local seen_path
+            package.loaded["vault.notes.note"] = function(path)
+                seen_path = path
+                return {
+                    local_graph = function() end,
+                }
+            end
+
+            require("vault.commands")._get_subcommands().note.graph.run({ "test_note" })
+
+            assert.are.equal(test_note_path, seen_path)
+            package.loaded["vault.notes.note"] = original_note
+        end)
+    end)
+
+    describe(":Vault note obsidian", function()
+        it("accepts an optional slug", function()
+            local original_note = package.loaded["vault.notes.note"]
+            local seen_path
+            local opened = false
+            package.loaded["vault.notes.note"] = function(path)
+                seen_path = path
+                return {
+                    open_in_obsidian = function()
+                        opened = true
+                    end,
+                }
+            end
+
+            require("vault.commands")._get_subcommands().note.obsidian.run({ "test_note" })
+
+            assert.are.equal(test_note_path, seen_path)
+            assert.is_true(opened)
+            package.loaded["vault.notes.note"] = original_note
+        end)
+    end)
 end)
 
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -1125,7 +1193,9 @@ describe("Vault command completions", function()
 
         it("completes taxonomy field names", function()
             local commands = require("vault.commands")
-            local result = commands._get_subcommands().process.complete("taxonomy=c", "Vault process taxonomy=c")
+            local result = commands
+                ._get_subcommands().process
+                .complete("taxonomy=c", "Vault process taxonomy=c")
             assert.is_true(vim.tbl_contains(result, "taxonomy=categories"))
         end)
     end)
