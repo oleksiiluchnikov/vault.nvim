@@ -191,7 +191,7 @@ require("vault").setup({
 These controls only affect `:Vault tasks kanban`; other kanban boards are not changed.
 | `:Vault calendar [date=<field>] [dir <path>\|tag <tag>\|base <name>]` | Month-grid calendar view placing notes by a date field. See [Calendar cookbook](docs/recipes.md#calendar). |
 | `:Vault kanban [group=<field>] [dir <path>\|tag <tag>\|base <name>]` | Kanban board view grouping notes by a field. |
-| `:Vault list [filter]` | List view for inline metadata editing. |
+| `:Vault list [filter]` | List view for inline metadata editing. Filters: `dir <path>`, `tag <tag>`, `base <name>`, `orphans`, `leaves`, or fuzzy slug text. `<C-r>` reloads while preserving the active filter. |
 | `:Vault process [columns] [filter]` | Spreadsheet grid for bulk editing. |
 | `:Vault dates` | Telescope picker for dates found in notes. |
 | `:Vault lines` | Telescope picker for dash-prefixed lines from journal notes. |
