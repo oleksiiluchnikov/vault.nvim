@@ -1055,7 +1055,7 @@ local function build_subcommands()
             run = function(args)
                 local list_editor = require("vault.views.list")
                 local filter = args[1]
-                local notes, desc
+                local notes, desc, reload_notes
 
                 local columns_arg = nil
                 if filter and filter:find(",") then
@@ -1071,26 +1071,43 @@ local function build_subcommands()
                 end
 
                 if not filter or filter == "" then
-                    notes = require("vault.notes")()
+                    reload_notes = function()
+                        return require("vault.notes")()
+                    end
+                    notes = reload_notes()
                     desc = "all notes"
                 elseif filter == "orphans" then
-                    notes = require("vault.notes")():orphans()
+                    reload_notes = function()
+                        return require("vault.notes")():orphans()
+                    end
+                    notes = reload_notes()
                     desc = "orphan notes"
                 elseif filter == "leaves" then
-                    notes = require("vault.notes")():leaves()
+                    reload_notes = function()
+                        return require("vault.notes")():leaves()
+                    end
+                    notes = reload_notes()
                     desc = "leaf notes"
                 elseif filter == "dir" and args[2] then
-                    notes = require("vault.notes")():filter("relpath", args[2], "startswith", false)
-                    desc = "dir:" .. args[2]
+                    local dir = args[2]
+                    reload_notes = function()
+                        return require("vault.notes")():filter("relpath", dir, "startswith", false)
+                    end
+                    notes = reload_notes()
+                    desc = "dir:" .. dir
                 elseif filter == "tag" and args[2] then
-                    notes = require("vault.notes")():filter({
-                        search_term = "tags",
-                        include = { args[2] },
-                        exclude = {},
-                        match_opt = "exact",
-                        mode = "all",
-                    })
-                    desc = "tag:" .. args[2]
+                    local tag = args[2]
+                    reload_notes = function()
+                        return require("vault.notes")():filter({
+                            search_term = "tags",
+                            include = { tag },
+                            exclude = {},
+                            match_opt = "exact",
+                            mode = "all",
+                        })
+                    end
+                    notes = reload_notes()
+                    desc = "tag:" .. tag
                 elseif filter == "base" then
                     if args[2] then
                         local base_name = table.concat(vim.list_slice(args, 2), " ")
@@ -1100,7 +1117,13 @@ local function build_subcommands()
                             log.error("Base not found: %s", base_name)
                             return
                         end
-                        list_editor.open({ base = base, columns = columns_arg })
+                        list_editor.open({
+                            base = base,
+                            columns = columns_arg,
+                            reload_notes = function()
+                                return require("vault.notes")()
+                            end,
+                        })
                     else
                         local ok, picker =
                             pcall(require, "telescope._extensions.vault.pickers.bases")
@@ -1110,11 +1133,20 @@ local function build_subcommands()
                     end
                     return
                 else
-                    notes = require("vault.notes")():filter("slug", filter, "fuzzy")
-                    desc = "filter:" .. filter
+                    local query = filter
+                    reload_notes = function()
+                        return require("vault.notes")():filter("slug", query, "fuzzy")
+                    end
+                    notes = reload_notes()
+                    desc = "filter:" .. query
                 end
 
-                list_editor.open({ notes = notes, filter_desc = desc, columns = columns_arg })
+                list_editor.open({
+                    notes = notes,
+                    filter_desc = desc,
+                    columns = columns_arg,
+                    reload_notes = reload_notes,
+                })
             end,
             complete = function(prefix, line)
                 if line and line:match("list%s+base%s+") then

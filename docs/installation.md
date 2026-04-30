@@ -4,6 +4,7 @@
 
 - Neovim 0.10+
 - [ripgrep](https://github.com/BurntSushi/ripgrep) (required)
+- [vimtable.nvim](https://github.com/oleksiiluchnikov/vimtable.nvim) (required for `:Vault process`, `:Vault list`, `:Vault kanban`, and `:Vault calendar`)
 - [glow](https://github.com/charmbracelet/glow) (optional)
 
 ## `lazy.nvim`
@@ -12,6 +13,9 @@
 {
     'oleksiiluchnikov/vault.nvim',
     version = '*',
+    dependencies = {
+        'oleksiiluchnikov/vimtable.nvim',
+    },
 
     ---@module 'vault.nvim'
     ---@type vault.Config
