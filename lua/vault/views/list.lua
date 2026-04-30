@@ -12,11 +12,13 @@ local shared = require("vault.views.shared")
 ---@field columns? string[]
 ---@field filter_desc? string
 ---@field base? vault.Base
+---@field reload_notes? fun(): table
 
 ---@class vault.ListEditorState
 ---@field list table
 ---@field note_paths table<vault.slug, vault.path>
 ---@field base? vault.Base
+---@field reload_notes? fun(): table
 ---@field filter_desc string
 ---@field columns string[]
 ---@field visible_columns string[]
@@ -79,24 +81,46 @@ end
 ---@param bufnr integer
 function M.reload(bufnr)
     local st = buf_states[bufnr]
-    if not st or not st.list then return end
-    local Note = require("vault.notes.note")
+    if not st or not st.list then
+        return
+    end
     local notes_map = {}
-    local dead = {}
-    for slug, path in pairs(st.note_paths) do
-        if vim.fn.filereadable(path) == 1 then
-            local ok, note = pcall(Note, path)
-            if ok and note then
-                notes_map[slug] = note
+    if type(st.reload_notes) == "function" then
+        local ok, refreshed = pcall(st.reload_notes)
+        if ok and refreshed and refreshed.map then
+            notes_map = refreshed.map
+            if st.base and st.base.has_filters and st.base:has_filters() then
+                notes_map = st.base:match_notes(notes_map)
             end
         else
-            dead[#dead + 1] = slug
+            log.warn("List reload filter refresh failed; keeping current note set")
         end
     end
-    for _, slug in ipairs(dead) do st.note_paths[slug] = nil end
+
+    if not next(notes_map) then
+        local Note = require("vault.notes.note")
+        local dead = {}
+        for slug, path in pairs(st.note_paths) do
+            if vim.fn.filereadable(path) == 1 then
+                local ok, note = pcall(Note, path)
+                if ok and note then
+                    notes_map[slug] = note
+                end
+            else
+                dead[#dead + 1] = slug
+            end
+        end
+        for _, slug in ipairs(dead) do
+            st.note_paths[slug] = nil
+        end
+    end
 
     local grid = require("vault.views.grid")
     local records = grid._build_records(notes_map, st.columns, st.base)
+    st.note_paths = {}
+    for _, rec in ipairs(records) do
+        st.note_paths[rec.slug] = rec._path
+    end
     st.list:reload(records)
 end
 
@@ -115,7 +139,9 @@ function M.open(opts)
         filter_desc = opts.filter_desc or ("base:" .. (base.data.name or "unnamed"))
     else
         local cfg = require("vault.config")
-        visible_columns = opts.columns or (cfg.options and cfg.options.process and cfg.options.process.columns) or { "slug", "title", "status", "tags" }
+        visible_columns = opts.columns
+            or (cfg.options and cfg.options.process and cfg.options.process.columns)
+            or { "slug", "title", "status", "tags" }
         for i, c in ipairs(visible_columns) do
             visible_columns[i] = grid._normalize_col(c)
         end
@@ -158,8 +184,12 @@ function M.open(opts)
             end
             col.parse = function(text)
                 local t = vim.trim(text)
-                if t == "☑" then return "done" end
-                if t == "☐" or t == "" then return nil end
+                if t == "☑" then
+                    return "done"
+                end
+                if t == "☐" or t == "" then
+                    return nil
+                end
                 return shared.parse_value(t, "status")
             end
             break
@@ -175,6 +205,7 @@ function M.open(opts)
         visible_columns = visible_columns,
         display_names = display_names,
         formula_cols = formula_cols,
+        reload_notes = opts.reload_notes,
     }
     for _, rec in ipairs(records) do
         st.note_paths[rec.slug] = rec._path
@@ -195,7 +226,8 @@ function M.open(opts)
         columns = list_columns,
         records = records,
         id_field = "slug",
-        primary_field = vim.tbl_contains(visible_columns, "title") and "title" or visible_columns[1],
+        primary_field = vim.tbl_contains(visible_columns, "title") and "title"
+            or visible_columns[1],
         status_field = vim.tbl_contains(visible_columns, "status") and "status" or nil,
         status_done_value = "done",
         identity = "conceal",
@@ -216,7 +248,9 @@ function M.open(opts)
         end,
         on_filter_request = function(l)
             local s = buf_states[l:bufnr()]
-            if not s then return end
+            if not s then
+                return
+            end
             require("vault.bases.views.filter_picker").open(l, s.visible_columns)
         end,
         hl = {
@@ -237,19 +271,21 @@ function M.open(opts)
 
     -- Help legend
     require("vimtable.help").setup_keymap(bufnr, {
-        { group = "Toggle",   lhs = "x",          desc = "Toggle status (done / undone)" },
-        { group = "Save",     lhs = "<C-s>",      desc = "Save all edits" },
-        { group = "Refresh",  lhs = "<C-r>",      desc = "Reload notes from disk" },
-        { group = "Sort",     lhs = "gs",         desc = "Cycle sort" },
-        { group = "Filter",   lhs = "gf",         desc = "Open filter picker" },
-        { lhs = "gF",        desc = "Clear all filters" },
-        { group = "Help",     lhs = "g?",         desc = "Toggle this help" },
+        { group = "Toggle", lhs = "x", desc = "Toggle status (done / undone)" },
+        { group = "Save", lhs = "<C-s>", desc = "Save all edits" },
+        { group = "Refresh", lhs = "<C-r>", desc = "Reload notes from disk" },
+        { group = "Sort", lhs = "gs", desc = "Cycle sort" },
+        { group = "Filter", lhs = "gf", desc = "Open filter picker" },
+        { lhs = "gF", desc = "Clear all filters" },
+        { group = "Help", lhs = "g?", desc = "Toggle this help" },
     })
 
     vim.api.nvim_create_autocmd("BufWipeout", {
         buffer = bufnr,
         once = true,
-        callback = function() buf_states[bufnr] = nil end,
+        callback = function()
+            buf_states[bufnr] = nil
+        end,
     })
 
     log.info("Processing %d notes (%s) [list]", #records, filter_desc)
