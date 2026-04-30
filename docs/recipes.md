@@ -519,6 +519,23 @@ views:
     order: [title, status, tags, formula.age, formula.linked]
 ```
 
+## List view
+
+### Edit filtered notes inline
+
+```vim
+:Vault list title,status
+:Vault list dir Inbox
+:Vault list tag project
+:Vault list base active-notes
+```
+
+The list view is backed by `vimtable.nvim`. Press `x` on a status cell to toggle it, then `:write` to persist frontmatter edits.
+
+Press `<C-r>` to reload from disk. Reload keeps the original filter (`dir`, `tag`, `base`, `orphans`, `leaves`, or fuzzy slug text), so newly matching notes appear without widening the list to the whole vault.
+
+Readonly file-derived columns such as `file.name` are display-only; editing them in the list does not rename files on save.
+
 ## Undo
 
 ### Undo the last process buffer save
