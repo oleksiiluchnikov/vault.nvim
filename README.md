@@ -2,7 +2,7 @@
 
 Plugin to manage [Obsidian](https://obsidian.md)-compatible vaults in Neovim.
 
-> **Note:** This plugin is under active development. Breaking changes may occur.
+> **Experimental personal-use software:** I wrote this plugin for my own vault and workflow. It is under active development, may break without notice, and is not guaranteed safe for other people's data. Batch operations can rewrite many notes; keep backups and test on a copy before using it on an important vault.
 
 ## Features
 
